@@ -6,7 +6,7 @@
 // seja: só quando o editor USA o app. Quem passa mais de ~24 h sem abri-lo perde
 // a sessão (`srv.err.cookiesExpired`) e refaz o pareamento. Reabrir sessão morta
 // não é possível (testado: nem o WME real se reconecta). A única saída é
-// renovar ANTES — e esta varredura faz isso, de ~6 em ~6 h, só para as sessões
+// renovar ANTES — e esta varredura faz isso, de ~10 em ~10 h, só para as sessões
 // que ligaram «Manter conectado» (opt-in por sessão).
 //
 // PRIVACIDADE — o compromisso, que fica escrito e testado:
@@ -27,12 +27,12 @@
 //     Então dá pra saber se a sessão está devida lendo SÓ a sessão (o carimbo
 //     dela é o prefixo do valor), sem decifrar nada. A entrada só é lida (e o
 //     token só decifrado) para quem está devida.
-//   · Devida = o carimbo da SESSÃO tem mais de `devidoApos` (5 h). Quem usa o
+//   · Devida = o carimbo da SESSÃO tem mais de `devidoApos` (10 h). Quem usa o
 //     app o dia todo tem carimbo novo (o `refreshCookies` regrava de hora em
 //     hora) e nunca é tocado: a varredura só trabalha por quem sumiu.
 //   · Renovar = UMA leitura barata ao Waze (`Session`, a do `perfil`) pelo
 //     `callWaze` COM contexto: o cookie novo da resposta é gravado pelo
-//     `refreshCookies` (que respeita a trava de 1 h; como a devida passa de 5 h,
+//     `refreshCookies` (que respeita a trava de 1 h; como a devida passa de 10 h,
 //     ela grava). Nenhuma gravação nossa além dessa.
 //   · 401/403 do Waze: CONFIRMA uma vez (outra pausa e outro `Session`); só a
 //     2ª negativa apaga a entrada e deixa a sessão vencer (gotcha #42: 401
@@ -51,13 +51,16 @@
 //                = 1 + 15 + 6×5 = 46 no pior caso — sob o teto de 50. Escrita:
 //                no máximo 6 por execução (a da sessão).
 //   por dia:       cron de 30 min = 48 execuções × 6 = 288 renovações no teto.
-//                Cada sessão mantida é renovada a cada ~5,5 h (5 h devida + até
-//                30 min de espera da próxima execução) = ~4,4 gravações por dia,
-//                então 288 renovações/dia cobrem ~65 pessoas — e o teto REAL é a
-//                cota de ESCRITA do KV (1.000/dia, compartilhada com o app): ~220
-//                pessoas sozinhas, bem menos com o uso normal somado. Pra mais
+//                Cada sessão mantida é renovada a cada ~10,5 h (10 h devida + até
+//                30 min de espera da próxima execução) = ~2,3 gravações por dia,
+//                então 288 renovações/dia cobrem ~125 pessoas — e o teto REAL é a
+//                cota de ESCRITA do KV (1.000/dia, compartilhada com o app): ~430
+//                pessoas sozinhas, bem menos com o uso normal somado. O prazo de
+//                10 h (e não 5) é escolha de capacidade: o Waze só invalida o valor
+//                depois de ~24 h (MEDIDO: 24 a 26 h), então sobram ~13 h de folga
+//                pra um Waze fora do ar ou uma execução perdida. Pra mais
 //                gente: subir `lote` (e conferir as 50 subrequisições) ou
-//                encurtar o cron — e, passando de ~100 mantidas, pagar o plano.
+//                encurtar o cron — e, passando de ~120 mantidas, pagar o plano.
 //   CPU: cada sessão faz 2 HKDF e 3 AES (abrir a entrada, abrir a sessão,
 //                regravar). O plano grátis dá ~10 ms de CPU por execução: se o
 //                log do Worker mostrar «exceeded CPU», baixe `lote` (a conta
@@ -74,7 +77,7 @@
 export const KA_PREFIXO = 'ka_';
 export const KA_TTL = 14 * 24 * 3600;        // 14 dias: religa a cada abertura do app
 export const KA_REGRAVA_APOS = 24 * 3600;    // não regrava a entrada à toa (escrita escassa)
-export const MANTER_DEVIDO_APOS = 5 * 3600;  // sessão devida: carimbo com mais de 5 h
+export const MANTER_DEVIDO_APOS = 10 * 3600; // sessão devida: carimbo com mais de 10 h
 export const MANTER_LOTE = 6;                // renovações por execução
 export const MANTER_EXAMINAR = 15;           // sessões LIDAS por execução (conta de leituras)
 export const MANTER_TETO_MS = 20_000;        // relógio de uma execução

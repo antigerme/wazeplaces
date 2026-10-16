@@ -182,7 +182,7 @@ test('varredura: renova a sessão devida, o cookie guardado MUDA e o próximo us
     await c.sessions.manterLigar(token, 'row');
     assert.equal(await c.cookieGuardado(token), 'LOGIN');
 
-    c.amb.avancar(6 * HORA); // o editor sumiu por 6 h
+    c.amb.avancar(MANTER_DEVIDO_APOS + HORA); // o editor sumiu além do prazo de «devida»
     const resumo = await varrerMantidosDoStore({ store: c.store, keyBytes: c.keyBytes, pausa: semPausa, embaralhar: ordemFixa });
     assert.deepEqual([resumo.vistas, resumo.renovadas, resumo.mortas, resumo.adiadas], [1, 1, 0, 0]);
     assert.equal(c.amb.chamadas.length, 1);
@@ -209,7 +209,7 @@ test('varredura: as duas formas de adaptador — o Worker (uma instância nova) 
       // A VM já leu essa sessão antes (a memória dos carimbos é dela).
       await c.sessions.loadSession(token);
       await c.sessions.manterLigar(token, 'row');
-      c.amb.avancar(6 * HORA);
+      c.amb.avancar(MANTER_DEVIDO_APOS + HORA);
       const r = await varrerMantidosDoStore({
         store: c.store, keyBytes: c.keyBytes, sessions: modelo === 'VM' ? c.sessions : null, pausa: semPausa, embaralhar: ordemFixa,
       });
@@ -224,16 +224,16 @@ test('varredura: só a sessão DEVIDA (carimbo com mais de devidoApos) vai ao Wa
   try {
     const recente = await c.novo('RECENTE');
     await c.sessions.manterLigar(recente, 'row');
-    c.amb.avancar(4 * HORA + 59 * 60);      // 4h59: ainda em dia
+    c.amb.avancar(9 * HORA + 59 * 60);      // 9h59: ainda em dia
     let r = await varrerMantidosDoStore({ store: c.store, keyBytes: c.keyBytes, pausa: semPausa, embaralhar: ordemFixa });
     assert.deepEqual([r.vistas, r.emDia, r.renovadas], [1, 1, 0]);
     assert.equal(c.amb.chamadas.length, 0, 'foi ao Waze por uma sessão que não estava devida');
     assert.equal(await c.cookieGuardado(recente), 'RECENTE');
 
-    c.amb.avancar(2 * 60);                  // passou de 5h
+    c.amb.avancar(2 * 60);                  // passou de 10h
     r = await varrerMantidosDoStore({ store: c.store, keyBytes: c.keyBytes, pausa: semPausa, embaralhar: ordemFixa });
-    assert.equal(r.renovadas, 1, 'passou de 5 h e não renovou');
-    assert.equal(MANTER_DEVIDO_APOS, 5 * HORA, 'o prazo de "devida" mudou — a conta de capacidade do módulo também');
+    assert.equal(r.renovadas, 1, 'passou de 10 h e não renovou');
+    assert.equal(MANTER_DEVIDO_APOS, 10 * HORA, 'o prazo de "devida" mudou — a conta de capacidade do módulo também');
   } finally { c.amb.restaurar(); }
 });
 
@@ -242,7 +242,7 @@ test('varredura: respeita o lote — e chama a pausa entre as sessões (jitter),
   try {
     const tokens = [];
     for (let i = 0; i < 8; i++) { const t = await c.novo(`S${i}`); await c.sessions.manterLigar(t, 'row'); tokens.push(t); }
-    c.amb.avancar(6 * HORA);
+    c.amb.avancar(MANTER_DEVIDO_APOS + HORA);
     let pausas = 0;
     const r = await varrerMantidosDoStore({ store: c.store, keyBytes: c.keyBytes, lote: 3, pausa: async () => { pausas++; }, embaralhar: ordemFixa });
     assert.equal(r.renovadas, 3, 'passou do lote');
@@ -274,7 +274,7 @@ test('varredura: 403 do Waze apaga a entrada (a sessão vence sozinha); 500 e er
     const morta = await c.novo('MORTA'), instavel = await c.novo('INSTAVEL'), sem_rede = await c.novo('SEMREDE');
     for (const t of [morta, instavel, sem_rede]) await c.sessions.manterLigar(t, 'row');
     c.amb.modo = (sessao) => ({ MORTA: '403', INSTAVEL: '500', SEMREDE: 'rede' }[sessao] || 'ok');
-    c.amb.avancar(6 * HORA);
+    c.amb.avancar(MANTER_DEVIDO_APOS + HORA);
     const r = await varrerMantidosDoStore({ store: c.store, keyBytes: c.keyBytes, pausa: semPausa, embaralhar: ordemFixa });
     assert.deepEqual([r.vistas, r.renovadas, r.mortas, r.adiadas, r.confirmadas], [3, 0, 1, 2, 1]);
     assert.equal(await c.sessions.manterEstado(morta), false, '403 não apagou a entrada');
@@ -304,7 +304,7 @@ test('varredura: um 401/403 ISOLADO não apaga a entrada — confirma uma vez, c
       const t = await c.novo('LOGIN'); await c.sessions.manterLigar(t, 'row');
       let idas = 0;
       c.amb.modo = () => (++idas === 1 ? primeira : segunda);
-      c.amb.avancar(6 * HORA);
+      c.amb.avancar(MANTER_DEVIDO_APOS + HORA);
       let pausas = 0;
       const r = await varrerMantidosDoStore({ store: c.store, keyBytes: c.keyBytes, pausa: async () => { pausas++; }, embaralhar: ordemFixa });
       assert.equal(idas, 2, `${nome}: o 403 não foi confirmado com uma segunda ida (${idas})`);
@@ -320,7 +320,7 @@ test('varredura: um 401/403 ISOLADO não apaga a entrada — confirma uma vez, c
   try {
     const t = await c.novo('LOGIN'); await c.sessions.manterLigar(t, 'row');
     c.amb.modo = () => '403';
-    c.amb.avancar(6 * HORA);
+    c.amb.avancar(MANTER_DEVIDO_APOS + HORA);
     const r = await varrerMantidosDoStore({ store: c.store, keyBytes: c.keyBytes, pausa: semPausa, relogio: (() => { let n = 0; return () => (n++ === 0 ? 0 : 19000); })() });
     assert.equal(r.mortas, 0);
     assert.equal(await c.sessions.manterEstado(t), true, 'sem tempo pra confirmar, a entrada foi apagada');
@@ -356,7 +356,7 @@ test('varredura: só toca nas chaves ka_ — sessão comum, pareamento, releitur
     c.store.mem.set('reler_xyz', `${c.amb.agora}|{}`);
     c.store.mem.set('kaboom', 'lixo que só começa parecido');
     const antes = new Map(c.store.mem);
-    c.amb.avancar(6 * HORA);
+    c.amb.avancar(MANTER_DEVIDO_APOS + HORA);
     const r = await varrerMantidosDoStore({ store: c.store, keyBytes: c.keyBytes, pausa: semPausa, embaralhar: ordemFixa });
     assert.equal(r.renovadas, 1);
     for (const k of ['pair_abc', 'reler_xyz', 'kaboom', await c.hashDe(comum)]) {
@@ -371,7 +371,7 @@ test('varredura: um `listar` que devolve chaves que não são ka_ não faz a var
   const c = await cenario();
   try {
     const comum = await c.novo('COMUM');
-    c.amb.avancar(6 * HORA);
+    c.amb.avancar(MANTER_DEVIDO_APOS + HORA);
     const chaves = ['kaboom', 'pair_abc', 'ka_', '', await c.hashDe(comum), 42, null];
     const antes = new Map(c.store.mem);
     const r = await varrerMantidosDoStore({ store: c.store, keyBytes: c.keyBytes, pausa: semPausa, listar: async () => chaves });
@@ -385,7 +385,7 @@ test('varredura: sem `list` no store não faz nada (e não lança); com `listar`
   const c = await cenario({ semList: true });
   try {
     const t = await c.novo(); await c.sessions.manterLigar(t, 'row');
-    c.amb.avancar(6 * HORA);
+    c.amb.avancar(MANTER_DEVIDO_APOS + HORA);
     const r = await varrerMantidosDoStore({ store: c.store, keyBytes: c.keyBytes, pausa: semPausa });
     assert.deepEqual(r, { vistas: 0, renovadas: 0, mortas: 0, adiadas: 0, emDia: 0, semRotacao: 0, expiradas: 0, confirmadas: 0 });
     assert.equal(c.amb.chamadas.length, 0);
@@ -401,7 +401,7 @@ test('varredura: o orçamento de operações de KV cabe nas 50 do plano grátis 
   const c = await cenario();
   try {
     for (let i = 0; i < 40; i++) { const t = await c.novo(`S${i}`); await c.sessions.manterLigar(t, 'row'); }
-    c.amb.avancar(6 * HORA);          // as 40 estão devidas
+    c.amb.avancar(MANTER_DEVIDO_APOS + HORA);          // as 40 estão devidas
     c.store.ops.get = c.store.ops.put = c.store.ops.delete = c.store.ops.list = 0;
     const antesFetch = c.amb.chamadas.length;
     await varrerMantidosDoStore({ store: c.store, keyBytes: c.keyBytes, pausa: semPausa });
@@ -427,7 +427,7 @@ test('varredura: o orçamento de KV segue sob as 50 com TODAS as sessões levand
   try {
     for (let i = 0; i < 40; i++) { const t = await c.novo(`S${i}`); await c.sessions.manterLigar(t, 'row'); }
     c.amb.modo = () => '403';
-    c.amb.avancar(6 * HORA);
+    c.amb.avancar(MANTER_DEVIDO_APOS + HORA);
     c.store.ops.get = c.store.ops.put = c.store.ops.delete = c.store.ops.list = 0;
     const antes = c.amb.chamadas.length;
     await varrerMantidosDoStore({ store: c.store, keyBytes: c.keyBytes, pausa: semPausa });
@@ -441,7 +441,7 @@ test('varredura: o teto de tempo para a execução (e conta o resto como adiado)
   const c = await cenario();
   try {
     for (let i = 0; i < 6; i++) { const t = await c.novo(`S${i}`); await c.sessions.manterLigar(t, 'row'); }
-    c.amb.avancar(6 * HORA);
+    c.amb.avancar(MANTER_DEVIDO_APOS + HORA);
     let relogioMs = 0;
     const r = await varrerMantidosDoStore({
       store: c.store, keyBytes: c.keyBytes, embaralhar: ordemFixa,
@@ -471,7 +471,7 @@ test('varredura: 200 sem cookie novo é contado à parte (a sessão segue devida
   try {
     const t = await c.novo('LOGIN'); await c.sessions.manterLigar(t, 'row');
     c.amb.modo = () => 'ok-sem-cookie';
-    c.amb.avancar(6 * HORA);
+    c.amb.avancar(MANTER_DEVIDO_APOS + HORA);
     const r = await varrerMantidosDoStore({ store: c.store, keyBytes: c.keyBytes, pausa: semPausa, embaralhar: ordemFixa });
     assert.equal(r.renovadas, 1);
     assert.equal(r.semRotacao, 1);
@@ -592,7 +592,7 @@ test('pareamento: a sessão do resgate nasce com o carimbo de 1 h atrás e a PRI
   } finally { c.amb.restaurar(); }
 });
 
-test('constantes: a conta de capacidade do módulo (14 dias, 1 dia, 5 h, lote 6) é a que o código usa', () => {
+test('constantes: a conta de capacidade do módulo (14 dias, 1 dia, 10 h, lote 6) é a que o código usa', () => {
   assert.equal(KA_TTL, 14 * 86400);
   assert.equal(KA_REGRAVA_APOS, 86400);
   assert.equal(SESSION_TTL, 21 * 86400, 'o TTL da sessão mudou: reveja o quanto uma sessão mantida vive depois de abandonada');

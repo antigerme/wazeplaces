@@ -10276,7 +10276,18 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
         gravado: !!localStorage.getItem('waze_places_history'), url: location.href.slice(0, 60), idioma: getLang() })).catch((x) => ({ erroAoLer: String(x).slice(0, 80) }));
       throw new Error(`${e.message} — estado: ${JSON.stringify(estado)}; erros: ${JSON.stringify(erros.slice(0, 2))}`);
     }
-    const snap = await page.locator('#filtersPanelHistory').ariaSnapshot();
+    let snap;
+    try { snap = await page.locator('#filtersPanelHistory').ariaSnapshot({ timeout: 30000 }); }
+    catch (e) {
+      // O CI do WebKit reprovou aqui UMA vez (o locator não resolveu em 30 s) sem nada que a máquina local reproduza. Sem retentativa
+      // às cegas: se código novo travasse a página, repetir esconderia. Diz se a página CAIU, se travou, e o que ela tinha.
+      const vivo = page.isClosed() ? 'página fechada' : await Promise.race([
+        page.evaluate(() => ({ pronto: document.readyState, painel: !!document.getElementById('filtersPanelHistory'),
+          oculto: (document.getElementById('filtersPanelHistory') || {}).hidden, aba: ['filtersTabFilters', 'filtersTabPrefs', 'filtersTabHistory'].find((i) => document.getElementById(i).getAttribute('aria-selected') === 'true') || null,
+          modalAberto: !document.getElementById('filtersModal').classList.contains('hidden'), logado: AppState.authenticated, idioma: getLang() })),
+        new Promise((ok) => setTimeout(() => ok('a página não respondeu em 5 s (travada)'), 5000))]).catch((x) => `evaluate falhou: ${String(x).slice(0, 100)}`);
+      throw new Error(`ariaSnapshot do Histórico (${onde}/${lang}) estourou: ${String(e.message).split('\n')[0]} — página: ${JSON.stringify(vivo)}; erros: ${JSON.stringify(erros.slice(0, 2))}`);
+    }
     const id = `${onde}/${lang}`;
     for (const frase of FRASES[lang]) checa(snap.includes(frase), `${id}: a árvore de acessibilidade não diz "${frase}"`, snap.split('\n').filter((l) => /\d/.test(l)).join(' | ').slice(0, 260));
     // CONTROLE: o defeito de antes — "12 · 1" sem rótulo — não pode estar na árvore (se estivesse, a frase não escondeu os números).

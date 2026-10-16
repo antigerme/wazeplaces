@@ -8,7 +8,7 @@ import { appendFileSync, existsSync } from 'node:fs';
 // mesmo jeito (editar só o carimbo do arquivo deixaria a memória do processo
 // achando que a sessão é recente, o que nunca acontece de verdade).
 const dateNow = Date.now.bind(Date);
-Date.now = () => dateNow() + (process.env.WAZE_STUB_SALTO && existsSync(process.env.WAZE_STUB_SALTO) ? 6 * 3600 * 1000 : 0);
+Date.now = () => dateNow() + (process.env.WAZE_STUB_SALTO && existsSync(process.env.WAZE_STUB_SALTO) ? 11 * 3600 * 1000 : 0);
 const PERFIL = { id: 12444348, userName: 'antigerme', rank: 5, isAreaManager: true, isStaff: false, areas: [], managedAreas: [] };
 let n = 0;
 const original = globalThis.fetch;

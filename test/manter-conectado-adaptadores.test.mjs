@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeSessions } from '../server/core.mjs';
-import { KA_TTL } from '../server/manter-conectado.mjs';
+import { KA_TTL, MANTER_DEVIDO_APOS } from '../server/manter-conectado.mjs';
 import { ambiente, cookiesCom, HORA } from './_manter.mjs';
 import { subirVM } from './_vm.mjs';
 
@@ -56,7 +56,7 @@ test('Worker: o `scheduled` pagina o list do KV, renova as sessões devidas pelo
     const tokens = [];
     for (let i = 0; i < 5; i++) { const t = await sessions.createSession(cookiesCom(`W${i}`)); await sessions.manterLigar(t, 'row'); tokens.push(t); }
     const comum = await sessions.createSession(cookiesCom('COMUM'));
-    amb.avancar(6 * HORA);
+    amb.avancar(MANTER_DEVIDO_APOS + HORA);
 
     const env = { ENCRYPTION_KEY: SECRET, SESSIONS: kv, ASSETS: { fetch: () => new Response('x') } };
     const esperas = [];
@@ -129,13 +129,13 @@ test('VM: o temporizador do «Manter conectado» renova a sessão devida do disc
     const idasEmDia = readFileSync(log, 'utf8').trim().split('\n').length;
     assert.equal(idasEmDia, 2, `a varredura foi ao Waze por uma sessão em dia (${idasEmDia} idas)`);
 
-    // O editor "sumiu por 6 h": o relógio da VM salta (ver o pré-carregado).
+    // O editor "sumiu por 11 h": o relógio da VM salta (ver o pré-carregado).
     const antes = Math.floor(Date.now() / 1000);
     writeFileSync(join(dir, 'salto'), '');
     await esperarAte(() => readFileSync(log, 'utf8').trim().split('\n').length > idasEmDia, 'a varredura da VM não renovou a sessão devida');
 
     // O carimbo voltou a ser recente (o cookie novo foi gravado) e o valor é o do Waze de mentira.
-    await esperarAte(() => parseInt(readFileSync(arquivo, 'utf8'), 10) > antes + 5 * HORA, 'o cookie renovado não foi gravado no arquivo');
+    await esperarAte(() => parseInt(readFileSync(arquivo, 'utf8'), 10) > antes + MANTER_DEVIDO_APOS, 'o cookie renovado não foi gravado no arquivo');
     const store = { get: async (h) => readFileSync(join(sessDir, 'sess_' + h), 'utf8') };
     const guardado = await makeSessions({ store, keyBytes: Buffer.alloc(32, 7) }).loadSession(token);
     assert.match(/_web_session\t(\S+)/.exec(guardado)[1], /^VM\d+$/, 'o cookie guardado não mudou');
