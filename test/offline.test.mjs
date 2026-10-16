@@ -235,6 +235,10 @@ test('as 13 chaves novas existem nas QUATRO línguas', () => {
 test('o plural tem chave própria: "1 pedidos" não sai em língua nenhuma', () => {
   const corpo = fatiar('atualizarLinhaDoOffline');
   assert.match(corpo, /n === 1 \? 'prefs\.offline\.prontoA' : n === 0 \? 'prefs\.offline\.prontoAZero' : 'prefs\.offline\.prontoAPlural'/);
+  // O ramo «sem sinal e tudo guardado» só existe com `n` verdadeiro: o ternário do zero ali era código morto (R24-6).
+  const semSinal = /if \(semRede && fotosValem && n\) \{[^]*?return;/.exec(corpo);
+  assert.ok(semSinal, 'o ramo «sem sinal com tudo guardado» sumiu');
+  assert.ok(!/prontoAZero/.test(semSinal[0]), 'DEFEITO: o ramo que só vale com n ≥ 1 voltou a escolher o texto do ZERO (código morto)');
   assert.match(corpo, /n === 1 \? 'prefs\.offline\.esperaA' : 'prefs\.offline\.esperaAPlural'/);
 });
 

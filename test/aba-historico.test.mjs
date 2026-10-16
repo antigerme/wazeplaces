@@ -85,7 +85,7 @@ function montarPainel({ modalAberto = true, abaNaTela = true } = {}) {
     verConquistasNaTela: () => {},
   };
   const api = montar(['historicoNaTela', 'agendarRedesenhoDoHistorico', 'copiaEmDia', 'lembrarTextoDaCopia', 'loadHistory',
-    'recordHistory'], deps,
+    'recordHistory', 'contagemDoHistorico'], deps,
     ['recordHistory', 'historicoNaTela'], 'let redesenhoDoHistoricoAgendado = false;');
   return { ...api, desenhos, modal, painel };
 }
@@ -217,7 +217,7 @@ function abrirAba(comp) {
     // A cópia em memória × o aparelho (R9-2-03): o que cada cópia DESTA aba leu.
     textoDaCopia: new WeakMap(),
   };
-  const nomes = ['copiaEmDia', 'lembrarTextoDaCopia', 'salvarHistorico', 'loadHistory', 'recordHistory', 'carregarConquistas',
+  const nomes = ['copiaEmDia', 'lembrarTextoDaCopia', 'salvarHistorico', 'loadHistory', 'recordHistory', 'contagemDoHistorico', 'carregarConquistas',
     'salvarConquistas', 'loadAutores', 'salvarAutores', 'podarAutores', 'registrarRejeicaoDeAutor', 'aoGravarEmOutraAba'];
   Object.assign(aba, montar(nomes, deps, nomes), { AppState, textoDaCopia: deps.textoDaCopia });
   comp.abas.push(aba);

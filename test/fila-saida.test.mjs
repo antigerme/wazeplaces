@@ -145,9 +145,9 @@ test('exceção no POUSO não leva o resto da fila junto', () => {
   assert.match(f, /catch \(e\) \{ dfato\('saida\.pouso\.erro'/,
     'a falha do pouso deixou de ser registrada: encalhe sem rastro é indepurável');
   // E o item tem que sair DEPOIS, senão a exceção some com ele. Sai pela
-  // CHAVE (`splice`), não pela posição: outra aba pode ter mexido na fila.
+  // IMPRESSÃO DIGITAL do item (`filter`), não pela posição: outra aba pode ter mexido na fila.
   const iTry = f.indexOf('try { registrarPousoDeSaida');
-  const iShift = f.indexOf('f.splice(saiu, 1)', iTry);
+  const iShift = f.indexOf('const tirados = f.filter(mesmoItem);', iTry);
   assert.ok(iShift > iTry, 'o item sai da fila antes do pouso');
 });
 
@@ -162,7 +162,7 @@ test('esvaziar para no que não adianta insistir, e mantém a fila', () => {
   // O `shift` só acontece DEPOIS de um pouso que não foi rede nem 401: item
   // que não saiu não pode sumir da fila.
   const iBreak = f.indexOf(">= 500)) break");
-  const iShift = f.indexOf('f.splice(saiu, 1)');
+  const iShift = f.indexOf('const tirados = f.filter(mesmoItem);');
   assert.ok(iBreak > 0 && iShift > iBreak,
     'o item é removido da fila antes de se saber que saiu');
 });
@@ -179,7 +179,7 @@ test('o esvaziamento RELÊ antes de gravar — senão perde o que chegou no meio
   const iPouso = f.indexOf('registrarPousoDeSaida(');
   assert.ok(iPouso > 0, 'não achei o pouso');
   const iRele = f.indexOf('f = carregarFilaDeSaida()', iPouso);
-  const iShift = f.indexOf('f.splice(saiu, 1)', iPouso);
+  const iShift = f.indexOf('const tirados = f.filter(mesmoItem);', iPouso);
   const iSalva = f.indexOf('salvarFilaSemOs(f', iPouso);
   assert.ok(iRele > 0, 'o esvaziamento parou de reler a fila antes de gravar');
   assert.ok(iShift > 0 && iSalva > 0, 'não achei o tirar/gravar depois do pouso');
@@ -1406,7 +1406,7 @@ test('R7-6-05: o "não sei onde" do GESTO vale no pouso — o Histórico não l�
     textoDaCopia: new WeakMap(),   // a cópia em memória × o aparelho (R9-2-03)
   };
   const chaves = Object.keys(deps);
-  const { recordHistory } = new Function(...chaves, ['copiaEmDia', 'lembrarTextoDaCopia', 'loadHistory', 'recordHistory'].map(fatiarComAsync).join('\n')
+  const { recordHistory } = new Function(...chaves, ['copiaEmDia', 'lembrarTextoDaCopia', 'loadHistory', 'recordHistory', 'contagemDoHistorico'].map(fatiarComAsync).join('\n')
     + '\nreturn { recordHistory };')(...chaves.map((k) => deps[k]));
   recordHistory('reject', 1, '2026-10-03', null);
   assert.equal(JSON.parse(guardado.get('waze_places_history'))['2026-10-03'].onde, undefined,

@@ -48,7 +48,7 @@ test('"Sair" e entrar de novo na MESMA página: a ação confirmada grava o hist
     garantirLinhaDeBaseDasConquistas: () => {},   // a 1ª passada das conquistas (R6-7-13)
     textoDaCopia: new WeakMap(),   // a cópia em memória × o aparelho (R9-2-03)
   };
-  const { recordHistory } = montar(['copiaEmDia', 'lembrarTextoDaCopia', 'loadHistory', 'recordHistory'], deps, ['recordHistory']);
+  const { recordHistory } = montar(['copiaEmDia', 'lembrarTextoDaCopia', 'loadHistory', 'recordHistory', 'contagemDoHistorico'], deps, ['recordHistory']);
   // O "Sair" deixa o histórico como o `handleLogout` deixa:
   const sair = fatiar('handleLogout');
   const m = /AppState\.history = ([^;]+);/.exec(sair);
