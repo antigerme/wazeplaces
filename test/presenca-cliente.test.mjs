@@ -1031,3 +1031,162 @@ test('leitor de tela: a mensagem que CHEGA com a conversa aberta é anunciada nu
   const HTML = readFileSync(new URL('../index.src.html', import.meta.url), 'utf8');
   assert.match(HTML, /<p id="conversaAnuncio" class="sr-only" role="status" aria-live="polite"><\/p>/);
 });
+
+// ── R24-5-01 · a mensagem que chega com a conversa FECHADA fala ao leitor de tela ───────────────────────
+
+test('leitor de tela (R24-5-01): a mensagem ao vivo com a conversa FECHADA muda uma região viva — a abertura e a sincronização não', async () => {
+  const c = novoCliente();
+  const reg = () => c.$('presencaAnuncioPilula').textContent;
+  // Abertura com mensagens JÁ pendentes: a primeira lista (e a pílula que ela desenha) não anuncia nada.
+  c.P.presencaAplicarLista({ online: [], conversas: [conversa(CAF, 'cafanha', 5, 2)] }, 1, 30);
+  c.P.presencaRenderPilula();
+  assert.equal(reg(), '', 'a abertura com 2 não lidas anunciou (a região viva falou antes de qualquer novidade)');
+  assert.equal(c.P.Presenca.timers.pilula, null, 'a abertura deixou um anúncio a caminho');
+  // Chega UMA ao vivo, de quem está na lista: o total sobe de 2 pra 3 — a região diz a frase da pílula, com a contagem de agora.
+  await c.P.presencaQuadro(fluxoDe(c), inbox(await bytesDeMensagem({ id: uuid(801), de: CAF, para: EU, texto: 'SEGREDO-DE-TERCEIRO', ctx: APP, ts: 1790200000001 })));
+  assert.equal(reg(), 'presenca.pill.msgPlural{"n":3}', 'a mensagem ao vivo não chegou à região viva');
+  assert.doesNotMatch(reg(), /SEGREDO|cafanha/, 'a região viva levou texto ou nome de terceiro (é só a contagem)');
+  // A que chega ao vivo ANTES da primeira lista (o tempo real abre antes dela) não faz da lista inicial uma novidade: sem base, nada a anunciar.
+  const d = novoCliente();
+  await d.P.presencaQuadro(fluxoDe(d), inbox(await bytesDeMensagem({ id: uuid(802), de: CAF, para: EU, texto: 'oi', ctx: APP, ts: 1790200000003 })));
+  d.P.presencaAplicarLista({ online: [], conversas: [conversa('777', 'outra', 5, 4)] }, 1, 30);
+  d.P.presencaRenderPilula();
+  assert.equal(d.$('presencaAnuncioPilula').textContent, '', 'a lista inicial (4 não lidas) virou "novidade" porque uma mensagem ao vivo chegou antes dela');
+  assert.equal(d.P.Presenca.timers.pilula, null);
+  // O leitor lê o que muda no DOM, não o aria-label: a região é viva e está fora de qualquer modal.
+  const HTML = readFileSync(new URL('../index.src.html', import.meta.url), 'utf8');
+  assert.match(HTML, /<p id="presencaAnuncioPilula" class="sr-only" role="status" aria-live="polite"><\/p>/);
+  // Irmã do #cardLiveRegion no topo do #appScreen: nenhum modal (escondido, o leitor de tela não lê a região) a contém.
+  const i = HTML.indexOf('id="presencaAnuncioPilula"');
+  assert.ok(i > HTML.indexOf('<div id="appScreen"') && i - HTML.indexOf('id="cardLiveRegion"') < 600, 'a região viva da pílula saiu do topo do #appScreen (ao lado do #cardLiveRegion)');
+});
+
+test('leitor de tela (R24-5-01): no máximo uma frase por janela — a rajada vira UMA, com o total de quando a janela fecha', async () => {
+  const c = novoCliente();
+  const reg = () => c.$('presencaAnuncioPilula').textContent;
+  c.P.presencaAplicarLista({ online: [], conversas: [conversa(CAF, 'cafanha', 5, 0)] }, 1, 30);
+  c.P.presencaRenderPilula();
+  const chega = async (n) => c.P.presencaQuadro(fluxoDe(c), inbox(await bytesDeMensagem({ id: uuid(810 + n), de: CAF, para: EU, texto: 'x' + n, ctx: APP, ts: 1790200000000 + n })));
+  await chega(1);
+  assert.equal(reg(), 'presenca.pill.msg{"n":1}');
+  await chega(2); await chega(3);
+  assert.equal(reg(), 'presenca.pill.msg{"n":1}', 'a 2ª e a 3ª falaram dentro da janela de 4 s');
+  assert.equal(c.timers.length, 1, 'a frase do fim da janela não ficou a caminho (e é UMA só, não uma por mensagem)');
+  c.relogio.agora += 4000; await c.rodarTimers();
+  assert.equal(reg(), 'presenca.pill.msgPlural{"n":3}', 'o fim da janela não disse o total de agora');
+  // Passada a janela, a seguinte fala na hora.
+  c.relogio.agora += 5000; await chega(4);
+  assert.equal(reg(), 'presenca.pill.msgPlural{"n":4}');
+  // E o total que CAI (leu em outro aparelho) não fala nem deixa frase a caminho.
+  c.P.presencaAplicarLista({ online: [], conversas: [conversa(CAF, 'cafanha', 6, 0)] }, 2, 30);
+  c.P.Presenca.vivas.clear(); c.P.presencaRenderPilula();
+  await c.rodarTimers();
+  assert.equal(reg(), 'presenca.pill.msgPlural{"n":4}', 'o total que CAI mudou a região');
+});
+
+test('leitor de tela (R24-5-01): a mesma frase duas vezes (1 mensagem, lê, chega outra) é dita de novo — limpa e reescreve', async () => {
+  const c = novoCliente();
+  const reg = () => c.$('presencaAnuncioPilula').textContent;
+  c.P.presencaAplicarLista({ online: [], conversas: [conversa(CAF, 'cafanha', 5, 0)] }, 1, 30);
+  c.P.presencaRenderPilula();
+  const chega = async (n) => c.P.presencaQuadro(fluxoDe(c), inbox(await bytesDeMensagem({ id: uuid(830 + n), de: CAF, para: EU, texto: 'x' + n, ctx: APP, ts: 1790200000000 + n })));
+  await chega(1);
+  assert.equal(reg(), 'presenca.pill.msg{"n":1}');
+  c.P.Presenca.vivas.clear(); c.P.presencaRenderPilula();     // leu
+  c.relogio.agora += 5000;
+  await chega(2);                                             // outra: o MESMO texto
+  assert.equal(reg(), '', 'a frase igual à que a região já dizia foi reescrita sem limpar (o leitor de tela pode não repetir)');
+  await c.rodarTimers();
+  assert.equal(reg(), 'presenca.pill.msg{"n":1}', 'a frase igual não voltou depois de limpar');
+});
+
+test('leitor de tela (R24-5-01): CONTROLES — com a conversa ABERTA fala o #conversaAnuncio, não a região da pílula; e o "Sair"/desligar limpa tudo', async () => {
+  const c = novoCliente();
+  const reg = () => c.$('presencaAnuncioPilula').textContent;
+  c.P.presencaAplicarLista({ online: [], conversas: [conversa('777', 'outra', 5, 0)] }, 1, 30);
+  c.P.presencaRenderPilula();
+  c.P.Presenca.aberta = CAF; c.$('conversaModal').classList.remove('hidden'); c.$('conversaTitle').textContent = 'cafanha';
+  await c.P.presencaQuadro(fluxoDe(c), inbox(await bytesDeMensagem({ id: uuid(850), de: CAF, para: EU, texto: 'Viu o posto novo?', ctx: APP, ts: 1790200000000 })));
+  assert.match(c.$('conversaAnuncio').textContent, /Viu o posto novo/, 'a conversa aberta deixou de usar o #conversaAnuncio');
+  assert.equal(reg(), '', 'a região da pílula falou por cima da conversa aberta');
+  // A de OUTRA pessoa com a conversa aberta não deixa frase velha pra depois: fechada a conversa, a base já é a de agora.
+  c.P.Presenca.aberta = null; c.$('conversaModal').classList.add('hidden');
+  c.P.presencaRenderPilula();
+  assert.equal(reg(), '');
+  // Fala; o desligar (o "Sair", a troca de conta, o interruptor) tira a frase e a base.
+  c.relogio.agora += 5000;
+  await c.P.presencaQuadro(fluxoDe(c), inbox(await bytesDeMensagem({ id: uuid(851), de: '777', para: EU, texto: 'oi', ctx: APP, ts: 1790200000002 })));
+  assert.match(reg(), /presenca\.pill\.msg/);
+  c.P.presencaDesligar();
+  assert.equal(reg(), '', 'o desligar deixou a frase da pílula na região viva');
+  assert.equal(c.P.Presenca.pilulaBase, null);
+  assert.equal(c.timers.length, 0, 'o desligar deixou um anúncio a caminho');
+});
+
+// ── R24-5-02 · o "Tentar de novo" manda as falhadas EM SÉRIE, na ordem escrita ──────────────────────────
+
+// Um Waze de mentira que SEGURA cada envio até o teste responder: a ordem de chegada é a ordem em que os pedidos saíram do cliente.
+function wazeQueSegura() {
+  const w = { falhar: true, chegadas: [], pendentes: [], falharNaVez: new Set() };
+  w.api = { chat: (cc) => {
+    if (cc.acao === 'abrir') return { success: true, mensagens: [], maisAntigas: false, recibos: [], lida: true };
+    if (cc.acao !== 'enviar') return { success: true };
+    if (w.falhar) return { success: false, errorCategory: 'transient', _motivo: 'rede' };
+    w.chegadas.push({ id: cc.id, texto: cc.texto });
+    return new Promise((res) => w.pendentes.push({ cc, res }));
+  } };
+  w.responder = (i, ok = true) => { const p = w.pendentes[i]; p.res(ok ? { success: true, id: p.cc.id, ts: 1790200000000 + i } : { success: false, errorCategory: 'transient', _motivo: 'rede' }); };
+  return w;
+}
+const tiqueDe = () => new Promise((r) => setImmediate(r));
+
+test('o "Tentar de novo" manda as falhadas UMA de cada vez, na ordem em que foram escritas, e uma falha PARA a série (R24-5-02)', async () => {
+  const w = wazeQueSegura();
+  const c = novoCliente({ api: w.api });
+  c.P.presencaMontar();
+  c.P.Presenca.aberta = '200'; c.escopo.openModal('conversaModal');
+  for (const t of ['primeira', 'segunda', 'terceira']) { c.P.presencaEnviar(t, null); await tiqueDe(); }
+  const h = c.P.Presenca.historico.get('200');
+  const ids = h.msgs.map((m) => m.id);
+  assert.deepEqual(h.msgs.map((m) => m.estado), ['falhou', 'falhou', 'falhou'], 'PRÉ-CONDIÇÃO: as três falharam');
+  w.falhar = false;
+  const serie = c.P.presencaTentarDeNovo();
+  await tiqueDe();
+  assert.deepEqual(w.chegadas.map((x) => x.texto), ['primeira'], 'a 2ª e a 3ª saíram no mesmo tique da 1ª (a ordem no Waze fica por conta da rede)');
+  assert.deepEqual(h.msgs.map((m) => m.estado), ['enviando', 'falhou', 'falhou']);
+  // Um segundo toque no meio da série não manda a fila inteira de novo.
+  c.P.presencaTentarDeNovo(); await tiqueDe();
+  assert.equal(w.chegadas.length, 1, 'o 2º toque no meio da série duplicou o envio');
+  w.responder(0); await tiqueDe(); await tiqueDe();
+  assert.deepEqual(w.chegadas.map((x) => x.texto), ['primeira', 'segunda'], 'a 2ª não saiu depois de a 1ª ter resposta');
+  // A 2ª falha DE NOVO: a série para — a 3ª segue "Não enviada" (e NÃO foi ao Waze), com o mesmo id.
+  w.responder(1, false); await tiqueDe(); await tiqueDe();
+  assert.deepEqual(w.chegadas.map((x) => x.texto), ['primeira', 'segunda'], 'a série seguiu depois de uma falha');
+  await serie;
+  assert.deepEqual(h.msgs.map((m) => m.estado), ['enviada', 'falhou', 'falhou']);
+  assert.deepEqual(h.msgs.map((m) => m.id), ids, 'a mensagem falhada mudou de id (o Waze não reconheceria a repetição)');
+  // O "Tentar de novo" continua disponível e retoma de onde parou, na ordem, com os MESMOS ids.
+  assert.match(c.$('conversaMsgs').innerHTML, /conversa-reenviar/, 'o botão "Tentar de novo" sumiu com falhadas na tela');
+  const s2 = c.P.presencaTentarDeNovo(); await tiqueDe();
+  assert.deepEqual(w.chegadas.slice(2).map((x) => x.texto), ['segunda'], 'a retomada não começou pela 2ª');
+  assert.equal(w.chegadas[2].id, ids[1]);
+  w.responder(2); await tiqueDe(); await tiqueDe();
+  w.responder(3); await s2;
+  assert.deepEqual(w.chegadas.map((x) => x.texto), ['primeira', 'segunda', 'segunda', 'terceira']);
+  assert.deepEqual(h.msgs.map((m) => m.estado), ['enviada', 'enviada', 'enviada']);
+});
+
+test('o "Tentar de novo" em série para onde a sessão acaba (R24-5-02)', async () => {
+  const w = wazeQueSegura();
+  const c = novoCliente({ api: w.api });
+  c.P.presencaMontar();
+  c.P.Presenca.aberta = '200'; c.escopo.openModal('conversaModal');
+  for (const t of ['a', 'b']) { c.P.presencaEnviar(t, null); await tiqueDe(); }
+  w.falhar = false;
+  const serie = c.P.presencaTentarDeNovo(); await tiqueDe();
+  assert.equal(w.chegadas.length, 1);
+  c.P.presencaDesligar();                        // o "Sair" / a troca de conta no meio da série
+  w.responder(0); await serie;
+  assert.equal(w.chegadas.length, 1, 'a série seguiu mandando depois de a sessão acabar');
+  assert.equal(c.P.Presenca.emSerie.size, 0);
+});

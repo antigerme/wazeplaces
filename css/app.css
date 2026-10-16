@@ -9,7 +9,7 @@
     ((max-width: 12.59rem) and (max-height: 17.8rem)) or
     ((max-width: 15.4rem) and (max-height: 17rem)) or
     ((max-width: 31rem) and (max-height: 12rem)) or
-    ((max-height: 240px) and (max-height: 15rem)){#filtersModal>div{overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain}#filtersModal>div>.dialogo-acoes:last-child{position:sticky;bottom:0;background:inherit}}@container filtros ((max-width: 31rem) and (max-height: 12rem)) or
+    ((max-height: 240px) and (max-height: 15rem)){#filtersModal>div{overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain}#filtersModal>div>.dialogo-acoes:last-child{position:sticky;bottom:0;background:inherit}#filtersModal>div>.overflow-y-auto{flex:none;overflow:visible}}@container filtros ((max-width: 31rem) and (max-height: 12rem)) or
     ((max-height: 240px) and (max-height: 15rem)){#filtersModal>div{scroll-padding-bottom:5.5rem}}@container filtros ((max-width: 8.19rem) and (max-height: 22rem)) or
     ((max-width: 8.29rem) and (max-height: 21.2rem)) or
     ((max-width: 8.69rem) and (max-height: 20.4rem)) or

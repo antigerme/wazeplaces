@@ -1741,6 +1741,49 @@ for (const [nomeA, viewport] of APARELHOS_FONTE) {
     out.comFoco = hit(document.getElementById('applyFilters'));
     return out;
   };
+  // R24-7-01 (lote 28): dentro da escada o CORPO do formulário tem a altura do conteúdo (não é um 2º rolante de 32 px) e os controles recebem o dedo e o foco.
+  // `vistos` = quantos dos controles da aba Filtros recebem o dedo (centro) em ALGUM ponto da rolagem do CARTÃO; `foco` = os da aba Preferências, depois de `focus()`
+  // (a rolagem que o Tab faria), com o centro recebendo o dedo — o rodapé preso e o cabeçalho não podem cobri-los.
+  const medirCorpoFiltros = async () => {
+    openModal('filtersModal'); switchFilterTab('filtersTabFilters');
+    await new Promise((ok) => setTimeout(ok, 200));
+    const card = document.querySelector('#filtersModal > div');
+    const corpo = card.querySelector(':scope > .overflow-y-auto');
+    const recebe = (e) => {
+      const q = e.getBoundingClientRect(); if (!q.width || !q.height) return false;
+      const n = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2);
+      return !!n && (n === e || e.contains(n) || (e.closest('label') && e.closest('label').contains(n)));
+    };
+    const ctrls = [...corpo.querySelectorAll('#filtersPanelFilters input, #filtersPanelFilters select, #filtersPanelFilters button')].filter((e) => e.offsetParent);
+    const vistos = new Set();
+    for (let y = 0; y <= card.scrollHeight; y += 20) { card.scrollTop = y; ctrls.forEach((e, i) => { if (recebe(e)) vistos.add(i); }); }
+    // `faixaPx`: o que sobra do cartão acima do rodapé preso. Com o rodapé EMPILHADO mais alto que o cartão (500% de 1280×800 = 256×160: 141 px de rodapé
+    // num cartão de 136) ele cobre o cartão inteiro, e nenhum controle pode receber o dedo — um limite do rodapé preso, que não é do corpo.
+    const rodape = card.querySelector(':scope > .dialogo-acoes:last-child');
+    const out = { corpoPx: Math.round(corpo.getBoundingClientRect().height), corpoSH: corpo.scrollHeight, corpoOverflowY: getComputedStyle(corpo).overflowY, vistos: vistos.size, de: ctrls.length, foco: {},
+      faixaPx: Math.round(card.clientHeight - rodape.getBoundingClientRect().height) };
+    card.scrollTop = 0;
+    switchFilterTab('filtersTabPrefs');
+    await new Promise((ok) => setTimeout(ok, 200));
+    for (const id of ['prefOfflineDisponivel', 'prefPresenca', 'prefPularGuarda', 'langSelect']) {
+      document.getElementById('filtersTabPrefs').focus(); card.scrollTop = 0;
+      document.getElementById(id).focus();
+      // O WebKit ANIMA a rolagem do foco (a 280×653 a 2× o cartão anda ~4.000 px) e a animação começa DEPOIS de uns quadros parada em 0: «parado» é o foco À VISTA e a rolagem
+      // sem mudar em 4 quadros seguidos (o elemento que passa pela faixa no meio da animação não conta), com teto de quadros — se o fim for coberto, o teto estoura e a falha sai.
+      for (let i = 0, igual = 0, ultimo = -1; i < 150 && !(igual >= 4 && recebe(document.getElementById(id))); i++) { await new Promise((ok) => requestAnimationFrame(ok)); igual = card.scrollTop === ultimo ? igual + 1 : 0; ultimo = card.scrollTop; }
+      out.foco[id] = recebe(document.getElementById(id));
+    }
+    return out;
+  };
+  const checaCorpoDosFiltros = (r, c, rot) => {
+    // Fora da escada o corpo é o rolante de sempre (nenhum pixel muda); dentro, o cartão rola o formulário e o corpo mostra o conteúdo inteiro.
+    if (r.cartaoOverflowY !== 'auto') { checa(c.corpoOverflowY === 'auto', `${rot}: fora da escada o corpo dos Filtros deixou de rolar (${c.corpoOverflowY})`, JSON.stringify(c)); return; }
+    checa(c.corpoOverflowY === 'visible' && c.corpoPx >= c.corpoSH - 1, `${rot}: o corpo dos Filtros segue como segundo rolante (${c.corpoPx} px de ${c.corpoSH})`, JSON.stringify(c));
+    if (c.faixaPx < 44) return;   // o rodapé preso cobre o cartão todo: o que se mede aqui é o corpo (acima), não os controles
+    checa(c.de >= 10 && c.vistos === c.de, `${rot}: só ${c.vistos} de ${c.de} controles dos Filtros recebem o dedo rolando o cartão`, JSON.stringify(c));
+    const cobertos = Object.entries(c.foco).filter(([, v]) => !v).map(([k]) => k);
+    checa(cobertos.length === 0, `${rot}: o foco leva ${cobertos.join(', ')} para sob o cabeçalho ou o rodapé preso`, JSON.stringify(c));
+  };
   const CASOS_FILTROS = [
     ['Fold 280×653', { width: 280, height: 653 }, [1, 1.5, 1.7, 1.8, 1.9, 2]],
     ['SE 320×568', { width: 320, height: 568 }, [1, 1.5, 1.7, 1.8, 1.9, 2]],
@@ -1774,6 +1817,7 @@ for (const [nomeA, viewport] of APARELHOS_FONTE) {
         checa(r.aplicar.inicial === 'ok' && r.cancelar.inicial === 'ok',
           `Filtros Fold ×1,7 · ${lang}: o rodapé que já se alcançava em repouso passou a ficar cortado`, JSON.stringify(r));
       }
+      if (lang === 'pt' || lang === 'fr') checaCorpoDosFiltros(r, await page.evaluate(medirCorpoFiltros), `Filtros ${rot} ×${escala} · ${lang}`);
       await fecharL25(page);
     }
     checa(erros.length === 0, `Filtros ${rot} ×${escala}: erro de JS`, erros[0]);
@@ -2755,6 +2799,7 @@ for (const [nomeA, viewport] of APARELHOS_FONTE) {
       checa(r.aplicar.inicial === 'ok' && r.cancelar.inicial === 'ok', `Filtros no zoom ${rot} (${w}×${h}) · ${lang}: o "Aplicar"/"Cancelar" não recebe o dedo SEM rolar`, JSON.stringify(r));
       checa(r.comFoco === 'ok', `Filtros no zoom ${rot} (${w}×${h}) · ${lang}: o foco do teclado não traz o "Aplicar" à vista`, JSON.stringify(r));
       checa(r.cartaoOverflowY === 'auto', `Filtros no zoom ${rot} (${w}×${h}) · ${lang}: o cartão não rola (a janela ficou fora da escada)`, JSON.stringify(r));
+      if (lang === 'pt' || lang === 'fr') checaCorpoDosFiltros(r, await page.evaluate(medirCorpoFiltros), `Filtros no zoom ${rot} (${w}×${h}) · ${lang}`);
       await fecharL25(page);
     }
     checa(erros.length === 0, `Filtros no zoom ${rot}: erro de JS`, erros[0]);
@@ -2791,6 +2836,17 @@ for (const [nomeA, viewport] of APARELHOS_FONTE) {
     await entrarL25(page, 'pt');
     const r = await page.evaluate(medirAlcanceFiltros);
     checa(r.aplicar.inicial !== 'ok' || r.cancelar.inicial !== 'ok' || r.aplicar.depois !== 'ok', 'Filtros no zoom 400%: CONTROLE — sem a escada o "Aplicar" segue ao alcance; a medida está cega', JSON.stringify(r));
+    await ctx.close();
+  }
+  {
+    // CONTROLE do corpo (R24-7-01): com o corpo de volta a segundo rolante (a regra do lote 27) o MESMO 400×225 (1600×900 a 400%) mostra 0 dos controles e cobre o foco.
+    const { ctx, page } = await novaPaginaL25({ width: 400, height: 225 }, 1, { estilo: '#filtersModal > div > .overflow-y-auto { flex: 1 1 0% !important; overflow-y: auto !important; }' });
+    await entrarL25(page, 'pt');
+    const r = await page.evaluate(medirAlcanceFiltros);
+    const c = await page.evaluate(medirCorpoFiltros);
+    // (O foco não entra no controle: com a rolagem do cartão zerada antes de cada `focus()` o Chromium o leva a um lugar à vista mesmo com o corpo de 32 px; só os
+    // controles que recebem o dedo e a altura do corpo distinguem as duas árvores nos dois motores — no WebKit o foco do Fold a 2× também reprova na de antes.)
+    checa(r.cartaoOverflowY === 'auto' && c.vistos < c.de && c.corpoPx < c.corpoSH / 4, 'Filtros no zoom 400%: CONTROLE — com o corpo como 2º rolante os controles seguem à vista; a medida está cega', JSON.stringify({ r, c }));
     await ctx.close();
   }
 
