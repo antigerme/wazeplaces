@@ -1866,9 +1866,9 @@ test('F5: região e país são da ABA — o lugar que a OUTRA aba aplica não mu
   // E o gesto DESTA aba troca o dela e grava, como sempre.
   B.setCountry(181);
   assert.deepEqual([B.getRegion(), B.getCountry(), dados.get('waze_country')], ['na', 181, '181']);
-  // A região antiga (`world`) segue virando `na` na leitura.
+  // A região antiga (`world`) deixou de ser apelido da `na` (a migração venceu): é valor inválido e cai no padrão.
   dados.set('waze_region', 'world');
-  assert.equal(aba().getRegion(), 'na');
+  assert.equal(aba().getRegion(), 'row');
   // O "Sair" noutra aba faz esta reler o lugar de fábrica que ele gravou.
   assert.match(fatiarDe(APP_SEM, 'handleLogout'), /\} else \{\s*API\.esquecerLugar\(\);\s*\}/);
 });

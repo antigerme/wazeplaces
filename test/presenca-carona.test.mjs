@@ -281,7 +281,7 @@ test('carona: presença LENTA não segura a resposta — teto de espera, e o res
 });
 
 test('carona: a região escolhe o servidor da presença (a lista é separada por servidor)', async () => {
-  for (const [region, prefixo] of [['na', 'Descartes'], ['il', 'il-Descartes'], ['world', 'Descartes']]) {
+  for (const [region, prefixo] of [['na', 'Descartes'], ['il', 'il-Descartes']]) {
     const { pedidos } = await comWaze({ acao: ACAO_OK, presenca: PRESENCA_OK },
       () => dispatch('validar-place', { ...S.dados, region, venueID: 'v1', updateRequestID: 'ur1', presenca: PRESENCA }, S.ctx));
     assert.equal(pedidos.find((p) => p.tipo === 'escrita').url,

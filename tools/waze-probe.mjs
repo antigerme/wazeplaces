@@ -25,6 +25,9 @@
 // _web_session + _csrf_token e permissions: -1 (todos os bits). É credencial de
 // ESCRITA na conta do owner. Por isso este script:
 //   · recusa /Features, /Issues/Read e /Issues/Star, os caminhos que alteram dado real;
+//   · recusa destino que não seja https no waze.com (ou subdomínio): o `--get` aceita URL
+//     absoluta, e o Cookie + o X-CSRF-Token do owner não saem pra outro host (R24-4-02);
+//   · não segue redirecionamento (`redirect: 'manual'`): um 3xx pra fora é resposta, não destino;
 //   · só faz GET (nunca manda corpo);
 //   · nunca imprime valor de cookie — só o nome e a contagem.
 // A recusa é mecânica de propósito: regra que depende de alguém lembrar não é
@@ -80,6 +83,20 @@ function caminhoDeEscrita(url) {
   return false;
 }
 
+// O destino pode receber o Cookie e o CSRF do owner? (R24-4-02) `get()` aceitava URL ABSOLUTA e mandava as
+// duas credenciais pra QUALQUER host, inclusive `http://` (`--get http://127.0.0.1:9/x`,
+// `--get https://example.org/x`). Só vale https em `www.waze.com` ou subdomínio, pelo MESMO casamento da CSP
+// (`tools/csp-img.mjs`): `www.waze.com.evil.com`, `waze.com.br`, `evilwaze.com` e `waze.com` pelado não
+// passam. Sem usuário/senha na URL e só na porta padrão. O que não se consegue ler é RECUSADO (falha fechada).
+// Função pura: `test/diag-ferramentas.test.mjs` roda o probe de verdade contra um `fetch` espião.
+const HOSTS_DO_WAZE = 'https://www.waze.com https://*.waze.com';
+function destinoDoWaze(url) {
+  let u;
+  try { u = new URL(url); } catch (e) { return false; }
+  return u.protocol === 'https:' && !u.username && !u.password && (u.port === '' || u.port === '443')
+    && hostLiberado(u.hostname, HOSTS_DO_WAZE);
+}
+
 const args = process.argv.slice(2);
 const arq = args[0];
 if (!arq || arq.startsWith('--')) {
@@ -128,6 +145,11 @@ console.log(`csrf: ${csrf ? 'presente' : 'AUSENTE — chamadas podem dar 403'} �
 const WME_EDITOR_URL = 'https://www.waze.com/editor';
 async function get(path, acceptLanguage = 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7', refBase = WME_EDITOR_URL) {
   const url = path.startsWith('http') ? path : base + path;
+  if (!destinoDoWaze(url)) {
+    console.error(`✗ RECUSADO: ${url}\n  O probe só fala com https://www.waze.com (ou subdomínio): o Cookie e o CSRF do owner`
+      + ' não saem pra outro destino (ver o cabeçalho do arquivo e a seção 🔑 do CLAUDE.md).');
+    process.exit(3);
+  }
   if (caminhoDeEscrita(url)) {
     console.error(`✗ RECUSADO: ${url}\n  Este path ALTERA dado real na conta do owner. O probe é só leitura`
       + ' (ver o cabeçalho do arquivo e a seção 🔑 do CLAUDE.md).');
@@ -136,6 +158,9 @@ async function get(path, acceptLanguage = 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
   await pausaComJitter();
   const r = await fetch(url, {
     method: 'GET',
+    // Um 3xx é RESPOSTA, não destino: seguido, o CSRF do owner iria junto pra onde o redirecionamento
+    // mandasse (o undici corta o Cookie na troca de origem, mas reenvia os outros cabeçalhos).
+    redirect: 'manual',
     headers: {
       Accept: '*/*',
       'Accept-Language': acceptLanguage,

@@ -3043,9 +3043,7 @@ function presencaCardSeguro(c) {
         updateTypeKey: txt(c.updateTypeKey, 40) || null,
         imageUrl: PRESENCA_FOTO_OK.test(foto) ? foto : null,
         lat: num(c.lat), lon: num(c.lon),
-        // MIGRACAO: regiao-world — cartão mandado por versão anterior, que
-        // ainda chamava a América do Norte de `world`.
-        region: c.region === 'world' ? 'na' : REGIOES_DO_WAZE.includes(c.region) ? c.region : 'row',
+        region: REGIOES_DO_WAZE.includes(c.region) ? c.region : 'row',
     };
 }
 

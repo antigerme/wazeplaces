@@ -113,11 +113,11 @@ test('R17-6-A2: categories é lista de textos (com teto) — o resto é 400', as
   assert.equal((await buscar({ categories: Array(200).fill('PARK') })).r.status, 200, 'o teto é 200, inclusive');
 });
 
-test('R17-6-A2: região desconhecida é 400 em qualquer rota — não cai em `row` calado; ausente, vazia e `world` seguem como sempre', async () => {
+test('R17-6-A2: região desconhecida é 400 em qualquer rota — não cai em `row` calado; ausente e vazia seguem como sempre; `world` (o apelido que saiu) é região inválida como outra qualquer', async () => {
   // DECISÃO: 400. Cair em `row` mandava rejeitar / marcar lido / excluir foto ao servidor
   // errado, que responde "não encontrado", e o app lê isso como "já tratado".
   for (const rota of ['buscar-places', 'perfil', 'lista-paises', 'marcar-lido', 'validar-place', 'excluir-foto']) {
-    for (const region of ['xx', 'constructor', '__proto__', 'toString', 'rows', true, 5, {}, []]) {
+    for (const region of ['xx', 'constructor', '__proto__', 'toString', 'rows', 'world', true, 5, {}, []]) {
       const s = await sessaoDeTeste(COOKIES);
       const original = globalThis.fetch;
       let foi = 0;
@@ -130,8 +130,8 @@ test('R17-6-A2: região desconhecida é 400 em qualquer rota — não cai em `ro
       } finally { globalThis.fetch = original; }
     }
   }
-  // CONTROLE: as três regiões, o apelido antigo, a caixa alta, e a região AUSENTE (que é `row`).
-  const prefixos = { row: 'row-Descartes', il: 'il-Descartes', na: 'Descartes', world: 'Descartes', NA: 'Descartes', ' Row ': 'row-Descartes', '': 'row-Descartes', undefined: 'row-Descartes', null: 'row-Descartes' };
+  // CONTROLE: as três regiões, a caixa alta, e a região AUSENTE (que é `row`).
+  const prefixos = { row: 'row-Descartes', il: 'il-Descartes', na: 'Descartes', NA: 'Descartes', ' Row ': 'row-Descartes', '': 'row-Descartes', undefined: 'row-Descartes', null: 'row-Descartes' };
   for (const [nome, prefixo] of Object.entries(prefixos)) {
     const region = nome === 'undefined' ? undefined : nome === 'null' ? null : nome;
     const { r, chamadas } = await buscar({ region });

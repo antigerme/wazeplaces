@@ -556,7 +556,7 @@ const CORE_SRC = _rf(new URL('../server/core.mjs', import.meta.url), 'utf8');
 test('o core manda o autor POR FOTO, com o nome já resolvido', () => {
     // O dicionário `users` chega na mesma resposta; o frontend não teria como
     // resolver o id depois. E id sem nome vira o número — feio, nunca invisível.
-    const i = CORE_SRC.indexOf('const imageAuthors = {}');
+    const i = CORE_SRC.indexOf('const imageAuthors = Object.create(null)');
     assert.ok(i !== -1, 'imageAuthors sumiu do core');
     const bloco = CORE_SRC.slice(i, CORE_SRC.indexOf('\n    }', i));
     assert.match(bloco, /img\.creatorUserId != null/,

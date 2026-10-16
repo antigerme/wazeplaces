@@ -5001,6 +5001,13 @@ const cenario9p = async (nome, { modo }) => {
     // depois do gatilho do teste tomava "a varredura do `online` já acabou" por "o gatilho não varreu".
     window.__prontasAntesDaRede = dfatoAnel.filter((e) => e.k === 'offline.pronto').length;
     return { dizTudoGuardado: el.textContent.includes(t('prefs.offline.prontoSemRedeB')) }; });
+  // B já fez o que tinha de fazer (a poda e o aviso). Aberta, a volta da rede dispara o `online` DELA também: a fila de 5
+  // de B é regravada (carimbo TB) DEPOIS de A gravar a dela (TA), e A termina `cobre:false · pronto:false` — a oscilação
+  // medida pela rodada 24 (7 de 12 rodadas reprovavam sob carga, 0 de 12 com B fechada; R24-4-01). Defeito do TESTE: o
+  // gesto que o cenário mede é o de A. O `close()` simples, e NÃO `fecharComoOUsuario`: no Chromium este devolve antes de
+  // a página sumir e o `setOffline` seguinte falha com «Target … closed» (3 de 5 rodadas). Na «mesma» B fica: o controle
+  // quer as DUAS abas vivas na volta da rede.
+  if (modo !== 'mesma') await B.pg.close();
   await ctx.setOffline(false);
   if (modo !== 'mesma') {
     // O gatilho seguinte de A prepara a fila DELA e baixa o mapa que a poda levou — seja a varredura do `online` ou a do gatilho,

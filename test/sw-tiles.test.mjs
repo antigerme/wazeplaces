@@ -45,9 +45,10 @@ test('servir o tile não CRIA o cache (o "Sair" o apagou)', () => {
   // `caches.match` com o nome do cache não cria nada; `caches.open` criaria.
   const i = SW.indexOf('const doCache = () =>');
   assert.ok(i > 0, 'o doCache sumiu');
-  const linha = SW.slice(i, SW.indexOf('\n', i));
-  assert.match(linha, /caches\.match\(event\.request, \{ cacheName: TILES_CACHE \}\)/);
-  assert.doesNotMatch(linha, /caches\.open/);
+  // O corpo inteiro do doCache (R24-4-03 o fez crescer: a leitura virou uma const e há o fallback sem rede).
+  const corpo = SW.slice(i, SW.indexOf('const daRedeOuDaListaLenta', i)).split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  assert.match(corpo, /caches\.match\(event\.request, \{ cacheName: TILES_CACHE \}\)/);
+  assert.doesNotMatch(corpo, /caches\.open/);
 });
 
 // ── O7: o pedido da VARREDURA passa direto (auditoria de 2026-09-26) ─────────
