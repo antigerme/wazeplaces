@@ -104,7 +104,6 @@ async function rodar(log, argv) {
 
     const base = { pid: process.pid, filho: filho.pid, cmd: argv.join(' '),
                    inicioMs: Date.now(), inicio: new Date().toISOString() };
-    gravarEstado(log, { ...base, estado: 'rodando' });
 
     let fechado = false;
     const fechar = (estado, extra) => {
@@ -146,6 +145,15 @@ async function rodar(log, argv) {
     }
     // Última rede: qualquer saída não prevista ainda carimba o arquivo.
     process.on('exit', () => fechar('morto', { sinal: 'exit' }));
+
+    // "rodando" é o sinal de PRONTO, e só sai DEPOIS do trap. Escrito antes
+    // dele, havia uma janela em que o estado já dizia "rodando" e o SIGTERM
+    // ainda caía no tratamento padrão do Node (sai sem rodar JS): o processo
+    // morria sem carimbar, e o vigia via um órfão onde houve uma morte
+    // comum. Com a máquina carregada (carga 10 em 4 CPUs) o teste do SIGTERM
+    // reprovou uma vez por isso. É o gotcha #62: pronto é sinal POSITIVO de
+    // que tudo está montado, nunca o primeiro passo da montagem.
+    gravarEstado(log, { ...base, estado: 'rodando' });
 
     const codigo = await new Promise((ok) => {
         // `fechar` já é idempotente, então um `close` que chegue depois de uma

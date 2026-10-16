@@ -15,7 +15,7 @@
 //   node tools/waze-probe.mjs <cookies.txt> --estados 30       → estados do país
 //   node tools/waze-probe.mjs <cookies.txt> --idioma           → o Waze honra Accept-Language?
 //   node tools/waze-probe.mjs <cookies.txt> --get '<path>'     → GET num path arbitrário
-//   ...qualquer um aceita  --regiao row|na|il|world  (padrão: row)
+//   ...qualquer um aceita  --regiao row|na|il  (padrão: row)
 //
 // RITMO — jitter aleatório entre TODAS as chamadas, de tools/waze-jitter.mjs
 // (fonte única, por instrução do owner: "vá devagar, sempre use jitter"). O
@@ -24,7 +24,7 @@
 // SEGURANÇA — o cookies.txt do WME não tem versão "só leitura": vem com
 // _web_session + _csrf_token e permissions: -1 (todos os bits). É credencial de
 // ESCRITA na conta do owner. Por isso este script:
-//   · recusa /Features e /Issues/Read, os dois caminhos que alteram dado real;
+//   · recusa /Features, /Issues/Read e /Issues/Star, os caminhos que alteram dado real;
 //   · só faz GET (nunca manda corpo);
 //   · nunca imprime valor de cookie — só o nome e a contagem.
 // A recusa é mecânica de propósito: regra que depende de alguém lembrar não é
@@ -38,18 +38,47 @@ import { lerCsp, diretiva, hostLiberado } from './csp-img.mjs';
 // abaixo: escrever essa leitura aqui de novo era o que fazia o probe mentir.
 import { prepareAuth } from '../server/core.mjs';
 
+// A América do Norte é `/Descartes/`, SEM prefixo: `na-Descartes` dá 404 (medido
+// em 2026-09-25; ver `WAZE_REGIONS` no core).
 const BASES = {
   row: 'https://www.waze.com/row-Descartes/app',
-  na: 'https://www.waze.com/na-Descartes/app',
+  na: 'https://www.waze.com/Descartes/app',
   il: 'https://www.waze.com/il-Descartes/app',
-  world: 'https://www.waze.com/Descartes/app',
 };
 // Mesma tabela do wazeRefererEnv em server/core.mjs.
-const ENV = { row: 'row', na: 'usa', il: 'il', world: 'row' };
+const ENV = { row: 'row', na: 'usa', il: 'il' };
 const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36';
 
 // Paths que ALTERAM dado no Waze. Bloqueados, sem flag pra destravar.
-const ESCRITA = [/\/Features\b/i, /\/Issues\/Read\b/i, /\/Issues\/Resolve\b/i];
+// `/Issues/Star` é a estrela do editor (o "Pular guarda o pedido"): estado
+// COMPARTILHADO com o WME. A lista é escrita à mão, então `test/diag-ferramentas.test.mjs`
+// a deriva dos helpers de endpoint do core: caminho de escrita novo sem regra aqui reprova.
+const ESCRITA = [/\/Features\b/i, /\/Issues\/Read\b/i, /\/Issues\/Star\b/i, /\/Issues\/Resolve\b/i];
+// A recusa lê o caminho como o SERVIDOR o lê, e não o texto cru da URL (R23-4-03): `/Issues/./Read`,
+// `/x/../Issues/Read`, `/Issues//Read`, `/%49ssues/Read` e `/Issues%2FRead` são o mesmo `Issues/Read` depois
+// de o `fetch` normalizar, e passavam por uma regra testada na string de antes. Aqui o `pathname` sai do
+// `new URL` (que já tira os `.`/`..`), é decodificado até estabilizar (o `%2549` de dupla camada), perde o
+// parâmetro de caminho (`;x`) e as barras repetidas, e a regra roda sobre o cru E sobre o normalizado. O que
+// não se consegue ler (URL inválida, escape quebrado) é RECUSADO: o instrumento falha fechado. Função pura e
+// sem dependência do resto do arquivo: `test/diag-ferramentas.test.mjs` a extrai daqui e a roda.
+function caminhoDeEscrita(url) {
+  let caminho;
+  try { caminho = new URL(url).pathname; } catch (e) { return true; }
+  const lidos = [caminho];
+  let atual = caminho;
+  for (let i = 0; i < 4; i++) {
+    let dec;
+    try { dec = decodeURIComponent(atual); } catch (e) { return true; }
+    if (dec === atual) break;
+    atual = dec;
+    lidos.push(atual);
+    try { atual = new URL('http://x' + (atual.startsWith('/') ? '' : '/') + atual).pathname; } catch (e) { return true; }
+    lidos.push(atual);
+  }
+  const limpo = (c) => c.split('/').map((seg) => seg.replace(/;.*$/, '')).join('/').replace(/\/{2,}/g, '/');
+  for (const c of [...lidos, ...lidos.map(limpo)]) if (ESCRITA.some((re) => re.test(c))) return true;
+  return false;
+}
 
 const args = process.argv.slice(2);
 const arq = args[0];
@@ -99,7 +128,7 @@ console.log(`csrf: ${csrf ? 'presente' : 'AUSENTE — chamadas podem dar 403'} �
 const WME_EDITOR_URL = 'https://www.waze.com/editor';
 async function get(path, acceptLanguage = 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7', refBase = WME_EDITOR_URL) {
   const url = path.startsWith('http') ? path : base + path;
-  if (ESCRITA.some((re) => re.test(url))) {
+  if (caminhoDeEscrita(url)) {
     console.error(`✗ RECUSADO: ${url}\n  Este path ALTERA dado real na conta do owner. O probe é só leitura`
       + ' (ver o cabeçalho do arquivo e a seção 🔑 do CLAUDE.md).');
     process.exit(3);

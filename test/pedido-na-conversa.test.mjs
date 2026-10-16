@@ -51,14 +51,17 @@ test('pedido: sem venueID não há pedido', () => {
   assert.equal(m.presencaCardSeguro(42), null);
 });
 
-test('pedido: a FOTO só passa se for https de um host do waze.com', () => {
+test('pedido: a FOTO só passa se for https do host das FOTOS do Waze', () => {
   // Ela vira `src` de uma <img>: sem esta trava, quem manda escolhe pra onde o
-  // aparelho de quem recebe faz requisição.
+  // aparelho de quem recebe faz requisição. Era qualquer `*.waze.com`, e um GET
+  // em `www.waze.com` sairia com os cookies do WME de quem recebe (auditoria de
+  // 2026-09-25). O card só monta `venue-image.waze.com` (`WAZE_IMAGE_BASE`).
   const m = montar();
   const ok = (u) => m.presencaCardSeguro({ ...CARD, imageUrl: u }).imageUrl;
   assert.equal(ok('https://venue-image.waze.com/thumbs/x.png'), 'https://venue-image.waze.com/thumbs/x.png');
-  assert.equal(ok('https://world-venue-image.waze.com/a.png'), 'https://world-venue-image.waze.com/a.png');
   for (const mau of [
+    'https://www.waze.com/row-Descartes/app/Session',   // GET com os cookies do WME
+    'https://world-venue-image.waze.com/a.png',        // outro host do domínio
     'http://venue-image.waze.com/x.png',          // sem TLS
     'javascript:alert(1)',                         // execução
     'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=',  // conteúdo do remetente
@@ -241,4 +244,26 @@ test('pedido: o cartão que chega pelo contexto passa pela limpeza campo a campo
   assert.equal('onerror' in vindo.card, false);
   assert.match(fonte, /card = presencaCardSeguro\(JSON\.parse\(ctx\.card\)\)/,
     'o cartão do contexto tem que passar pela limpeza');
+});
+
+test('a folha do pedido recebido tira a foto que não carrega (sem ícone de imagem quebrada)', () => {
+  // Auditoria de 2026-09-25: a foto do pedido vem de outro aparelho e pode já
+  // não existir (ou estar sem sinal); o ícone quebrado no topo da folha não
+  // informa nada. O `onerror` vai ANTES do `src`.
+  const app = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  const i = app.indexOf('function abrirPedidoRecebido(');
+  assert.ok(i > 0, 'abrirPedidoRecebido sumiu');
+  const corpo = app.slice(i, app.indexOf('\nfunction ', i + 10));
+  const iErro = corpo.indexOf("img.onerror = () => { foto.classList.add('hidden'); };");
+  const iSrc = corpo.indexOf('img.src = dados.imageUrl;');
+  assert.ok(iErro > 0 && iSrc > iErro, 'a foto quebrada do pedido recebido não sai da folha (ou o onerror vem depois do src)');
+});
+
+test('pedido: o host que o CORE monta pras fotos é o que a conversa aceita (mudar um sem o outro some com a foto)', () => {
+  const core = readFileSync(new URL('../server/core.mjs', import.meta.url), 'utf8');
+  const base = /const WAZE_IMAGE_BASE = '([^']+)'/.exec(core);
+  assert.ok(base, 'WAZE_IMAGE_BASE sumiu do core');
+  const m = montar();
+  assert.equal(m.presencaCardSeguro({ ...CARD, imageUrl: base[1] + 'abc' }).imageUrl, base[1] + 'abc',
+    'a foto que o core monta seria descartada pela conversa');
 });

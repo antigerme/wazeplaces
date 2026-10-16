@@ -147,32 +147,56 @@ test('o estado e o objeto exportado são o MESMO — nada de dois Presenca', () 
     'voltou a existir um segundo objeto Presenca — é o bug do ✕ de novo');
 });
 
-test('o recuo do tempo real só zera quando o Google ENTREGA o lote, não quando a conexão abre', () => {
+test('o recuo do tempo real só zera quando a conexão PROVA que serve (lote E duração) — não quando abre, nem no lote dela', () => {
   // O bug mais caro da sala, e ele vale pro fluxo do Google do mesmo jeito:
   // zerar o recuo ao abrir faz toda falha virar uma tentativa nova a cada
-  // poucos segundos, pra sempre. O que prova que a conexão SERVE é o fim do
-  // lote inicial (`endOfBatch`) — é o `eu` da sala, noutra roupa. O desligar
-  // também zera, e é outra coisa: é a pessoa saindo, não a rede voltando.
-  const CLI = read('js/presenca.js').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
-  // DENTRO do bloco do fim do lote, medido casando as chaves — e não "na mesma
-  // linha", que reprovava o bloco assim que ele ganhou mais de uma instrução
-  // (gotcha #67: guard amarrado na forma, não na estrutura).
+  // poucos segundos, pra sempre. O fim do lote inicial (`endOfBatch`) provava
+  // que a conexão SERVE — o `eu` da sala, noutra roupa —, até o R21-5-05: toda
+  // conexão abre com ele (MEDIDO em produção, no 1º milissegundo), então a que
+  // fecha logo depois zerava o recuo a cada volta e religava a cada 1 s, uma ida
+  // por segundo ao Google. Quem prova é a conexão que ENTREGOU o lote E VIVEU o
+  // piso (`presencaFluxoProvarVida`). O desligar também zera, e é outra coisa: é
+  // a pessoa saindo, não a rede voltando.
+  const CLI = semComentario(read('js/presenca.js'));
+  // O corpo de uma função, casando as chaves (não "na mesma linha", que
+  // reprovava o bloco assim que ele ganhava mais de uma instrução — gotcha #67:
+  // guard amarrado na forma, não na estrutura).
+  const casar = (ini) => {
+    let prof = 0;
+    for (let i = CLI.indexOf('{', ini); i < CLI.length; i++) {
+      if (CLI[i] === '{') prof++;
+      else if (CLI[i] === '}' && --prof === 0) return CLI.slice(ini, i + 1);
+    }
+    throw new Error('não delimitei');
+  };
+  const funcao = (nome) => {
+    const ini = CLI.search(new RegExp(`^(?:async )?function ${nome}\\(`, 'm'));
+    assert.ok(ini >= 0, `sumiu a função ${nome}`);
+    return casar(ini);
+  };
+  // Onde o recuo é zerado: só na prova e no desligar.
+  const zeragens = [...CLI.matchAll(/fluxoTentativa\s*=\s*0/g)].map((m) => {
+    const fn = [...CLI.slice(0, m.index).matchAll(/function (\w+)\(/g)].pop();
+    return fn ? fn[1] : '?';
+  });
+  assert.deepEqual(zeragens.sort(), ['presencaDesligar', 'presencaFluxoProvarVida'],
+    'o recuo do tempo real é zerado fora da prova (lote + duração) — abrir a conexão não é ter conectado, e o lote sozinho também não');
+  // A prova confere as DUAS coisas, e a duração é a do piso.
+  const prova = funcao('presencaFluxoProvarVida');
+  assert.match(prova, /!fluxo\.teveLote/, 'a prova deixou de exigir o lote');
+  assert.match(prova, /!presencaFluxoViveu\(fluxo\)/, 'a prova deixou de exigir a duração');
+  assert.match(funcao('presencaFluxoViveu'), /Date\.now\(\) - fluxo\.desde >= PRESENCA_FLUXO_VIVEU_MS/, 'a duração deixou de ser medida contra o piso');
+  // O bloco do fim do lote NÃO zera o recuo nem fecha a série de quedas.
   const iniLote = CLI.indexOf('if (o.endOfBatch) {');
   assert.ok(iniLote > 0, 'sumiu o tratamento do fim do lote');
-  let prof = 0, fimLote = -1;
-  for (let i = CLI.indexOf('{', iniLote); i < CLI.length; i++) {
-    if (CLI[i] === '{') prof++;
-    else if (CLI[i] === '}' && --prof === 0) { fimLote = i; break; }
-  }
-  const zeragens = [...CLI.matchAll(/fluxoTentativa\s*=\s*0/g)].map((m) => {
-    const linha = CLI.slice(CLI.lastIndexOf('\n', m.index) + 1, CLI.indexOf('\n', m.index));
-    const fn = [...CLI.slice(0, m.index).matchAll(/function (\w+)\(/g)].pop();
-    return { linha: linha.trim(), fn: fn ? fn[1] : '?', noLote: m.index > iniLote && m.index < fimLote };
-  });
-  assert.ok(zeragens.some((z) => z.noLote), 'o fim do lote deixou de zerar o recuo');
-  const fora = zeragens.filter((z) => !z.noLote && z.fn !== 'presencaDesligar');
-  assert.deepEqual(fora.map((z) => `${z.fn}: ${z.linha}`), [],
-    'o recuo do tempo real é zerado fora do fim do lote — abrir a conexão não é ter conectado');
+  const lote = casar(iniLote);
+  assert.doesNotMatch(lote, /fluxoTentativa/, 'o fim do lote voltou a mexer no recuo — toda conexão abre com ele');
+  assert.doesNotMatch(lote, /quedasSeguidas\s*=\s*0/, 'o fim do lote voltou a fechar a série de quedas — o par de cada `caiu` do laço');
+  // A prova roda a cada pedaço que chega (o sinal de vida de 10 s), e o fim
+  // normal é só a duração: sem `teveLote` na conta.
+  const abrir = funcao('presencaFluxoAbrir');
+  assert.match(abrir, /presencaQuadro\(fluxo, quadro\);[\s\S]*?presencaFluxoProvarVida\(fluxo\);/, 'a prova deixou de rodar a cada pedaço da conexão');
+  assert.match(abrir, /fimNormal = presencaFluxoViveu\(fluxo\);/, 'o fim normal voltou a depender de outra coisa que a duração');
 });
 
 test('o `online` do navegador não zera o recuo do tempo real', () => {

@@ -7,6 +7,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
 
 const fonte = readFileSync(new URL('../js/api.js', import.meta.url), 'utf8');
 
@@ -209,7 +210,8 @@ test('o anel SEM PORTÃO existe, e só leva o que é raro e sem dado de terceiro
 
   // E os dois anéis saem numa linha do tempo só, senão ler o arquivo vira
   // intercalar dois arrays à mão.
-  assert.match(semCom, /diario: \[\.\.\.dfatoAnel, \.\.\.dlogAnel\]\.sort/,
+  // (Com as repetições que o limitador ainda não escreveu — `dfatoPendentes`, R21-4-05 —, entre os dois.)
+  assert.match(semCom, /diario: \[\.\.\.dfatoAnel, \.\.\.dfatoEntregarPendentes\(\), \.\.\.dlogAnel\]\.sort/,
     'o diário parou de juntar os dois anéis');
 });
 
@@ -223,8 +225,11 @@ test('desligar o dev APAGA o que ele gravou', () => {
   assert.match(corpo, /delete c\.corpoResposta/, 'os corpos de resposta guardados sobreviveram');
   // O anel de METADADOS fica: não tem dado pessoal e é a espinha do diagnóstico.
   assert.ok(!/API\.chamadas = \[\]/.test(corpo), 'apagou os metadados junto — perdeu a sequência sem precisar');
-  // E o desligar avisa antes de levar captura não baixada embora.
-  assert.match(semCom, /dlogNaoBaixados\(\) > 0[\s\S]{0,200}?toast\.devPerdeCaptura/,
+  // E o desligar avisa antes de levar captura não baixada embora — DENTRO do
+  // bloco que confere a contagem (nenhum `}` no meio), não a N caracteres dele:
+  // o singular/plural por chave alongou a linha e a distância cravada reprovou
+  // código certo (gotcha #67).
+  assert.match(semCom, /dlogNaoBaixados\(\) > 0[^{]*\{[^}]*toast\.devPerdeCaptura/,
     'desligar pode perder captura não baixada sem avisar');
 });
 
@@ -251,7 +256,13 @@ test('a captura NÃO dispara toast — o instrumento não pode medir a si mesmo'
   assert.ok(iF !== -1, 'ligarFabDev sumiu');
   const fab = semCom.slice(iF, semCom.indexOf('\nfunction ', iF + 10));
   const i = fab.indexOf('const soltar = ');
-  const corpo = fab.slice(i, fab.indexOf('};', i));
+  const soltar = fab.slice(i, fab.indexOf('};', i));
+  assert.match(soltar, /capturar\(\);/, 'o toque parou de registrar');
+  // A captura em si mora em `capturar()` — o toque e o teclado (Enter/Espaço)
+  // passam por ela, então é NELA que o toast não pode estar.
+  const iC = fab.indexOf('function capturar()');
+  assert.ok(iC !== -1, 'a captura saiu de `capturar()`');
+  const corpo = fab.slice(iC, fab.indexOf('\n    }', iC));
   assert.match(corpo, /dlogCapturar\('manual'\)/, 'o toque parou de registrar');
   assert.ok(!/showToast/.test(corpo), 'voltou o toast na captura — ele bloqueia o toque seguinte');
 });
@@ -295,7 +306,7 @@ test('o selo do FAB e o aviso do desligar contam SÓ o que a pessoa registrou', 
     'o aviso do desligar esqueceu as capturas guardadas de aberturas anteriores — desligar as apaga');
   assert.match(nao, /dlogJaBaixados\.has\(m\)/, 'o aviso deixou de saber quais já foram baixadas');
   // Baixado é MARCADO no momento; a contagem antiga mentia quando o anel girava.
-  assert.match(fatia('baixarDiagnostico'), /dlogMarcarBaixados\(\);/,
+  assert.match(fatia('baixarDiagnostico'), /dlogMarcarBaixados\(corpo\.entregue\.momentos\);/,
     'baixar o relatório parou de marcar o que foi baixado — o aviso do desligar mentiria');
   assert.doesNotMatch(semCom, /\bdlogBaixados\b/,
     'voltou o contador de baixados — com o anel cheio ele dizia "0 não baixados" com captura nova');
@@ -452,7 +463,16 @@ test('segurar PEGA o botão, com aviso, e arrastar não vira toque', () => {
     const pegar = fab.slice(iP, fab.indexOf('};', iP));
     assert.match(pegar, /classList\.add\('fab-pego'\)/, 'sumiu o aviso visual de pegou');
     assert.match(pegar, /navigator\.vibrate/, 'sumiu o aviso tátil de pegou');
-    assert.match(pegar, /devFabFixado = true/, 'pegar precisa fixar: o app não pode mover o que está na mão');
+    // O app não pode mover o que está na mão — mas quem garante isso é o
+    // `posicionarFabDev` ignorar o botão PEGO, não o pegar FIXAR: fixar no
+    // pegar deixava o toque devagar (segurou e soltou sem andar) fixando o
+    // botão pra sempre (auditoria de 2026-09-25; executado em test/fab-dev).
+    assert.doesNotMatch(pegar, /devFabFixado = true/, 'pegar voltou a fixar: toque devagar prende o botão');
+    const pos = semCom.slice(semCom.indexOf('function posicionarFabDev('));
+    // Com DEDO no botão: o "pego" sem dedo (o relógio órfão de dois dedos, D7 da
+    // auditoria de 2026-09-26) é solto aqui, e isso roda em test/fab-dev.
+    assert.match(pos.slice(0, 500), /if \(fab\.classList\.contains\('fab-pego'\)\) \{\s*if \(devFabDedo !== null\) return;/,
+        'o app voltou a poder mover o botão que está na mão');
     // e o CSS do aviso existe de verdade no arquivo COMPILADO — classe que só
     // existe no JS é indistinguível de classe certa se olhar só o JS
     assert.match(CSS, /#devFab\.fab-pego #devFabBtn\{[^}]*transform:scale/,
@@ -462,6 +482,7 @@ test('segurar PEGA o botão, com aviso, e arrastar não vira toque', () => {
     const mover = fab.slice(iM, fab.indexOf('};', iM));
     assert.match(mover, /pegar\(\);/, 'sair andando antes do relógio precisa pegar na hora');
     assert.match(mover, /arrastou = true/, 'o arrasto não se marca, e vira toque ao soltar');
+    assert.match(mover, /devFabFixado = true/, 'ARRASTAR tem que fixar: é a pessoa escolhendo o lugar');
     const iS = fab.indexOf('const soltar = ');
     const soltar = fab.slice(iS, fab.indexOf('};', iS));
     assert.match(soltar, /if \(arrastou\) return;/, 'arrastar voltou a registrar um momento');
@@ -503,6 +524,12 @@ test('todo id de camada vigiada pelo FAB existe no index.html', () => {
         assert.ok(HTML.includes(`id="${id}"`), `#${id} é vigiado mas não existe no index.html`);
     }
     assert.ok(lista.includes('...MODAL_IDS'), 'os modais saíram da lista de camadas vigiadas');
+    // D8 (auditoria de 2026-09-26): os PAINÉIS da fila vazia aparecem sem mexer em
+    // modal, lightbox ou tela — sem vigiá-los, o FAB ficava na borda do "Tentar
+    // novamente" e do "Agora não" do convite de instalar.
+    for (const id of ['loadErrorState', 'noMoreCards', 'installInvite']) {
+        assert.ok(ids.includes(id), `o painel #${id} não é vigiado: o FAB não reavalia o canto quando ele aparece`);
+    }
 });
 
 test('desligar o modo dev apaga também a posição fixada do FAB', () => {
@@ -638,13 +665,33 @@ test('a sentinela do mapa compara a CAIXA com o enquadramento', () => {
     + 'nenhuma linha no arquivo que o editor manda');
   // Ela precisa comparar as DUAS coisas: só olhar a caixa não distingue nada
   // (elas sempre batem), e só olhar o enquadramento não tem com o que comparar.
-  assert.match(s, /mapaPara[\s\S]{0,400}Math\.abs\([\s\S]{0,40}g\.w\)[\s\S]{0,120}g\.h\)/,
-    'a sentinela deixou de comparar o enquadramento com a caixa medida — é a '
-    + 'comparação inteira, porque as caixas sempre batem');
-  // Tolerância: `clientWidth` é inteiro arredondado (gotcha #34).
-  assert.match(s, /Math\.abs\([^)]*\)\s*>\s*1/,
-    'a sentinela ficou sem tolerância de 1px: `clientWidth` é arredondado e ela '
-    + 'passa a alertar por ruído de arredondamento');
+  // A comparação mora em `diagMapaForaDaCaixa`, EXECUTADA no teste abaixo.
+  assert.match(s, /if \(diagMapaForaDaCaixa\(g\)\)/,
+    'a sentinela deixou de comparar o enquadramento com a caixa medida');
+});
+
+test('as sentinelas de TAMANHO usam a caixa de layout: o arraste (girado) e a saída (encolhida) não disparam', () => {
+  // Auditoria de 2026-09-25: o `getBoundingClientRect` inclui a transformação.
+  // Toda captura `auto:arraste` com o mapa na frente trazia "mapa fora da caixa",
+  // e a saída do card pra cima, "alvo pequeno" no ↑ de 48px.
+  const app = semLinhaComentada(APP);
+  const fora = new Function(fatiarFn(app, 'diagMapaForaDaCaixa') + '\nreturn diagMapaForaDaCaixa;')();
+  const pequeno = new Function(fatiarFn(app, 'diagAlvoPequeno') + '\nreturn diagAlvoPequeno;')();
+  // Card girado no arraste: o rect cresce, a caixa de layout é a de sempre.
+  assert.equal(fora({ mapaPara: '359x337', w: 402, h: 381, cw: 359, ch: 337 }), false, 'o arraste acusou o mapa');
+  // CONTROLE: o defeito de verdade (desenhado pra outra caixa) segue acusado...
+  assert.equal(fora({ mapaPara: '400x240', w: 359, h: 337, cw: 359, ch: 337 }), true, 'o defeito real sumiu da sentinela');
+  // ...com a tolerância de 1px (clientWidth arredondado, gotcha #34)...
+  assert.equal(fora({ mapaPara: '359x337', w: 360, h: 338, cw: 360, ch: 338 }), false);
+  // ...e relatório antigo (sem `cw`) cai no rect, como antes.
+  assert.equal(fora({ mapaPara: '400x240', w: 359, h: 337 }), true);
+  // Botão de 48px encolhido pela animação de saída: não é alvo pequeno.
+  assert.equal(pequeno({ w: 43, h: 43, ow: 48, oh: 48 }), false, 'a animação acusou alvo pequeno');
+  assert.equal(pequeno({ w: 40, h: 40, ow: 40, oh: 40 }), true, 'CONTROLE: o alvo pequeno de verdade sumiu');
+  // E a geometria GRAVA os dois tamanhos de layout.
+  const g = fatiarFn(app, 'diagGeometria');
+  assert.match(g, /cw: e\.clientWidth, ch: e\.clientHeight/);
+  assert.match(g, /ow: e\.offsetWidth, oh: e\.offsetHeight/);
 });
 
 test('o card de fundo NÃO entra no alerta de toque interceptado', () => {
@@ -683,15 +730,15 @@ test('motivo FREQUENTE tem cota própria e não expulsa os outros do anel', () =
     'a cota do arraste sumiu: ele é o gesto CENTRAL do app e, a uma captura por 30s, '
     + 'toma as 12 vagas do anel em ~6 minutos — empurrando pra fora o momento do erro '
     + 'de JS e o da queda de sessão, que são os que se quer ler');
-  const cap = semLinhaComentada(APP.slice(APP.indexOf('function dlogCapturar(')));
-  // A poda tem que acontecer ANTES do corte do anel: se rodar depois, o
-  // `shift()` já tirou o mais antigo de OUTRO motivo, que é o dano que a cota
-  // existe pra evitar.
+  const cap = fatiarFn(semLinhaComentada(APP), 'dlogCapturar');
+  // A poda tem que acontecer ANTES do corte do anel: se rodar depois, o corte
+  // já tirou o mais antigo de OUTRO motivo, que é o dano que a cota existe pra
+  // evitar.
   const iCota = cap.indexOf('DLOG_COTA_POR_MOTIVO[motivo]');
-  const iShift = cap.indexOf('dlogMomentos.shift()');
-  assert.ok(iCota > 0 && iShift > 0, 'não achei as âncoras da poda');
-  assert.ok(iCota < iShift,
-    'a cota passou pra depois do corte do anel — aí o `shift()` já removeu o momento '
+  const iCorte = cap.indexOf('if (dlogMomentos.length > DLOG_MAX_MOMENTOS)');
+  assert.ok(iCota > 0 && iCorte > 0, 'não achei as âncoras da poda');
+  assert.ok(iCota < iCorte,
+    'a cota passou pra depois do corte do anel — aí o corte já removeu o momento '
     + 'de outro motivo e a cota não protege mais nada');
   // E ela poda o PRÓPRIO motivo, nunca varre o anel inteiro.
   assert.match(cap, /dlogMomentos\[i\]\.motivo === motivo/,
@@ -702,6 +749,138 @@ test('motivo FREQUENTE tem cota própria e não expulsa os outros do anel', () =
   // +47 KB no ZIP que o editor manda.
   assert.ok(/DLOG_MAX_MOMENTOS = 12/.test(app),
     'o teto do anel mudou — os números da cota foram medidos contra 12 vagas');
+});
+
+// ── R7-4-02: as capturas AUTOMÁTICAS não empurram as da PESSOA pra fora ─────
+// O anel cheio descartava o mais velho, fosse qual fosse: com o servidor fora
+// (quando se registra a tela pra relatar), cada busca que falha deixa duas
+// automáticas, e o 6º "Tentar de novo" levava as telas do toque do anel, da
+// cópia guardada e do relatório — com o número do botão ainda contando-as
+// (MEDIDO no navegador: 2 → 0 na 6ª tentativa, ~2,5 min). Aqui o `dlogCapturar`
+// RODA, com o resto do app de mentira.
+function anelDeCapturas() {
+  const selos = [];
+  const diario = [];
+  const deps = {
+    diagRedeAgora: () => ({}), diagOfflineAgora: () => ({}), dlogTelaAtual: () => ({ painel: 'card' }),
+    diagNoInstante: () => ({ alertas: [] }), document: { querySelectorAll: () => [], images: [] },
+    diagSemSegredoDePareamento: (s) => s, AppState: { queue: [] }, diagSeguro: (x) => x, dlogPlace: () => null,
+    domParaDiagnostico: () => '', DLOG_COTA_POR_MOTIVO: { 'auto:arraste': 2 },
+    DLOG_MAX_MOMENTOS: Number(/^const DLOG_MAX_MOMENTOS = (\d+);/m.exec(APP)[1]),
+    // As capturas JÁ BAIXADAS, marcadas como o `dlogMarcarBaixados` marca (R8-4-01).
+    dlogJaBaixados: new WeakSet(),
+    dlog: (k, o) => diario.push([k, o]), diagGuardarAbertura: () => {},
+  };
+  const chaves = Object.keys(deps);
+  const app = new Function(...chaves, 'selos', `let dlogMomentos = [];
+    function atualizarFabDev(o) { selos.push([o, dlogMomentos.filter((m) => m.motivo === 'manual').length]); }
+    ${fatiarFn(semLinhaComentada(APP), 'dlogCapturar')}
+    return { capturar: dlogCapturar, anel: () => dlogMomentos };`)(...chaves.map((k) => deps[k]), selos);
+  const baixar = () => { for (const m of app.anel()) deps.dlogJaBaixados.add(m); };
+  return { ...app, selos, diario, baixar, max: deps.DLOG_MAX_MOMENTOS };
+}
+
+test('R7-4-02: o anel cheio tira a captura AUTOMÁTICA mais velha — nunca a que a pessoa fez', () => {
+  const a = anelDeCapturas();
+  a.capturar('manual');
+  a.capturar('manual');
+  // Cada automática com o seu nome, pra se saber QUAL saiu.
+  for (let i = 0; i < a.max; i++) a.capturar('auto:falha' + i);
+  const motivos = a.anel().map((m) => m.motivo);
+  assert.equal(motivos.length, a.max, 'o anel passou do teto');
+  assert.equal(motivos.filter((m) => m === 'manual').length, 2, 'as telas que a PESSOA registrou saíram do anel pelas automáticas');
+  assert.deepEqual(motivos.slice(0, 2), ['manual', 'manual'], 'as telas da pessoa mudaram de lugar no anel');
+  // Das automáticas saíram as mais VELHAS (a 0 e a 1): ficam as 10 últimas, na ordem.
+  assert.deepEqual(motivos.slice(2), Array.from({ length: a.max - 2 }, (_, i) => 'auto:falha' + (i + 2)),
+    'das automáticas não saíram as mais VELHAS');
+});
+
+test('R7-4-02: o anel só de telas da pessoa — a automática que chega é a que sai; a tela nova tira a mais velha da pessoa', () => {
+  const a = anelDeCapturas();
+  for (let i = 0; i < a.max; i++) a.capturar('manual');
+  const antes = [...a.anel()];
+  a.capturar('auto:erroDeJs');
+  assert.deepEqual(a.anel(), antes, 'uma automática tomou o lugar de uma tela da pessoa');
+  a.capturar('manual');
+  assert.equal(a.anel().length, a.max);
+  assert.equal(a.anel()[0], antes[1], 'a tela nova da pessoa não tirou a mais VELHA dela');
+  assert.ok(a.anel().every((m) => m.motivo === 'manual'));
+  // E o diário diz que a automática nem coube (sem a marca, ele anotava uma
+  // captura que o relatório não traz).
+  const naoCoube = a.diario.find(([k, o]) => k === 'momento' && o.motivo === 'auto:erroDeJs');
+  assert.equal(naoCoube && naoCoube[1].foraDoAnel, true, 'o diário anotou como capturada a automática que não coube no anel');
+  assert.ok(a.diario.filter(([k, o]) => k === 'momento' && o.motivo === 'manual').every(([, o]) => !o.foraDoAnel),
+    'a captura que ENTROU no anel saiu marcada como fora dele');
+});
+
+// ── R8-4-01: o que JÁ FOI BAIXADO sai primeiro ──────────────────────────────
+// As telas baixadas seguem no anel (o número desta abertura as conta), mas já
+// foram entregues: a regra do R7-4-02 protege o que NÃO foi. Com o anel cheio de
+// telas da pessoa JÁ BAIXADAS, a automática que chegava — o erro de JS, a busca
+// que falhou — era a que saía, e não ia nem pra cópia guardada nem pro próximo
+// relatório (MEDIDO no navegador, r1 da auditoria: 12 toques, o download, um
+// erro de JS de verdade: a captura dele sumiu; com 11 toques, entrou).
+test('R8-4-01: com o anel cheio de capturas JÁ BAIXADAS, a nova entra — sai a baixada mais velha, de qualquer motivo', () => {
+  const a = anelDeCapturas();
+  for (let i = 0; i < a.max; i++) a.capturar('manual');
+  const baixadas = [...a.anel()];
+  a.baixar();
+  a.capturar('auto:erroDeJs');
+  assert.ok(a.anel().some((m) => m.motivo === 'auto:erroDeJs'),
+    'a captura automática (não entregue) não entrou no anel cheio de telas JÁ BAIXADAS — some sem ir em relatório nenhum');
+  assert.equal(a.anel().length, a.max, 'o anel passou do teto');
+  assert.ok(!a.anel().includes(baixadas[0]), 'não saiu a baixada mais VELHA');
+  assert.deepEqual(a.anel().slice(0, -1), baixadas.slice(1), 'saiu outra que não a baixada mais velha, ou a ordem mudou');
+  // A baixada sai de QUALQUER motivo, antes da automática não entregue: a
+  // automática baixada mais velha sai, e a automática nova (não entregue) fica.
+  const b = anelDeCapturas();
+  b.capturar('auto:buscaFalhou');
+  for (let i = 1; i < b.max; i++) b.capturar('manual');
+  b.baixar();
+  const autoBaixada = b.anel()[0];
+  b.capturar('auto:falhaAoCarregar');
+  assert.ok(!b.anel().includes(autoBaixada) && b.anel().some((m) => m.motivo === 'auto:falhaAoCarregar'));
+  // Uma tela NOVA da pessoa também tira a baixada, e nunca outra não entregue.
+  const c = anelDeCapturas();
+  for (let i = 0; i < 6; i++) c.capturar('manual');
+  c.baixar();
+  const ja = [...c.anel()];
+  for (let i = 0; i < 6; i++) c.capturar('auto:x' + i);   // 6 automáticas NÃO entregues: o anel enche (12)
+  c.capturar('manual');                                     // a 13ª: sai a baixada mais velha
+  assert.ok(!c.anel().includes(ja[0]), 'a tela nova da pessoa não tirou a baixada mais velha');
+  assert.equal(c.anel().filter((m) => /^auto:x/.test(m.motivo)).length, 6, 'a tela nova tirou uma automática NÃO entregue com baixada no anel');
+});
+
+test('R8-4-01 CONTROLES: sem baixada, segue o R7-4-02 — sai a automática mais velha; só telas da pessoa, a mais velha delas', () => {
+  // Telas da pessoa NÃO baixadas com automáticas: sai a automática mais velha (o R7-4-02).
+  const a = anelDeCapturas();
+  a.capturar('manual');
+  for (let i = 0; i < a.max - 1; i++) a.capturar('auto:a' + i);
+  a.capturar('auto:nova');
+  assert.deepEqual(a.anel().map((m) => m.motivo), ['manual', ...Array.from({ length: a.max - 2 }, (_, i) => 'auto:a' + (i + 1)), 'auto:nova']);
+  // O baixado de ANTES de capturas novas não protege as novas: com 11 baixadas e 1
+  // não baixada, a automática que chega tira a baixada mais velha (não a não baixada).
+  const b = anelDeCapturas();
+  for (let i = 0; i < b.max - 1; i++) b.capturar('manual');
+  b.baixar();
+  b.capturar('manual');
+  const naoEntregue = b.anel()[b.max - 1];
+  b.capturar('auto:erroDeJs');
+  assert.ok(b.anel().includes(naoEntregue), 'saiu a tela da pessoa NÃO entregue com baixada no anel');
+});
+
+test('R7-4-02: o número do botão é refeito a CADA captura — sem reposicionar o botão no meio do gesto', () => {
+  const a = anelDeCapturas();
+  a.capturar('manual');
+  a.capturar('auto:arraste');
+  assert.equal(a.selos.length, 2, 'uma captura não refez o número do botão');
+  assert.deepEqual(a.selos.map(([o]) => o), [{ reposicionar: false }, { reposicionar: false }],
+    'a captura reposicionou o botão (a do arraste acontece com o card no meio do gesto)');
+  assert.deepEqual(a.selos.map(([, n]) => n), [1, 1], 'o número foi refeito ANTES de a captura entrar (e sair) do anel');
+  // E o `atualizarFabDev` sabe não reposicionar.
+  const f = fatiarFn(semLinhaComentada(APP), 'atualizarFabDev');
+  assert.match(f, /^function atualizarFabDev\(\{ reposicionar = true \} = \{\}\)/);
+  assert.match(f, /if \(ligado && reposicionar\) posicionarFabDev\(\);/, 'o `reposicionar: false` não é respeitado');
 });
 
 // ── O que o relato de 2026-09-22 mostrou que faltava ──────────────────────
@@ -771,9 +950,13 @@ test('o mapa CONTA o tile que falhou antes de tirá-lo da tela', () => {
   const mapa = fatiarFn(semCom, 'renderMapa');
   assert.match(mapa, /box\.dataset\.tilesPedidos = String\(r\.tiles\.length\);/,
     'o mapa deixou de dizer quantos tiles pediu');
-  assert.match(mapa, /im\.onerror = \(\) => \{ registrarFalhaDeTile\(box, t\.url\); im\.remove\(\); \};/,
+  // (desde o R15-4-04 só conta a falha do desenho VIGENTE; a ordem segue: registra
+  // ANTES de tirar da tela)
+  assert.match(mapa, /im\.onerror = \(\) => \{\s*if \(box\._desenhoDoMapa === desenho\) registrarFalhaDeTile\(box, t\.url\);\s*im\.remove\(\);\s*\};/,
     'o tile que falha voltou a sumir SEM ser contado');
-  assert.match(semCom, /im\.onerror = \(\) => \{ registrarFalhaDeTile\(null, t\.url\); im\.remove\(\);/,
+  // (o do ampliado ganhou mais linhas — lembra o tile que falhou, L17 —, e a
+  // ordem que importa segue: registra ANTES de tirar da tela)
+  assert.match(semCom, /im\.onerror = \(\) => \{\s*registrarFalhaDeTile\(null, t\.url\);\s*im\.remove\(\);/,
     'o mapa ampliado voltou a apagar o tile sem registrar');
   assert.match(fatiarFn(semCom, 'diagGeometria'), /tiles: \{ pedidos: \+e\.dataset\.tilesPedidos, falharam:/,
     'a geometria parou de levar a contagem de tiles do mapa');
@@ -794,8 +977,12 @@ test('o mapa CONTA o tile que falhou antes de tirá-lo da tela', () => {
 
 test('o relatório traz o offline, o service worker pela boca dele e o teto dos recursos', () => {
   const corpo = fatiarFn(semCom, 'diagCorpo');
-  assert.match(corpo, /offline: await diagOffline\(\),/, 'a seção `offline` saiu do relatório');
-  assert.match(corpo, /sw\.proprio = await diagServiceWorker\(\);/, 'o service worker deixou de ser perguntado');
+  // (R17-4-03) a leitura da seção corre contra o prazo do relatório, mas a seção segue no arquivo.
+  assert.match(corpo, /offline: await offlinePromessa\.catch\(/, 'a seção `offline` saiu do relatório');
+  assert.match(corpo, /const offlinePromessa = lerLocal\('offline \(base e cache do mapa\)', \(\) => diagOffline\(\)\);/,
+    'a leitura da seção `offline` deixou de correr contra o prazo do relatório (R17-4-03)');
+  assert.match(corpo, /const swProprioPromessa = diagServiceWorker\(\);/, 'o service worker deixou de ser perguntado (ou voltou a ser perguntado DEPOIS das esperas locais, R18-4-01)');
+  assert.match(corpo, /sw\.proprio = await swProprioPromessa;/, 'a resposta do worker não entra no arquivo');
   assert.match(corpo, /recursosInfo: \{ n: recursos\.length, encheu: diagRecursosCheio,/,
     'o relatório deixou de dizer se a lista de recursos bateu no teto');
   // Quem nunca ligou o offline: nada de abrir a base (abrir CRIA a base).
@@ -837,7 +1024,7 @@ test('cada captura leva o `computado` e os ALERTAS daquele instante', () => {
   assert.ok(iTela > 0 && iInst > iTela, 'a captura deixou de rodar as sentinelas no instante');
   assert.ok(iDom > iInst, 'as sentinelas têm que rodar ANTES de copiar o `dom` (é o mesmo instante)');
   const inst = fatiarFn(semCom, 'diagNoInstante');
-  assert.match(inst, /const computado = diagComputado\(\);\s+return \{ computado, alertas: diagSentinelas\(computado\) \};/,
+  assert.match(inst, /const computado = diagComputado\(\);\s+const alertas = diagSentinelas\(computado\);[\s\S]*?return \{ computado, alertas \};/,
     'as sentinelas da captura têm que ler o MESMO `computado` que vai junto');
   // Sentinela quebrada não pode derrubar a captura: vira alerta, como no relatório.
   assert.match(inst, /catch \(e\) \{\s+return \{ alertas: \[\{ chave: '_erro'/,
@@ -929,11 +1116,44 @@ test('o DOM do diagnóstico vai INTEIRO (modo dev), e passa por UM lugar só', (
   assert.equal((codigo.match(/dom: domParaDiagnostico\(\)/g) || []).length, 2, 'o relatório e as capturas têm que usar o helper');
 });
 
+// ── O script que a BORDA injeta no HTML (v2026.09.25-05) ─────────────────────
+// A régua que o `cacheVsRede` e o `codigo` usam: a constante e a função, juntas.
+const BORDA = () => {
+  const i = APP.indexOf('const DIAG_INJECAO_DA_BORDA');
+  const f = APP.indexOf('function diagSemInjecaoDaBorda', i);
+  assert.ok(i > 0 && f > i, 'sumiu a régua da injeção da borda');
+  return APP.slice(i, APP.indexOf('\n}\n', f) + 3);
+};
+// A forma MEDIDA em produção em 2026-09-25 (valores trocados por sintéticos do
+// mesmo formato — são token e hora por resposta, não nossos).
+const INJETADO = (r, t) => `<script>window.__CF$cv$params={r:'${r}',t:'${t}',u:'01a0dabc24147031a351eb3a5367a672',ut:'x-1790376158-1.2.1.1-_y',i:60};(function(){if(!document.body)return;var s=document.createElement('script');s.src='/cdn-cgi/challenge-platform/scripts/precursor/main.js';document.head.appendChild(s);})();</script>`;
+
+test('código: o `/` servido pelo Cloudflare é comparado SEM o script que a borda injeta a cada resposta', () => {
+  const tirar = new Function(`${BORDA()}\nreturn diagSemInjecaoDaBorda;`)();
+  const nosso = '<!DOCTYPE html><html><body><script defer src="js/min/app.js"></script>';
+  const a = nosso + INJETADO('a40d8b0cd819f90b', 'MTc5MDM3NjE1OA==') + '</body> </html>';
+  const b = nosso + INJETADO('a40d8b1a8a795949', 'MTc5MDM3NjE2MA==') + '</body> </html>';
+  assert.equal(a.length, b.length, 'a fixture perdeu a forma medida (mesmo tamanho, bytes diferentes)');
+  assert.notEqual(a, b);
+  assert.equal(tirar(a), tirar(b), 'duas respostas do MESMO código diferem pela injeção da borda');
+  // Controle: uma mudança no NOSSO código continua sendo diferença.
+  const c = nosso.replace('app.js', 'app2.js') + INJETADO('a40d8b0cd819f90b', 'MTc5MDM3NjE1OA==') + '</body> </html>';
+  assert.notEqual(tirar(a), tirar(c), 'a régua engoliu uma diferença real do nosso HTML');
+  // E sem injeção (VM, ou `wrangler dev`) nada muda.
+  assert.equal(tirar(nosso), nosso);
+  // Os DOIS lados passam pela régua antes do hash, e o `codigo` usa a mesma.
+  const corpo = fatiarFn(APP.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n'), 'diagCorpo');
+  assert.match(corpo, /const \[la, lb\] = \[diagSemInjecaoDaBorda\(local\), diagSemInjecaoDaBorda\(remoto\)\];\s*const \[ha, hb\] = \[await hash\(la\), await hash\(lb\)\];/,
+    'o cacheVsRede voltou a comparar com o script da borda');
+  assert.match(fatiarFn(APP, 'diagCodigoEnxuto'), /c\.hash = await hash\(diagSemInjecaoDaBorda\(c\.corpo\)\);/,
+    'o hash do `codigo` deixou de ser o mesmo do cacheVsRede');
+});
+
 // ── O `codigo` enxuto (v2026.09.24-02) ───────────────────────────────────────
 // O JS e o HTML inteiros eram quase metade do .zip e respondiam uma pergunta só:
 // "este aparelho roda versão velha?". Tamanho, hash e versão respondem igual.
 test('código: tamanho, hash e versão de cada arquivo — o CORPO, só do CSS (é dele que o diag-tela remonta a tela)', async () => {
-  const enxuto = new Function(`return async ${fatiarFn(APP, 'diagCodigoEnxuto')};`)();
+  const enxuto = new Function(`${BORDA()}\nreturn async ${fatiarFn(APP, 'diagCodigoEnxuto')};`)();
   const hash = async (t) => 'h' + t.length;
   const HTML_SERVIDO = '<!DOCTYPE html><html>' + 'x'.repeat(50) + '</html>';
   const codigo = {
@@ -962,7 +1182,7 @@ test('código: o enxugamento roda DEPOIS do cacheVsRede, que precisa do corpo pr
   const chamadas = corpo.match(/^\s+await diagCodigoEnxuto\(codigo, hash\);$/gm) || [];
   assert.equal(chamadas.length, 1, 'o relatório tem que enxugar o `codigo` exatamente uma vez');
   const iEnxuto = corpo.search(/^\s+await diagCodigoEnxuto\(codigo, hash\);$/m);
-  const iComparar = corpo.indexOf('cacheVsRede[u] = { aparelho: ha, servidor: hb');
+  const iComparar = corpo.indexOf('const comparados = await Promise.all(urlsComparadas.map(comparar));');
   assert.ok(iComparar > 0 && iEnxuto > iComparar, 'enxugar ANTES de comparar deixa todo arquivo "sem corpo local"');
 });
 
@@ -970,7 +1190,655 @@ test('código: o cacheVsRede compara SÓ o que entrou no `codigo` — a fonte e 
   const corpo = fatiarFn(APP.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n'), 'diagCorpo');
   const i = corpo.indexOf('const cacheVsRede = {};');
   assert.ok(i > 0, 'sumiu o cacheVsRede');
-  const laco = /for \(const u of ([^)]+\)?)\) \{/.exec(corpo.slice(i));
-  assert.ok(laco, 'sumiu o laço do cacheVsRede');
-  assert.equal(laco[1], 'Object.keys(codigo)', 'o cacheVsRede voltou a comparar o que o coletor pula de propósito');
+  assert.match(corpo.slice(i), /const urlsComparadas = Object\.keys\(codigo\);/,
+    'o cacheVsRede voltou a comparar o que o coletor pula de propósito');
+});
+
+// ── A ORIGEM FORA DO AR (auditoria de 2026-10-01, R5-4-3) ─────────────────────
+// Com a origem fora, quem responde à releitura `?diag-rede` é a BORDA, com a
+// página de erro dela (502, ~50 bytes). O `comparar` fazia o hash dela como se
+// fosse o arquivo do servidor e todo arquivo saía "diferente": a triagem dizia
+// "o aparelho roda código diferente do servidor" justo no caso em que o app
+// instalado abre da cópia guardada. Aqui roda o `comparar` DE VERDADE (fatiado
+// do `diagCorpo`), com uma rede de mentira.
+test('código: a resposta que não é OK (a página de erro da borda, um 404) fica "sem conferir", com o status — não "diferente"', async () => {
+  const semCom = APP.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  const ini = semCom.indexOf('const comparar = async (u) => {');
+  assert.ok(ini > 0, 'sumiu o `comparar` do cacheVsRede');
+  let prof = 0, fim = -1;
+  for (let k = semCom.indexOf('{', semCom.indexOf('=>', ini)); k < semCom.length; k++) {
+    if (semCom[k] === '{') prof++;
+    else if (semCom[k] === '}' && --prof === 0) { fim = k + 1; break; }
+  }
+  const fonte = semCom.slice(semCom.indexOf('async (u)', ini), fim);
+  const U = 'https://x.dev/js/min/version.js';
+  const LOCAL = 'const APP_VERSION="2026100101";';
+  let lidos = 0;
+  const resposta = (status, corpo) => ({ ok: status >= 200 && status < 300, status, text: async () => { lidos++; return corpo; } });
+  const comparar = (r) => new Function('codigo', 'diagFetch', 'diagSemInjecaoDaBorda', 'diagFalhaDaLeitura', 'hash', 'prazo',
+    `return ${fonte};`)({ [U]: { corpo: LOCAL } }, async () => r, (t) => t, (e) => ({ erro: String(e && e.message) }),
+    async (t) => 'h' + t.length + ':' + t, Infinity);
+  const borda = await comparar(resposta(502, '<html><body><h1>502 Bad Gateway</h1></body></html>'))(U);
+  assert.deepEqual(borda, { erro: 'http 502', http: 502 }, 'a página de erro da borda foi comparada como se fosse o arquivo do servidor');
+  assert.equal(lidos, 0, 'o corpo da página de erro foi lido (e comparado) à toa');
+  assert.deepEqual(await comparar(resposta(404, 'Not Found'))(U), { erro: 'http 404', http: 404 });
+  // CONTROLES: com o servidor de pé, o mesmo arquivo é igual e outro é diferente.
+  const igual = await comparar(resposta(200, LOCAL))(U);
+  assert.equal(igual.igual, true, 'CONTROLE: o arquivo igual deixou de ser igual');
+  assert.equal(igual.http, 200);
+  const outro = await comparar(resposta(200, 'const APP_VERSION="2026093001";'))(U);
+  assert.equal(outro.igual, false, 'CONTROLE: o arquivo diferente deixou de ser diferente');
+});
+
+test('desligar o modo dev e "Sair" levam o CORPO das chamadas (texto de conversa), não só a resposta', () => {
+  // Auditoria de 2026-09-25: com o dev ligado o `corpoReq` leva o texto da
+  // conversa; ele sobrevivia ao desligar e ao "Sair", e ia no relatório de quem
+  // entrasse depois e ligasse o dev de novo.
+  const APP = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  assert.match(APP, /delete c\.corpoResposta; delete c\._bytes; delete c\.corpoReq;/);
+  const sair = APP.slice(APP.indexOf('async function handleLogout'), APP.indexOf('function resetQueue'));
+  assert.match(sair, /API\.chamadas\.length = 0;/, 'o "Sair" deixou o anel de chamadas da sessão anterior');
+});
+
+test('desligar o modo dev com captura não baixada: o 1º toque AVISA e não apaga; o 2º desliga', () => {
+  // O toast dizia "baixe antes de desligar" no MESMO instante em que as
+  // capturas eram apagadas (auditoria de 2026-09-25).
+  const APP = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  const i = APP.indexOf("$('prefDevModeActive').addEventListener('change'");
+  const h = APP.slice(i, APP.indexOf('renderUndoGateUI();', i));
+  // A chamada do aviso, qualquer que seja a forma (singular/plural por chave).
+  const mAviso = /showToast\(t\([^;]*'toast\.devPerdeCaptura/.exec(h);
+  const iAviso = mAviso ? mAviso.index : -1;
+  const iVolta = h.indexOf('e.target.checked = true;');
+  const iApaga = h.indexOf('dlogApagar();');
+  assert.ok(iVolta > 0 && iAviso > iVolta, 'o primeiro toque não devolve o interruptor');
+  assert.ok(h.slice(iAviso, iApaga).includes('return;'), 'depois do aviso ele APAGA na mesma hora');
+});
+
+// ── A cópia segura do estado (auditoria de 2026-09-25) ───────────────────────
+const SEGURO = () => {
+  const c = /^const DIAG_FUNDO = \d+;$/m.exec(APP);
+  assert.ok(c, 'sumiu o DIAG_FUNDO');
+  return new Function(`${c[0]}\n${fatiarFn(APP, 'diagSeguro')}\nreturn diagSeguro;`)();
+};
+
+test('diagSeguro: a coordenada de uma entrada proposta chega inteira, e o mesmo objeto em dois ramos não vira [circular]', () => {
+  const seguro = SEGURO();
+  // O caminho do relatório: `appState` (0) → queue (1) → [0] (2) → changes (3) →
+  // [0] (4) → delta (5) → add (6) → [0] (7) → point (8) → coordinates (9).
+  const ponto = { type: 'Point', coordinates: [-46.6333, -23.5505] };
+  const place = { venueID: 'v1', changes: [{ field: 'entryExitPoints', delta: { add: [{ point: ponto }] } }] };
+  const r = seguro({ queue: [place], selecionado: ponto });
+  assert.deepEqual(r.queue[0].changes[0].delta.add[0].point.coordinates, [-46.6333, -23.5505],
+    'a coordenada da entrada proposta virou [fundo]');
+  assert.deepEqual(r.selecionado, { type: 'Point', coordinates: [-46.6333, -23.5505] },
+    'o mesmo objeto noutro ramo virou [circular] sem ser ciclo');
+  // Controle: ciclo de verdade segue cortado (é o que impede o `stringify` de lançar).
+  const a = { nome: 'a' }; a.eu = a; a.filhos = [a];
+  const ra = seguro(a);
+  assert.equal(ra.eu, '[circular]');
+  assert.equal(ra.filhos[0], '[circular]');
+  assert.doesNotThrow(() => JSON.stringify(ra));
+  // E o fundo segue existindo.
+  const raiz = {}; let x = raiz; for (let i = 0; i < 30; i++) { x.f = {}; x = x.f; }
+  assert.match(JSON.stringify(seguro(raiz)), /"\[fundo\]"/, 'sem teto de profundidade');
+});
+
+test('captura: os filtros vão como CÓPIA — o Aplicar muda o objeto no LUGAR', () => {
+  const seguro = SEGURO();
+  const filtros = { countryId: '30', types: ['NEW_PLACE'] };
+  const foto = seguro(filtros);
+  filtros.countryId = '73'; filtros.types.push('NEW_PHOTO');   // o que o `applyFiltersFromModal` faz
+  assert.deepEqual(foto, { countryId: '30', types: ['NEW_PLACE'] }, 'a captura mudou junto com o filtro');
+  assert.match(fatiarFn(semCom, 'dlogCapturar'), /filtros: diagSeguro\(AppState\.filters\),/,
+    'a captura voltou a guardar a referência viva dos filtros');
+});
+
+test('o aviso de ResizeObserver não vira "erro de JS" nem captura automática no diagnóstico', () => {
+  const ouvintes = {};
+  const erros = [];
+  const capturas = [];
+  const ini = APP.indexOf('const RUIDO_RESIZE_OBSERVER');
+  const ruido = APP.slice(ini, APP.indexOf('\n', ini));
+  const cap = new Function('addEventListener', 'performance', 'console', 'dfato', 'dlog', 'dlogCapturarAuto',
+    'diagErros', 'navigator', 'PerformanceObserver', 'document', 'innerWidth', 'innerHeight', 'devicePixelRatio',
+    `${ruido}\nlet diagRecursosCheio = false;\n${fatiarFn(APP, 'diagCapturarErros')}\nreturn diagCapturarErros;`)(
+    (tipo, fn) => { (ouvintes[tipo] = ouvintes[tipo] || []).push(fn); },
+    { addEventListener() {} }, { error() {}, warn() {} }, () => {}, () => {},
+    (m) => capturas.push(m), erros, { onLine: true }, class { observe() {} },
+    { getElementById: () => null }, 400, 800, 2);
+  cap();
+  const disparar = (msg) => (ouvintes.error || []).forEach((fn) => fn({ message: msg, filename: 'x.js', lineno: 1 }));
+  disparar('ResizeObserver loop completed with undelivered notifications.');
+  assert.equal(erros.length, 0, 'o ruído do ResizeObserver entrou como erro de JS');
+  assert.equal(capturas.length, 0, 'o ruído do ResizeObserver disparou uma captura automática');
+  // Controle: erro de verdade segue entrando e capturando.
+  disparar('TypeError: x is not a function');
+  assert.equal(erros.length, 1);
+  assert.deepEqual(capturas, ['erroDeJs']);
+});
+
+// ── O segredo do pareamento fica fora do relatório (auditoria de 2026-09-25) ──
+// Ele vale uma sessão NOVA por 5 minutos e não depura nada. O modo dev leva a
+// conversa inteira; credencial que não ajuda a depurar, não.
+test('modo dev: a resposta do pareamento vai SEM o segredo, e o sessionToken de qualquer resposta sai como no pedido', async () => {
+  const api = montar({ corpo: '{"success":true,"code":"SEGREDO20SIMBOLOSXYZ","curto":"K7Q9ZX","expiresIn":300}', devAtivo: true });
+  await api._post('parear', { sessionToken: 'x', action: 'create' });
+  const r = api.chamadas[0].corpoResposta;
+  assert.ok(!r.includes('SEGREDO20SIMBOLOSXYZ') && !r.includes('K7Q9ZX'), 'o segredo do pareamento foi pro registro');
+  assert.match(r, /"code":"\[código de pareamento\]"/);
+  assert.match(r, /"expiresIn":300/, 'o prazo é o que depura: fica');
+  const login = montar({ corpo: '{"success":true,"sessionToken":"TOKEN_NOVO_Q","profile":{"rank":5}}', devAtivo: true });
+  await login._post('testar-cookies', { cookies: 'c' });
+  assert.ok(!login.chamadas[0].corpoResposta.includes('TOKEN_NOVO_Q'), 'o token da resposta do login foi pro registro');
+  assert.match(login.chamadas[0].corpoResposta, /"rank":5/, 'o resto da resposta tem que ficar');
+  // Controle: resposta sem segredo nenhum passa INTEIRA (inclusive a que não é JSON-com-segredo).
+  const fila = montar({ corpo: '{"success":true,"places":[{"name":"LOCAL_X"}]}', devAtivo: true });
+  await fila._post('buscar-places', { sessionToken: 'x' });
+  assert.equal(fila.chamadas[0].corpoResposta, '{"success":true,"places":[{"name":"LOCAL_X"}]}');
+});
+
+// ── A casa e o trabalho no relatório, e o LEIA-ME (auditoria de 2026-09-29, D1) ──
+// A resposta do `perfil` traz `referencias.casa`/`trabalho` (a ordem "Perto de
+// casa"), e com o modo dev ela entra INTEIRA no registro de chamadas: a decisão
+// de 2026-09-24 é que privacidade não é critério no modo dev. O que não pode é
+// o arquivo levar a posição da casa de alguém SEM DIZER — o LEIA-ME aparece na
+// listagem de qualquer visualizador de ZIP. A frase anda JUNTO com o conteúdo,
+// nos dois sentidos: se a resposta um dia deixar de levar as coordenadas, a
+// frase tem que sair, senão é o app mentindo sobre si do outro lado.
+function dicionario() {
+  const ctx = { navigator: { language: 'pt' }, document: { documentElement: {} } };
+  vm.createContext(ctx);
+  vm.runInContext(readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8'), ctx);
+  return ctx.I18N_DICT;
+}
+test('modo dev: a resposta do perfil leva a casa e o trabalho, e o LEIA-ME diz isso nos 4 idiomas, com o termo da tela', async () => {
+  const CASA = [-23.5617123, -46.6559876], TRAB = [-22.9068467, -43.1728965];
+  const corpo = JSON.stringify({ success: true, profile: { id: 1, rank: 5 }, referencias: { casa: CASA, trabalho: TRAB } });
+  const ligado = montar({ corpo, devAtivo: true });
+  await ligado._post('perfil', { sessionToken: 'x' });
+  const r = String(ligado.chamadas[0].corpoResposta || '');
+  const leva = r.includes(String(CASA[0])) && r.includes(String(TRAB[0]));
+  // CONTROLE: sem o modo dev a resposta não entra — por isso a frase é condicionada a ele.
+  const desligado = montar({ corpo, devAtivo: false });
+  await desligado._post('perfil', { sessionToken: 'x' });
+  assert.equal(desligado.chamadas[0].corpoResposta, undefined, 'CONTROLE: a resposta do perfil entrou no registro SEM o modo dev');
+  const D = dicionario();
+  // O TERMO é o que a tela usa (a dica da ordem por distância), e o nome do modo o das Preferências.
+  const TERMOS = { pt: ['casa', 'trabalho'], en: ['home', 'work'], es: ['casa', 'trabajo'], fr: ['maison', 'travail'] };
+  assert.deepEqual(Object.keys(D).sort(), Object.keys(TERMOS).sort(), 'idioma novo: diga aqui como a tela dele chama casa e trabalho');
+  for (const [l, termos] of Object.entries(TERMOS)) {
+    const dica = D[l]['filters.sort.hint.perfil'].toLowerCase();
+    for (const w of termos) assert.ok(dica.includes(w), `PRÉ-CONDIÇÃO (${l}): a tela não chama de "${w}" — o teste precisa do termo DELA`);
+    const leiame = D[l]['diag.leiame'].replace(/\s+/g, ' ').toLowerCase();
+    const menciona = termos.every((w) => new RegExp(`\\b${w}\\b`).test(leiame));
+    assert.equal(menciona, leva, leva
+      ? `o LEIA-ME (${l}) não diz que o arquivo leva a posição de casa e a do trabalho`
+      : `o LEIA-ME (${l}) diz que o arquivo leva casa e trabalho — e ele não leva mais`);
+    const modo = D[l]['prefs.devMode.label'].replace(/\s*🛠️\s*$/u, '').toLowerCase();
+    assert.ok(leiame.includes(modo), `o LEIA-ME (${l}) não diz que é com o "${modo}" ligado — desligado, a posição não vai`);
+  }
+});
+
+test('a cópia da página e as capturas saem SEM o segredo do pareamento (o do QR e o digitável)', () => {
+  const fmt = fatiarFn(APP, 'formatarCodigoPareamento');
+  const montar = (doc, emitidos = []) => new Function('document', 'pareamentosEmitidos', `const PAIR_CODE_LEN = 6, PAIR_CODE_GRUPO = 3;
+    ${fmt}\n${fatiarFn(APP, 'diagSemSegredoDePareamento')}\n${fatiarFn(APP, 'domParaDiagnostico')}
+    return { dom: domParaDiagnostico, filtro: diagSemSegredoDePareamento };`)(doc, new Set(emitidos));
+  const pagina = '<html><body><div id="pairCode" data-raw="SEGREDO20SIMBOLOSXYZ" data-curto="K7Q9ZX">K7Q-9ZX</div><p>resto</p></body></html>';
+  const comModal = { documentElement: { outerHTML: pagina },
+                     getElementById: (id) => (id === 'pairCode' ? { dataset: { raw: 'SEGREDO20SIMBOLOSXYZ', curto: 'K7Q9ZX' } } : null) };
+  const saida = montar(comModal).dom();
+  for (const x of ['SEGREDO20SIMBOLOSXYZ', 'K7Q9ZX', 'K7Q-9ZX']) assert.ok(!saida.includes(x), `o segredo foi pra cópia da página: ${x}`);
+  assert.match(saida, /<p>resto<\/p>/, 'o resto da página tem que ficar');
+  // D1 (auditoria de 2026-09-26): com o modal FECHADO o `data-raw` some — e o
+  // link do toast copiável (quando a área de transferência falha) segue na
+  // tela. O filtro é pelo que o aparelho EMITIU, não pelo que o modal mostra.
+  const toast = '<div id="toastContainer"><div class="toast"><span>https://app.x/#pair=SEGREDO20SIMBOLOSXYZ</span></div></div>';
+  const fechado = { documentElement: { outerHTML: '<html><body><div id="pairCode" data-i18n="x">······</div>' + toast + ' e o curto K7Q-9ZX</body></html>' },
+                    getElementById: (id) => (id === 'pairCode' ? { dataset: {} } : null) };
+  const semModal = montar(fechado, ['SEGREDO20SIMBOLOSXYZ', 'K7Q9ZX']);
+  const dom = semModal.dom();
+  for (const x of ['SEGREDO20SIMBOLOSXYZ', 'K7Q9ZX', 'K7Q-9ZX']) assert.ok(!dom.includes(x), `com o modal fechado, o segredo foi pra cópia da página: ${x}`);
+  assert.match(dom, /#pair=\[código de pareamento\]/);
+  assert.equal(semModal.filtro('https://app.x/#pair=SEGREDO20SIMBOLOSXYZ'), 'https://app.x/#pair=[código de pareamento]',
+    'o texto do toast (a lista de toasts da captura) não passa pelo filtro');
+  // Controle: sem pareamento nenhum, a página sai idêntica.
+  const semPar = { documentElement: { outerHTML: '<html>x K7Q9ZX</html>' }, getElementById: () => ({ dataset: {} }) };
+  assert.equal(montar(semPar).dom(), '<html>x K7Q9ZX</html>');
+  // A captura: a lista de toasts passa pelo MESMO filtro, e o QR não é desenhado.
+  const cap = fatiarFn(semCom, 'dlogCapturar');
+  assert.match(cap, /\.map\(\(e\) => diagSemSegredoDePareamento\(\(e\.textContent \|\| ''\)\.trim\(\)\)\.slice\(0, 120\)\)/,
+    'a lista de toasts da captura deixou de passar pelo filtro do segredo');
+  assert.match(cap, /if \(c\.id === 'pairQr'\) return \{ classe: c\.className, omitido: 'QR do pareamento' \};/,
+    'a captura voltou a levar o QR do pareamento');
+});
+
+// D1: o toast copiável do pareamento não vai pro DIÁRIO. O `showToast` de
+// verdade (fatiado), num DOM mínimo: o diário anota o aviso e NUNCA o texto.
+test('o toast SENSÍVEL (o link do pareamento) entra no diário sem o texto — e o copiável do pareamento é sensível', () => {
+  const diario = [];
+  const el = () => ({ style: {}, className: '', innerHTML: '', title: '', children: [],
+    addEventListener() {}, querySelector: () => null, contains: () => false, remove() {} });
+  const container = { children: [], appendChild(x) { this.children.push(x); }, removeChild() {}, get firstElementChild() { return null; } };
+  const showToast = new Function('dlog', 'document', 'escapeHtml', 't', 'setTimeout', 'clearTimeout', 'window', 'TOAST_COPIAVEL_RECHECA_MS',
+    fatiarFn(APP, 'showToast') + '\nreturn showToast;')(
+    (k, d) => diario.push({ k, ...d }), { getElementById: () => container, createElement: el },
+    (x) => String(x), (k) => k, () => 1, () => {}, {}, 1500);
+  showToast('https://app.x/#pair=SEGREDO20SIMBOLOSXYZ', 'info', 30000, null, { copiavel: true, sensivel: true });
+  showToast('Já tratado por outro editor', 'info');
+  assert.equal(diario.length, 2, 'PRÉ-CONDIÇÃO: o funil do diário não anotou os dois avisos');
+  assert.ok(!JSON.stringify(diario[0]).includes('SEGREDO20SIMBOLOSXYZ'), 'o link do pareamento foi pro diário');
+  assert.equal(diario[0].sensivel, true, 'o diário tem que dizer que houve um aviso sensível');
+  assert.equal(diario[1].txt, 'Já tratado por outro editor', 'CONTROLE: o toast comum deixou de ir pro diário com o texto');
+  assert.match(fatiarFn(APP, 'copiarLinkPareamento'), /showToast\(url, 'info', TOAST_COPIAVEL_MS, null, \{ copiavel: true, sensivel: true \}\);/,
+    'o toast do link do pareamento deixou de ser sensível');
+});
+
+test('o resumo não conta o "já tratado" como falha (relatório v10)', () => {
+  // Auditoria em produção de 2026-09-26: a única "falha" de 10 chamadas era um ✕
+  // que o Waze respondeu "já tratado" — pro app, o pedido resolvido.
+  const helpers = fatiarFn(semCom, 'chamadaJaTratada') + '\n' + fatiarFn(semCom, 'chamadaFalhou');
+  const { chamadaJaTratada, chamadaFalhou } = new Function(helpers + '\nreturn { chamadaJaTratada, chamadaFalhou };')();
+  const ja = { ok: false, errorCategory: 'already_processed' };
+  const naoAchou = { ok: false, errorCategory: 'not_found' };
+  const rede = { ok: false, errorCategory: 'transient' };
+  const semCategoria = { ok: false };
+  const ok = { ok: true };
+  assert.equal(chamadaFalhou(ja), false, '"já tratado" contado como falha');
+  assert.equal(chamadaFalhou(naoAchou), false, '"não encontrado" (outro editor resolveu) contado como falha');
+  assert.equal(chamadaFalhou(rede), true, 'a falha de rede deixou de contar');
+  assert.equal(chamadaFalhou(semCategoria), true, 'falha sem categoria deixou de contar');
+  assert.equal(chamadaFalhou(ok), false);
+  assert.equal(chamadaJaTratada(ja) && chamadaJaTratada(naoAchou), true);
+  assert.equal(chamadaJaTratada(rede) || chamadaJaTratada(ok), false);
+  const corpo = fatiarFn(semCom, 'diagCorpo');
+  assert.match(corpo, /falhas: \(API\.chamadas \|\| \[\]\)\.filter\(chamadaFalhou\)\.length,/,
+    'o `resumo.falhas` voltou a contar o "já tratado"');
+  assert.match(corpo, /jaTratadas: \(API\.chamadas \|\| \[\]\)\.filter\(chamadaJaTratada\)\.length,/);
+  assert.match(corpo, /rotasQueFalharam: \[\.\.\.new Set\(\(API\.chamadas \|\| \[\]\)\.filter\(chamadaFalhou\)/,
+    '`rotasQueFalharam` voltou a listar a rota do "já tratado"');
+});
+
+// ── D10 (auditoria de 2026-09-26): o 2º relatório na mesma página ───────────
+// O `cacheVsRede` relê cada arquivo com `?diag-rede=1`, e essas leituras ficam
+// na lista de recursos da página: o relatório SEGUINTE as pegava como código
+// (23 arquivos em vez de 11, o dobro de requisições, o CSS duas vezes).
+test('código: o `codigo` é só o código nosso — sem a leitura do relatório anterior, fonte, imagem ou /api', () => {
+  const diagUrlsDoCodigo = new Function(fatiarFn(APP, 'diagUrlsDoCodigo') + '\nreturn diagUrlsDoCodigo;')();
+  const meu = 'https://x.dev';
+  const daPagina = [meu + '/js/min/app.js', meu + '/css/app.css', meu + '/fonts/inter-latin-wght-normal.woff2',
+    meu + '/icons/icon-192.svg', meu + '/api/perfil', meu + '/manifest.json',
+    meu + '/?diag-rede=1', meu + '/css/app.css?diag-rede=1', meu + '/manifest.json?diag-rede=1',
+    meu + '/js/min/app.js&diag-rede=1', 'https://outro.dev/x.js', meu + '/css/app.css'];
+  assert.deepEqual(diagUrlsDoCodigo(daPagina, meu, meu + '/'),
+    [meu + '/', meu + '/service-worker.js', meu + '/js/min/app.js', meu + '/css/app.css', meu + '/icons/icon-192.svg', meu + '/manifest.json'],
+    'o `codigo` levou o que não é código — a leitura do relatório anterior, fonte ou /api');
+  // CONTROLE: sem nada do relatório anterior, a lista é a mesma de antes.
+  assert.deepEqual(diagUrlsDoCodigo(daPagina.filter((u) => !u.includes('diag-rede')), meu, meu + '/'),
+    diagUrlsDoCodigo(daPagina, meu, meu + '/'));
+  // E o relatório usa esta lista (e não outra montada à parte) — com o código do
+  // DOCUMENTO na frente da lista de recursos da sessão (R9-1-01, abaixo).
+  assert.match(fatiarFn(APP, 'diagCorpo'),
+    /const urlsDoCodigo = diagUrlsDoCodigo\(\[\.\.\.diagUrlsDoDocumento\(\), \.\.\.recursos\.map\(\(r\) => r\.url\)\], meu, location\.href\);/,
+    'o `codigo` deixou de sair do `diagUrlsDoCodigo` (ou deixou de ler o código do documento)');
+});
+
+// ── R9-1-01 = R9-4-04 (auditoria da rodada 9): o código depois do "Sair" ──────
+// A lista do `codigo` saía SÓ da lista de recursos da sessão, e a troca de conta
+// (e o "Sair" seguido de outro login na mesma página) a limpa: o `app.css` e os
+// `js/min/*`, carregados na abertura, ANTES da marca, saíam junto — o relatório
+// de quem entrou conferia 2 dos 11 arquivos, e o `diag-tela` remontava a tela
+// sem estilo (MEDIDO no navegador). Aqui a limpeza, a régua da sessão, o
+// documento e a lista do código rodam DE VERDADE, num documento de mentira que
+// casa seletor como o navegador (o subconjunto que o app usa; o resto LANÇA).
+function documentoDeMentira(elementos) {
+  const casa = (el, parte) => {
+    const m = /^([a-z]+)((?:\[[^\]]+\])*)$/.exec(parte);
+    if (!m) throw new Error('seletor que o documento de mentira não entende: ' + parte);
+    if (el.tagName !== m[1].toUpperCase()) return false;
+    for (const [, cond] of m[2].matchAll(/\[([^\]]+)\]/g)) {
+      const c = /^([\w-]+)(?:(~?=)"([^"]*)")?$/.exec(cond);
+      if (!c) throw new Error('condição que o documento de mentira não entende: ' + cond);
+      const v = el.attrs[c[1]];
+      if (v === undefined) return false;
+      if (c[2] === '=' && v !== c[3]) return false;
+      if (c[2] === '~=' && !v.split(/\s+/).includes(c[3])) return false;
+    }
+    return true;
+  };
+  return { querySelectorAll: (sel) => elementos.filter((el) => sel.split(',').some((p) => casa(el, p.trim()))) };
+}
+
+test('R9-1-01: depois do "Sair" ou da troca de conta, o relatório ainda leva o CÓDIGO da página — do documento, não só da lista de recursos', () => {
+  const meu = 'https://x.dev';
+  const script = (src) => ({ tagName: 'SCRIPT', attrs: { src, defer: '' }, src: new URL(src, meu + '/').href });
+  const link = (rel, href) => ({ tagName: 'LINK', attrs: { rel, href }, href: new URL(href, meu + '/').href });
+  const elementos = [
+    { tagName: 'SCRIPT', attrs: {} },                                     // o inline do tema: sem arquivo
+    link('preload', 'fonts/inter-latin-wght-normal.woff2'), link('manifest', 'manifest.json'),
+    link('icon', 'icons/icon-192.svg'), link('stylesheet', 'css/app.css'),
+    script('js/min/qr.js'),                                               // o pareamento o pôs no <head>
+    script('js/min/version.js'), script('js/min/api.js'), script('js/min/app.js'),
+    { tagName: 'SCRIPT', attrs: { src: 'x' }, src: 'https://static.cloudflareinsights.com/beacon.min.js' },
+  ];
+  const relogio = { agora: 0 };
+  const recursos = [];
+  const performance = { now: () => relogio.agora, clearResourceTimings: () => { recursos.length = 0; },
+    getEntriesByType: (tipo) => (tipo === 'resource' ? recursos.slice() : []) };
+  const fns = new Function('performance', 'API', 'document',
+    ['esquecerRegistrosDaPagina', 'diagRecursosDaSessao', 'diagUrlsDoDocumento', 'diagUrlsDoCodigo'].map((n) => fatiarFn(APP, n)).join('\n')
+    + '\nreturn { esquecerRegistrosDaPagina, diagRecursosDaSessao, diagUrlsDoDocumento, diagUrlsDoCodigo };')(
+    performance, { registrosDesde: 0 }, documentoDeMentira(elementos));
+  // A composição do `diagCorpo` (a asserção estrutural do teste de cima a amarra).
+  const codigo = () => fns.diagUrlsDoCodigo([...fns.diagUrlsDoDocumento(), ...fns.diagRecursosDaSessao().map((r) => r.name)], meu, meu + '/')
+    .map((u) => u.slice(meu.length));
+  // A abertura carrega o código; a foto de perfil de quem estava e a foto do pedido chegam depois.
+  for (const [u, t] of [['/css/app.css', 5], ['/js/min/version.js', 8], ['/js/min/api.js', 9], ['/js/min/app.js', 12],
+    ['/js/min/qr.js', 300]]) recursos.push({ name: meu + u, startTime: t });
+  recursos.push({ name: 'https://sms-profile-image.waze.com/QUEM_SAIU', startTime: 50 },
+    { name: 'https://venue-image.waze.com/thumbs/thumb700_FOTO', startTime: 60 });
+  const tudo = ['/', '/service-worker.js', '/css/app.css', '/js/min/qr.js', '/js/min/version.js', '/js/min/api.js', '/js/min/app.js'];
+  assert.deepEqual(codigo(), tudo, 'CONTROLE: antes de qualquer limpeza, o relatório não leva o código da página');
+  // O "Sair" (ou a troca de conta) aos 400 ms.
+  relogio.agora = 400;
+  fns.esquecerRegistrosDaPagina();
+  assert.equal(fns.diagRecursosDaSessao().filter((r) => /\/js\/min\/|\/css\//.test(r.name)).length, 0,
+    'PRÉ-CONDIÇÃO: a limpeza deixou o código na lista de recursos — o caso não foi encenado');
+  assert.deepEqual(codigo(), tudo,
+    'depois da limpeza o relatório perdeu o código da página (o `diag-tela` remonta sem estilo, e "versão velha?" confere 2 arquivos)');
+  // E o documento NÃO traz o que não é código: a fonte do preload, o manifest, o
+  // ícone (são `<link>`, mas não folha de estilo), o inline sem arquivo e o script de terceiro.
+  assert.deepEqual(fns.diagUrlsDoDocumento().map((u) => u.replace(meu, '')),
+    ['/css/app.css', '/js/min/qr.js', '/js/min/version.js', '/js/min/api.js', '/js/min/app.js',
+     'https://static.cloudflareinsights.com/beacon.min.js'],
+    'o documento devolveu o que não é `<script src>` nem folha de estilo');
+  // Nunca lança: sem documento, a lista é a dos recursos.
+  assert.deepEqual(new Function(fatiarFn(APP, 'diagUrlsDoDocumento') + '\nreturn diagUrlsDoDocumento();')(), []);
+});
+
+// ── R12-4-06 (auditoria da rodada 12): o 405 do relatório de produção ────────
+// O Web Analytics que a borda do Cloudflare injeta manda o relatório dele por
+// `sendBeacon` pra MESMA origem (`/cdn-cgi/rum?`, que só aceita POST). O pedido
+// entra na lista de recursos da página (tipo "beacon"), não é `/api/` nem
+// binário, e virava "código": o GET de comparação levava 405, e toda triagem de
+// produção dizia "sem conferir: o servidor respondeu 405 em 1 arquivo" — sobre
+// algo que não é código (reproduzido emulando a borda, n11 da auditoria). Aqui a
+// composição do `diagCorpo` roda de verdade: o documento de mentira com o código
+// e o beacon de terceiro, a lista de recursos com o envio do beacon.
+test('R12-4-06: o endereço reservado da borda (`/cdn-cgi/`) não entra no `codigo` — o envio do beacon nem o script do Bot Fight Mode', () => {
+  const meu = 'https://x.dev';
+  const script = (src) => ({ tagName: 'SCRIPT', attrs: { src }, src: new URL(src, meu + '/').href });
+  const elementos = [{ tagName: 'LINK', attrs: { rel: 'stylesheet', href: 'css/app.css' }, href: meu + '/css/app.css' },
+    script('js/min/version.js'), script('js/min/app.js'),
+    { tagName: 'SCRIPT', attrs: { src: 'x' }, src: 'https://static.cloudflareinsights.com/beacon.min.js' }];
+  const recursos = [['/css/app.css', 5], ['/js/min/version.js', 8], ['/js/min/app.js', 12], ['/api/perfil', 40],
+    // O que a borda põe na lista: o envio do Web Analytics (o caminho do 405) e,
+    // se um dia carregar, o script do Bot Fight Mode — os dois na MESMA origem.
+    ['/cdn-cgi/rum?', 900], ['/cdn-cgi/challenge-platform/scripts/jsd/main.js', 30]]
+    .map(([u, t]) => ({ name: meu + u, startTime: t }));
+  const performance = { now: () => 1000, clearResourceTimings: () => {},
+    getEntriesByType: (tipo) => (tipo === 'resource' ? recursos.slice() : []) };
+  const fns = new Function('performance', 'API', 'document',
+    ['diagRecursosDaSessao', 'diagUrlsDoDocumento', 'diagUrlsDoCodigo'].map((n) => fatiarFn(APP, n)).join('\n')
+    + '\nreturn { diagRecursosDaSessao, diagUrlsDoDocumento, diagUrlsDoCodigo };')(
+    performance, { registrosDesde: 0 }, documentoDeMentira(elementos));
+  const codigo = fns.diagUrlsDoCodigo([...fns.diagUrlsDoDocumento(), ...fns.diagRecursosDaSessao().map((r) => r.name)], meu, meu + '/')
+    .map((u) => u.slice(meu.length));
+  assert.ok(fns.diagRecursosDaSessao().some((r) => r.name === meu + '/cdn-cgi/rum?'),
+    'PRÉ-CONDIÇÃO: o envio do beacon não está na lista de recursos — o caso não foi encenado');
+  assert.deepEqual(codigo.filter((u) => u.startsWith('/cdn-cgi/')), [],
+    'DEFEITO: o endereço da borda entrou no `codigo` — o GET de comparação leva 405, e a triagem diz "o servidor respondeu 405"');
+  // CONTROLE: o código nosso segue todo lá, e só a RAIZ reservada sai (o mesmo
+  // nome noutro lugar do caminho é arquivo nosso como qualquer outro).
+  assert.deepEqual(codigo, ['/', '/service-worker.js', '/css/app.css', '/js/min/version.js', '/js/min/app.js']);
+  assert.deepEqual(fns.diagUrlsDoCodigo([meu + '/js/min/cdn-cgi.js', meu + '/docs/cdn-cgi/x.js'], meu, meu + '/')
+    .map((u) => u.slice(meu.length)), ['/', '/service-worker.js', '/js/min/cdn-cgi.js', '/docs/cdn-cgi/x.js'],
+    'o filtro da borda pegou arquivo nosso que só tem "cdn-cgi" no nome');
+});
+
+// ── D9 (auditoria de 2026-09-26): o tile guardado que falhou, UMA vez ───────
+// A sentinela lia o anel ACUMULADO da página, sem janela e sem hora: depois de
+// uma falha, toda captura e todo relatório a repetiam — inclusive num card sem
+// mapa, minutos depois. Aqui o caminho de verdade (`diagNoInstante`, com a
+// leitura e a marcação) roda sobre o anel, com a sentinela real.
+test('tileGuardadoFalhou: acusa só o que falhou desde a captura anterior, e diz a HORA', () => {
+  const ini = semCom.indexOf('let diagTilesLidosAte = 0;');
+  assert.ok(ini > 0, 'sumiu o marcador de leitura do anel dos tiles');
+  const app = new Function('agora', `
+    let diagTilesGuardadosQueFalharam = [];
+    ${semCom.slice(ini, semCom.indexOf('\n}\n', semCom.indexOf('function diagTilesParaAlerta')) + 3)}
+    const Date = class extends globalThis.Date { static now() { return agora.v; } };
+    const diagComputado = () => ({ tilesGuardadosQueFalharam: diagTilesParaAlerta() });
+    const AppState = { authenticated: false };
+    const safeLS = { get: () => 'x' };
+    const diagSessao = () => ({ ciclos: [] });
+    const diagArmazenamentoDuravel = () => ({});
+    ${fatiarFn(semCom, 'diagSentinelas')}
+    ${fatiarFn(semCom, 'diagNoInstante')}
+    return {
+      falha: (t, url) => diagTilesGuardadosQueFalharam.push({ t, url }),
+      capturar: () => diagNoInstante().alertas.find((a) => a.chave === 'tileGuardadoFalhou') || null,
+    };
+  `);
+  const agora = { v: 1_800_000_000_000 };
+  const a = app(agora);
+  assert.equal(a.capturar(), null, 'CONTROLE: sem falha nenhuma, a sentinela cala');
+  agora.v += 1000;
+  a.falha(agora.v, 'https://www.waze.com/row-tiles/live/base/17/1/1/tile.png');
+  agora.v += 300;
+  const primeira = a.capturar();
+  assert.ok(primeira && primeira.n === 1, 'a captura logo depois da falha não acusou');
+  assert.deepEqual(primeira.quando, [new Date(agora.v - 300).toISOString()], 'o alerta não diz QUANDO o tile falhou');
+  agora.v += 2500;
+  assert.equal(a.capturar(), null, 'a MESMA falha voltou a acusar na captura seguinte — o anel acumulado sem janela');
+  // Uma falha NOVA volta a acusar — e só ela.
+  agora.v += 1000;
+  a.falha(agora.v, 'https://www.waze.com/row-tiles/live/base/17/2/2/tile.png');
+  agora.v += 10;
+  const nova = a.capturar();
+  assert.ok(nova && nova.n === 1 && /17\/2\/2/.test(nova.exemplos[0]), 'a falha nova não acusou, ou veio junto da velha');
+  // E o relatório também LÊ: ele marca, como a captura.
+  assert.match(fatiarFn(semCom, 'diagCorpo'), /const alertas = diagSentinelas\(computado\);\s*diagTilesLidosAte = Date\.now\(\);/,
+    'o relatório deixou de marcar o que leu — a captura seguinte repetiria a falha que ele já acusou');
+});
+
+// ── D12 (auditoria de 2026-09-26): QUAL frase o painel está mostrando ────────
+// O `painel` dizia "tudoLimpo" também no "Fim da fila" (pulados pendentes) e no
+// "nada tratado nesta fila", e o diário da tela vazia não levava os pulados. A
+// variante sai da CHAVE que o `showNoPlaces` põe no texto — a mesma, com os
+// mesmos seletores, pra as duas não divergirem.
+test('a captura diz QUAL frase o painel mostra (fim da fila, nada nesta fila, limpo, sem conexão)', () => {
+  const variante = fatiarFn(semCom, 'dlogVarianteDoPainel');
+  const noPlaces = fatiarFn(semCom, 'showNoPlaces');
+  for (const sel of ['h3[data-i18n^="states.empty.title"]', 'p[data-i18n^="states.empty.body"]']) {
+    assert.ok(variante.includes(sel) && noPlaces.includes(sel), `o seletor ${sel} não é o mesmo nos dois lados`);
+  }
+  const el = (chave) => ({ getAttribute: (a) => (a === 'data-i18n' ? chave : null) });
+  const doc = (titulo, corpo, erro) => ({
+    getElementById: (id) => (id === 'noMoreCards'
+      ? { querySelector: (s) => (s.startsWith('h3') ? el(titulo) : el(corpo)) } : null),
+    querySelector: (s) => (s === '#loadErrorState h3' ? el(erro) : null),
+  });
+  const rodar = (d, painel) => new Function('document', variante + '\nreturn dlogVarianteDoPainel;')(d)(painel);
+  assert.equal(rodar(doc('states.empty.titlePulados', 'states.empty.bodyPulados'), 'tudoLimpo'), 'fimDaFila');
+  assert.equal(rodar(doc('states.empty.title', 'states.empty.bodyNada'), 'tudoLimpo'), 'nadaNestaFila');
+  assert.equal(rodar(doc('states.empty.title', 'states.empty.body'), 'tudoLimpo'), 'limpo');
+  assert.equal(rodar(doc(null, null, 'states.error.titleOffline'), 'falhaAoCarregar'), 'semConexao');
+  assert.equal(rodar(doc(null, null, 'states.error.title'), 'falhaAoCarregar'), 'falha');
+  // A captura leva a variante junto do painel, e o diário da tela vazia leva os
+  // PULADOS e se houve trabalho nesta fila (os dois decidem a frase).
+  assert.match(fatiarFn(semCom, 'dlogTelaAtual'), /\{ variante: dlogVarianteDoPainel\(painel\) \}/,
+    'a captura deixou de dizer qual frase o painel mostra');
+  assert.match(noPlaces, /dfato\('tela\.vazia', \{[^}]*pulados: puladosNestaFila\(\),\s*tratou: tratouNestaFila \}\);/,
+    'o diário da tela vazia deixou de levar os pulados');
+  // E o HTML tem os elementos que as duas funções leem.
+  const HTML = readFileSync(new URL('../index.src.html', import.meta.url), 'utf8');
+  const bloco = (id) => { const i = HTML.indexOf(`id="${id}"`); return HTML.slice(i, HTML.indexOf('</section>', i) > 0 ? i + 3000 : i + 3000); };
+  assert.match(bloco('noMoreCards'), /<h3[^>]*data-i18n="states\.empty\.title"/, 'sumiu o título do painel de fila vazia');
+  assert.match(bloco('noMoreCards'), /<p[^>]*data-i18n="states\.empty\.body"/, 'sumiu o corpo do painel de fila vazia');
+  assert.match(bloco('loadErrorState'), /<h3[^>]*data-i18n="states\.error\.title"/, 'sumiu o título do painel de falha');
+});
+
+// ── D3 (auditoria de 2026-09-26): o TOAST por cima dos botões não é defeito ──
+// A sentinela `toqueInterceptado` acusava ✕ ↑ ✓ sempre que um toast comum (o
+// snackbar, z-70, no `#notifyStack`) estava sobre eles — o lugar dele nas telas
+// baixas, e ele some sozinho. Toda captura até 4 s depois de um toast trazia três
+// alertas falsos. Aqui a geometria (quem recebe o dedo) e a sentinela rodam de
+// verdade, fatiadas.
+test('toqueInterceptado: o aviso passageiro (#notifyStack) por cima não acusa — um elemento de verdade, sim', () => {
+  // A geometria marca `sobAviso` quando quem recebe o dedo no centro está no stack.
+  const naPilha = { closest: (s) => (s === '#notifyStack' ? {} : null) };
+  const outro = { closest: () => null };
+  const alvoBotao = { contains: () => false };
+  const noCentro = (quem) => new Function('document', fatiarFn(semCom, 'diagCentroEmAvisoPassageiro')
+    + '\nreturn diagCentroEmAvisoPassageiro;')({ elementFromPoint: () => quem });
+  const r = { left: 0, top: 0, width: 48, height: 48 };
+  assert.equal(noCentro(naPilha)(alvoBotao, r), true, 'o toast no centro do botão não foi reconhecido como aviso passageiro');
+  assert.equal(noCentro(outro)(alvoBotao, r), false, 'CONTROLE: um elemento qualquer por cima virou "aviso passageiro"');
+  assert.equal(noCentro(alvoBotao)(alvoBotao, r), false, 'o próprio botão no centro virou "aviso passageiro"');
+  // A geometria leva a marca, e a sentinela a respeita.
+  assert.match(fatiarFn(semCom, 'diagGeometria'), /\.\.\.\(diagCentroEmAvisoPassageiro\(e, r\) \? \{ sobAviso: true \} : \{\}\),/,
+    'a geometria deixou de dizer que quem recebe o dedo é o aviso passageiro');
+  const sentinelas = new Function(`
+    const AppState = { authenticated: false };
+    const safeLS = { get: () => 'x' };
+    const diagSessao = () => ({ ciclos: [] });
+    const diagArmazenamentoDuravel = () => ({});
+    const diagAlvoPequeno = () => false, diagMapaForaDaCaixa = () => false;
+    ${fatiarFn(semCom, 'diagSentinelas')}
+    return diagSentinelas;`)();
+  const botao = (extra) => ({ sel: '.card-btn-reject', noCentro: 'DIV.toast', camadaAberta: false, naCamada: false, noFundo: false, ...extra });
+  const alertas = (g) => sentinelas({ geometria: [g] }).filter((a) => a.chave === 'toqueInterceptado');
+  assert.equal(alertas(botao({ sobAviso: true })).length, 0, 'o toast por cima dos botões voltou a acusar "toqueInterceptado"');
+  assert.equal(alertas(botao({})).length, 1, 'CONTROLE: um elemento de verdade por cima do ✕ deixou de acusar');
+});
+
+// ── D15 (auditoria de 2026-09-26): o relatório com a rede PENDURADA ──────────
+// As leituras eram em SÉRIE, cada uma com o seu teto de 4 s: com a rede
+// pendurada o arquivo levava ~48 s (12 leituras), com o botão em "Gerando…" sem
+// sinal. Agora andam em PARALELO, dentro de um ORÇAMENTO do relatório, e o que
+// não chegou sai marcado. O tempo de verdade é medido no smoke do offline (8c).
+test('D15: cada leitura do relatório respeita o ORÇAMENTO — esgotado, nem sai; e o que não chegou é "sem resposta"', async () => {
+  const pedidos = [], tetos = [];
+  let agora = 1_000_000;
+  const mk = () => new Function('fetch', 'AbortSignal', 'AbortController', 'setTimeout', 'Date', 'DIAG_FETCH_TETO_MS',
+    fatiarFn(semCom, 'diagFetch') + '\n' + fatiarFn(semCom, 'diagFalhaDaLeitura') + '\nreturn { diagFetch, diagFalhaDaLeitura };')(
+    async (url) => { pedidos.push(url); return { ok: true }; },
+    { timeout: (ms) => { tetos.push(ms); return {}; } }, class {}, () => 0, { now: () => agora }, 4000);
+  const { diagFetch, diagFalhaDaLeitura } = mk();
+  await diagFetch('/a', {}, agora + 10000);
+  assert.deepEqual(tetos, [4000], 'com orçamento de sobra, o teto é o da leitura');
+  await diagFetch('/b', {}, agora + 1500);
+  assert.deepEqual(tetos, [4000, 1500], 'o teto não encolheu pro que resta do orçamento');
+  let erro = null;
+  try { await diagFetch('/c', {}, agora - 1); } catch (e) { erro = e; }
+  assert.ok(erro && erro.name === 'TimeoutError', 'com o orçamento esgotado a leitura não falhou como "sem resposta"');
+  assert.deepEqual(pedidos, ['/a', '/b'], 'com o orçamento esgotado a leitura ainda saiu pra rede');
+  // Sem orçamento (quem chama sem prazo), o teto de sempre.
+  await diagFetch('/d');
+  assert.equal(tetos.at(-1), 4000);
+  // O que não chegou (teto, orçamento, aborto) é "sem resposta" — não "o arquivo falhou".
+  assert.deepEqual(diagFalhaDaLeitura(erro), { erro: 'sem resposta', semResposta: true });
+  assert.deepEqual(diagFalhaDaLeitura(Object.assign(new Error('x'), { name: 'AbortError' })), { erro: 'sem resposta', semResposta: true });
+  assert.deepEqual(diagFalhaDaLeitura(new TypeError('Failed to fetch')), { erro: 'Failed to fetch' },
+    'CONTROLE: a falha de rede comum virou "sem resposta"');
+});
+
+test('D15: as leituras do relatório andam em PARALELO, com o prazo do relatório', () => {
+  const corpo = fatiarFn(APP.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n'), 'diagCorpo');
+  assert.match(corpo, /const prazo = inicioDaColeta \+ DIAG_ORCAMENTO_MS;/, 'o relatório não tem orçamento');
+  assert.match(corpo, /const lidos = await Promise\.all\(urlsDoCodigo\.map\(\(u\) => texto\(u\)\)\);/,
+    'as leituras do código voltaram a ser em SÉRIE (48 s com a rede pendurada)');
+  assert.match(corpo, /const comparados = await Promise\.all\(urlsComparadas\.map\(comparar\)\);/,
+    'as releituras do servidor voltaram a ser em SÉRIE');
+  assert.match(corpo, /diagFetch\(url, \{ cache: 'force-cache' \}, prazo\)/, 'a leitura do aparelho saiu do orçamento');
+  // O relógio do servidor sai JUNTO das releituras: a promessa nasce antes delas.
+  const iRelogio = corpo.indexOf('const relogioPromessa = (async () => {');
+  const iCompara = corpo.indexOf('const comparados = await Promise.all(');
+  assert.ok(iRelogio > 0 && iRelogio < iCompara, 'o relógio do servidor voltou a esperar as releituras');
+  assert.match(corpo, /semResposta: \[\.\.\.Object\.entries\(codigo\)/, 'o relatório não diz o que ficou sem resposta');
+  // A `coleta` é seção nova: quem lê um relatório sem ela precisa saber que é
+  // IDADE, não defeito.
+  const v = Number((APP.match(/const DIAG_VERSAO = (\d+);/) || [])[1]);
+  assert.ok(v >= 11, `a versão do diagnóstico não subiu com a coleta (${v})`);
+});
+
+// ── R8-4-06: o relatório e a captura feitos DENTRO do treino ────────────────
+// Com o treino aberto, a fila na tela — e no `appState` e no `estado.fila` das
+// capturas — é a de EXEMPLOS, e nada no arquivo dizia isso: a palavra "treino"
+// só aparecia no id inerte do pedido da frente. E a fila REAL, que o treino
+// guarda desde o lote 11 (com a época, o `devolver`, o perfil e a ordem que
+// chegaram nele), não ia no arquivo — o relato "ao sair do treino a fila voltou
+// errada" chegava sem a fila que voltou (MEDIDO, r7 da auditoria).
+test('R8-4-06: a captura e o resumo dizem que o TREINO estava aberto — em números', () => {
+  const app = semLinhaComentada(APP);
+  assert.match(fatiarFn(app, 'dlogTelaAtual'), /^\s+treino: diagTreinoAgora\(\),$/m,
+    'a tela da captura (e o `resumo.telaAgora`) não diz se o treino estava aberto');
+  // RODADA, contra um treino de mentira.
+  const agora = (Treino, AppState) => new Function('Treino', 'AppState',
+    fatiarFn(app, 'diagTreinoAgora') + '\nreturn diagTreinoAgora();')(Treino, AppState);
+  assert.deepEqual(agora({ ativo: true, passo: 2, _salvo: {} }, { queue: [{}, {}, {}] }), { ativo: true, passo: 2, exemplos: 3 },
+    'com o treino aberto, a tela não diz o passo e quantos exemplos estão na fila');
+  assert.deepEqual(agora({ ativo: false, passo: 0 }, { queue: [{}, {}] }), { ativo: false });
+  // Nunca derruba a captura: sem o `Treino` (a TDZ, num erro na carga), "não se sabe".
+  assert.deepEqual(new Function(fatiarFn(app, 'diagTreinoAgora') + '\nreturn diagTreinoAgora();')(), { ativo: null });
+});
+
+test('R8-4-06: o relatório leva a fila REAL que o treino guarda — a fila, a frente, as épocas, o que volta e o que chegou nele', () => {
+  const app = semLinhaComentada(APP);
+  assert.match(fatiarFn(app, 'diagCorpo'), /^\s+treino: diagTreinoGuardado\(\),$/m,
+    'o relatório não leva a fila real que o treino guarda (o `appState` tem só os exemplos)');
+  const guardado = (Treino, AppState) => new Function('Treino', 'AppState', 'diagSeguro',
+    fatiarFn(app, 'diagTreinoAgora') + '\n' + fatiarFn(app, 'diagTreinoGuardado') + '\nreturn diagTreinoGuardado();')(
+    Treino, AppState, (x) => JSON.parse(JSON.stringify(x)));
+  const A = { venueID: 'vA', updateRequestID: 'uA' }, B = { venueID: 'vB', updateRequestID: 'uB' };
+  const R = { venueID: 'vR', updateRequestID: 'uR' };
+  const T = { ativo: true, passo: 1, _salvo: { queue: [A, B], currentPlace: B, autorEmFoco: 77, epoca: 4, epocaDoTreino: 5,
+    devolver: [R], perfilChegou: true, ordemMudou: false } };
+  const g = guardado(T, { queue: [{ venueID: 'vA', updateRequestID: 'treino-inerte', _treino: true }], fetchEpoch: 5 });
+  assert.deepEqual(g.fila.map((p) => p.updateRequestID), ['uA', 'uB'], 'a fila REAL não foi no relatório');
+  assert.equal(g.currentPlaceIdx, 1, 'o pedido que estava na frente da fila real não vai (como índice)');
+  assert.deepEqual(g.devolver.map((p) => p.updateRequestID), ['uR'], 'o que o Waze recusou com o treino aberto (e volta como card) não vai');
+  assert.deepEqual([g.ativo, g.passo, g.exemplos, g.autorEmFoco, g.epoca, g.epocaDoTreino, g.epocaAgora, g.perfilChegou, g.ordemMudou],
+    [true, 1, 1, 77, 4, 5, 5, true, false], 'o que o treino guarda não foi inteiro');
+  // Fechado: só diz que está fechado (nada de fila).
+  assert.deepEqual(guardado({ ativo: false, _salvo: null }, { queue: [A] }), { ativo: false });
+  // Nunca derruba o relatório.
+  assert.ok(guardado({ get ativo() { throw new Error('quebrou'); } }, { queue: [] }).erro, 'o erro ao ler o treino derrubou o relatório');
+});
+
+// ── R9-4-07 (auditoria da rodada 9): o que ESPERA o "Sair" do treino ─────────
+// A fila guardada do offline que a abertura sem rede leu com o treino aberto
+// (`abrirGuardada`) e a recusa automática pedida nele (`recusaPedida`) entraram
+// no `_salvo` em paralelo com o relatório do treino, e ficaram de fora dele: o
+// arquivo feito no treino dizia "fila real: 0 pedidos" com a fila guardada
+// esperando o "Sair", e quem lia concluía que ela tinha sumido (MEDIDO, n2).
+test('R9-4-07: o relatório feito no treino leva o que espera o "Sair" dele — a fila guardada do offline e a recusa automática', () => {
+  const app = semLinhaComentada(APP);
+  const guardado = (salvo) => new Function('Treino', 'AppState', 'diagSeguro',
+    fatiarFn(app, 'diagTreinoAgora') + '\n' + fatiarFn(app, 'diagTreinoGuardado') + '\nreturn diagTreinoGuardado();')(
+    { ativo: true, passo: 0, _salvo: { queue: [], currentPlace: null, autorEmFoco: null, epoca: 4, epocaDoTreino: 5,
+      devolver: [], perfilChegou: false, ordemMudou: false, recusaPedida: false, abrirGuardada: false, ...salvo } },
+    { queue: [{ _treino: true }, { _treino: true }], fetchEpoch: 5 }, (x) => JSON.parse(JSON.stringify(x)));
+  const g = guardado({ abrirGuardada: true, recusaPedida: true });
+  assert.deepEqual(g.fila, [], 'PRÉ-CONDIÇÃO: a fila real que o treino guarda está vazia (a guardada do offline espera o "Sair")');
+  assert.equal(g.abrirGuardada, true, 'o relatório não diz que a fila guardada do offline espera o "Sair" do treino');
+  assert.equal(g.recusaPedida, true, 'o relatório não diz que a recusa automática pedida no treino roda no "Sair" dele');
+  // CONTROLE: nada esperando — as duas saem falsas (e não ausentes).
+  const n = guardado({});
+  assert.deepEqual([n.abrirGuardada, n.recusaPedida], [false, false]);
+  // E os nomes são os que o `Treino` anota (e o `sair()` lê): renomeado lá, o
+  // relatório leria sempre falso, calado.
+  assert.match(app, /this\._salvo\.abrirGuardada = /, 'o treino deixou de anotar `abrirGuardada` — o relatório lê um campo que ninguém escreve');
+  assert.match(app, /this\._salvo\.recusaPedida = /, 'o treino deixou de anotar `recusaPedida` — o relatório lê um campo que ninguém escreve');
+  // A fila que o PERFIL mandou refazer no treino (R9-7-04) e a fila guardada lida
+  // nele (quantos e de quando) também esperam o "Sair".
+  const r = guardado({ refazerFila: true, avisoDoPais: { chave: 'toast.paisDoPerfil', pais: 'France' }, filaGuardadaLida: { n: 7, t: 1785203731191 } });
+  assert.equal(r.refazerFila, true, 'o relatório não diz que o perfil mandou refazer a fila real no treino');
+  assert.equal(r.avisoDoPais, 'toast.paisDoPerfil', 'o relatório não diz que o aviso do país espera o "Sair"');
+  assert.deepEqual(r.filaGuardadaLida, { n: 7, t: 1785203731191 }, 'o relatório não diz quantos pedidos a fila guardada lida no treino tem');
+  assert.deepEqual([n.refazerFila, n.avisoDoPais, n.filaGuardadaLida], [false, null, null]);
+  assert.match(app, /this\._salvo\.refazerFila = /, 'o treino deixou de anotar `refazerFila` — o relatório lê um campo que ninguém escreve');
+  assert.match(app, /this\._salvo\.filaGuardadaLida = /, 'o treino deixou de anotar `filaGuardadaLida` — o relatório lê um campo que ninguém escreve');
 });

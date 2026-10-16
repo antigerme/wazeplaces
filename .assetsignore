@@ -50,3 +50,13 @@ test
 # publicado (verificado com `wrangler dev`, não deduzido: ver gotcha #14.1).
 js/*.js
 css/styles.css
+
+# ── Credenciais e artefatos LOCAIS: nunca asset. ─────────────────────────────
+# O deploy do CI parte do git, e o .gitignore já tira isto de lá. Mas um
+# `wrangler deploy` feito da máquina de quem desenvolve publica o diretório
+# como ele está — e é nele que o cookies.txt do owner circula (seção 🔑 do
+# CLAUDE.md), ao lado de logs e de diagnósticos .zip, que levam token de sessão.
+cookies.txt
+*cookies*.txt
+*.log
+*.zip

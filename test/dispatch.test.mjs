@@ -276,3 +276,26 @@ test('401 de sessão vem com errorCategory: unauthorized', async () => {
   assert.equal(semNada.body.errorCategory, 'unauthorized',
     'requisição sem token nenhum também precisa do carimbo');
 });
+
+// F8 (auditoria da fila, 2026-09-26): "⏳ Mais antigos" pede a ordem ASC ao
+// Waze. MEDIDO no Waze real (só leitura, conta do owner): `SORTING_UPDATE_TIME_ASC`
+// é aceito (HTTP 200) e muda a página 1. O cliente escolhe, mas por LISTA
+// BRANCA: qualquer outra coisa vai como sempre foi — é valor que entra no corpo
+// de uma requisição ao Waze em nome da pessoa.
+test('dispatch buscar-places: a ordem do cliente passa por LISTA BRANCA', async () => {
+  const { ctx, token } = await ctxComSessao();
+  const enviada = async (orderBy) => {
+    const { chamadas } = await comFetchMockado(
+      () => ok(wazePayload()),
+      () => dispatch('buscar-places', { sessionToken: token, region: 'row', countryId: 30, page: 1,
+        ...(orderBy === undefined ? {} : { orderBy }) }, ctx));
+    return JSON.parse(chamadas[0].opts.body).venueUpdateRequestsFilter.orderBy;
+  };
+  assert.equal(await enviada('SORTING_UPDATE_TIME_ASC'), 'SORTING_UPDATE_TIME_ASC', '"Mais antigos" não chega ao Waze');
+  assert.equal(await enviada('SORTING_UPDATE_TIME_DESC'), 'SORTING_UPDATE_TIME_DESC');
+  // CONTROLE: sem ordem, e com o que não está na lista, vai a de sempre.
+  assert.equal(await enviada(undefined), 'SORTING_UPDATE_TIME_DESC');
+  for (const lixo of ['SORTING_CREATION_TIME_ASC', 'sorting_update_time_asc', '', null, 42, { $ne: 1 }, ['SORTING_UPDATE_TIME_ASC']]) {
+    assert.equal(await enviada(lixo), 'SORTING_UPDATE_TIME_DESC', `a ordem ${JSON.stringify(lixo)} passou pra o Waze`);
+  }
+});

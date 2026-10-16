@@ -28,6 +28,16 @@
     { "tag": "v1", "new_sqlite_classes": ["SalaDO"] },
     { "tag": "v2", "deleted_classes": ["SalaDO"] }
   ],
+  // «Manter conectado»: a cada 30 minutos o Worker renova o cookie do Waze das
+  // sessões que ligaram isso (server/manter-conectado.mjs). Cada execução renova
+  // no máximo 6 sessões devidas (carimbo com mais de 5 h) e lê no máximo 15, o que
+  // dá 48 × 6 = 288 renovações por dia, ~65 pessoas a cada ~5,5 h. O teto real é
+  // a cota de ESCRITA do KV no plano grátis (1.000/dia, dividida com o uso normal
+  // do app), não o cron. Pra mais gente: subir MANTER_LOTE no módulo (e conferir
+  // as 50 subrequisições por execução e a CPU) ou encurtar o cron aqui. O cron só
+  // roda no deploy do Worker em produção, não no `wrangler dev` (use
+  // `wrangler dev --test-scheduled` e chame /__scheduled).
+  "triggers": { "crons": ["*/30 * * * *"] },
   "kv_namespaces": [
     {
       "binding": "SESSIONS",

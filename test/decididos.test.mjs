@@ -67,7 +67,7 @@ function montar({ offline = true } = {}) {
   const diario = [];
   const estado = { offline };
   const fontes = ['chaveDoPedido', 'marcarEmAndamento', 'offlineLerPousos', 'registrarPouso',
-    'offlinePodarPousos', 'semOsJaDecididos', 'carregarFilaDeSaida', 'salvarFilaDeSaida',
+    'offlinePodarPousos', 'semOsJaDecididos', 'carregarFilaDeSaida', 'salvarFilaDeSaida', 'salvarFilaSemOs', 'chaveDoItemDaSaida',
     'enfileirarSaida', 'diagResumoDaSaida', 'registrarEntradaNaFila', 'semOsQueJaPassaramPelaFila'].map(fatiar).join('\n');
   const deps = {
     safeLS,
@@ -76,15 +76,20 @@ function montar({ offline = true } = {}) {
     OFFLINE_POUSOS_KEY: constante('OFFLINE_POUSOS_KEY'),
     OFFLINE_POUSOS_MAX: constante('OFFLINE_POUSOS_MAX'),
     POUSO_NA_MEMORIA_MS: constante('POUSO_NA_MEMORIA_MS'),
-    pedidosEmAndamento: new Set(),
+    pedidosEmAndamento: new Set(), saidaTiradosSemGravar: new Map(),
     pousosDaPagina: new Map(),
     offlineLigado: () => estado.offline,
     dfato: (k, o) => diario.push([k, o]),
     updateInFlightIndicator: () => {},
     historyTodayKey: () => '2026-09-22',
+    contaAgora: () => null,   // a conta do gesto (ver test/conta.test.mjs)
+    marcaDaSessao: () => 'marca',   // a sessão do gesto (idem)
+    marcaDestaAba: () => 'marca',   // e ela é a da memória desta aba (R13-1-04)
     ondeAgora: () => '30',
     AppState: { queue: [], currentPlace: null },
     pedidosQueEntraramNaFila: new Set(),
+    // A região do Waze vai no item (ver `enfileirarSaida`).
+    API: { getRegion: () => 'row', getSession: () => 'tok' },
   };
   const nomes = Object.keys(deps);
   const app = new Function(...nomes, fontes + `
@@ -344,7 +349,7 @@ test('a REABERTURA SEM REDE filtra a foto, e desiste se tudo foi decidido', () =
 test('a fila guardada leva o `desde`, e a poda só roda DEPOIS de a gravação fechar', () => {
   const f = fatiar('offlineGravarFila');
   assert.match(f, /desde: valeDesde,/, 'a fila guardada não leva mais o instante da lista');
-  const iGrava = f.indexOf('await new Promise(');
+  const iGrava = f.indexOf('await esperarComTeto(');   // a transação da gravação (com teto, R21-4-01)
   const iPoda = f.indexOf('offlinePodarPousos(valeDesde);');
   assert.ok(iGrava > 0 && iPoda > iGrava,
     'a poda veio antes da gravação fechar: se ela falhar, a foto velha fica sem os pousos que a corrigem');
@@ -359,12 +364,22 @@ test('TODO pouso passa pela fonte única — um caminho de fora deixaria o pedid
   assert.equal(conta('handleActionResult'), 2, 'o pouso do card saiu do handleActionResult');
   assert.equal(conta('registrarPousoDeSaida'), 1, 'o pouso da fila de saída não é registrado');
   assert.equal(conta('enviarLote'), 2, 'o pouso do lote não é registrado');
-  assert.equal(conta('enviarAprovacao'), 2, 'aprovar RESOLVE o pedido: o pouso tem que ser registrado');
-  assert.equal(conta('handleBatchMarkRead'), 1, 'o lote de lidos não registra o pouso');
+  // A aprovação pousa por UM lugar (`concluirAprovacao`), chamado nos dois
+  // desfechos que valem (sucesso e "outro editor aprovou antes").
+  assert.equal(conta('concluirAprovacao'), 1, 'aprovar RESOLVE o pedido: o pouso tem que ser registrado');
+  assert.equal((fatiar('enviarAprovacao').match(/concluirAprovacao\(alvo\);/g) || []).length, 2,
+    'um dos desfechos da aprovação deixou de pousar');
+  // O lote de lidos pousa a CADA PEDAÇO e a cada pedido do um-a-um (O4,
+  // auditoria de 2026-09-29): um pouso só, no fim do laço, deixava sem pouso o
+  // que o Waze já tinha marcado quando o app fechava no meio (medido em
+  // test/lote-lidos.test.mjs). E o terceiro é o do que pousou DEPOIS de a
+  // sessão cair, na fila que atravessou a queda (V6b, test/costura-sessao).
+  // (O quarto é o do treino aberto com o lote no ar: a fila guardada nele, R18-1-01.)
+  assert.equal(conta('handleBatchMarkRead'), 4, 'o lote de lidos não registra o pouso por pedaço, por pedido, o de depois da queda e o da fila guardada pelo treino');
   // E o pouso vem ANTES do que pode lançar (histórico, conquistas): se algo ali
   // quebrar, o pedido não pode voltar por causa disso.
   const h = fatiar('handleActionResult');
-  assert.ok(h.indexOf('registrarPouso(place);') < h.indexOf('recordHistory(actionType, 1);'));
+  assert.ok(h.indexOf('registrarPouso(place);') < h.indexOf('recordHistory(actionType, 1,'));
 });
 
 test('o pedido fica "em andamento" do GESTO até o fim do envio — e sai por todos os caminhos', () => {
@@ -373,12 +388,14 @@ test('o pedido fica "em andamento" do GESTO até o fim do envio — e sai por to
   assert.ok(iMarca > 0, 'o pedido na janela do Desfazer não é marcado');
   assert.ok(iMarca < s.indexOf('const timerId = setTimeout(') && iMarca < s.indexOf("undoEnabled === false && canDisableUndo()"),
     'a marca tem que vir ANTES da janela e do envio sem janela');
-  // Fim do envio, Desfazer, cancelar (logout/pagehide do lote) e enfileirar ao
-  // fechar sem rede. Um que falte deixa o pedido de fora da fila pra sempre.
-  assert.equal((s.match(/marcarEmAndamento\(places, false\);/g) || []).length, 4,
+  // Fim do envio, Desfazer, cancelar (logout/pagehide do lote), enfileirar ao
+  // fechar sem rede e a descarga que acha a decisão REPETIDA na fila (ela não
+  // envia nada). Um que falte deixa o pedido de fora da fila pra sempre.
+  assert.equal((s.match(/marcarEmAndamento\((?:places|doEnvio), false(, geracao)?\);/g) || []).length, 5,
     'algum caminho de saída da janela deixou de desmarcar o pedido');
   const iFinally = s.indexOf('} finally {');
-  assert.ok(iFinally > 0 && s.indexOf('marcarEmAndamento(places, false);', iFinally) > iFinally,
+  // (O ✓ e o ↑ soltam só a marca que ainda é do envio — `doEnvio`, R20-1-03; o ✕, todos os `places`.)
+  assert.ok(iFinally > 0 && s.indexOf('marcarEmAndamento(doEnvio, false, geracao);', iFinally) > iFinally,
     'o fim do envio tem que desmarcar no `finally` — exceção no executor não pode prender o pedido');
 });
 
@@ -387,23 +404,24 @@ test('o LOTE marca os pedidos em andamento — a recusa automática não passa p
   const iMarca = l.indexOf('marcarEmAndamento(places, true);');
   const iLaco = l.indexOf('for (const p of places)');
   assert.ok(iMarca > 0 && iMarca < iLaco, 'o lote tem que marcar os pedidos ANTES do primeiro envio');
-  assert.match(l, /marcarEmAndamento\(p, false\);\s*progresso\(\);/,
+  assert.match(l, /marcarEmAndamento\(p, false(, geracao)?\);\s*progresso\(\);/,
     'cada pedido tem que sair do "em andamento" quando resolve — senão ele fica fora da fila até a página morrer');
   const iFinally = l.indexOf('} finally {');
-  assert.ok(iFinally > 0 && l.indexOf('marcarEmAndamento(places, false);', iFinally) > iFinally,
+  assert.ok(iFinally > 0 && l.indexOf('marcarEmAndamento(places, false, geracao);', iFinally) > iFinally,
     'o `finally` tem que desmarcar todos — a sessão morta no meio (`return`) deixaria os outros presos');
 });
 
 test('fechar SEM REDE com ação na janela do Desfazer enfileira de forma SÍNCRONA', () => {
   const d = fatiar('descarregarAcaoPendente');
   const iSemRede = d.indexOf('navigator.onLine === false && AppState.pendingAction.enfileirarSemRede');
-  const iExecuta = d.indexOf('AppState.pendingAction.execute()');
+  const iExecuta = d.indexOf('AppState.pendingAction.descarregar();');
   assert.ok(iSemRede > 0 && iExecuta > iSemRede,
     'sem rede, a ação tem que ir pra fila ANTES de tentar a rede — a volta do laço pode não existir');
   const s = fatiar('scheduleAction');
   assert.match(s, /if \(executed \|\| n !== 1 \|\| \(type !== 'read' && type !== 'reject'\)\) return false;/,
     'só ✕ e ✓ de UM pedido vão pra fila ao fechar: o lote cancela e o Pular não escreve');
-  assert.match(s, /const r = enfileirarSaida\(type, places\[0\]\);\s*if \(!r\) return false;/,
+  // O 4º argumento é o momento do gesto (`carimboDoGesto`, R6-7-4).
+  assert.match(s, /const r = enfileirarSaida\(type, places\[0\], regiaoDoGesto, gestoDoAgendamento\);\s*if \(!r\) return false;/,
     'fila cheia tem que cair no caminho de sempre, que avisa');
   assert.match(s, /if \(r === 'repetida'\) reverterPlacar\(true\);/,
     'o gesto repetido não pode contar duas vezes no placar');
@@ -434,4 +452,50 @@ test('o relatório leva a fila de saída em números e a versão subiu', () => {
   assert.ok(v >= 5, `a versão do diagnóstico não subiu com os campos novos (${v})`);
   assert.match(fatiar('diagOffline'), /o\.pousosGravados = offlineLerPousos\(\)\.length;/,
     'a seção offline parou de contar os pousos gravados');
+});
+
+test('enfileirarSaida: a REGIÃO do gesto vai no item — trocar de região depois não muda o servidor do envio', () => {
+  // Sem ela, o item saía pela região do filtro de AGORA: o pedido ia pro
+  // servidor errado, voltava "não encontrado" e contava como feito.
+  const { app } = montar();
+  app.enfileirarSaida('reject', { venueID: 'v1', updateRequestID: 'u1' }, 'na');
+  app.enfileirarSaida('read', { venueID: 'v2', updateRequestID: 'u2' });
+  const f = app.carregarFilaDeSaida();
+  assert.equal(f[0].regiao, 'na', 'a região do gesto não foi pro item');
+  assert.equal(f[1].regiao, 'row', 'sem região explícita, vale a de agora');
+});
+
+test('o esvaziamento manda cada item pela região DELE, e tira da fila pela CHAVE', () => {
+  const e = fatiar('esvaziarFilaDeSaida');
+  assert.match(e, /API\.markAsRead\(item\.venueID, item\.updateRequestID, null, item\.regiao\)/);
+  assert.match(e, /API\.rejectPlace\(item\.venueID, item\.updateRequestID, null, item\.regiao\)/);
+  assert.match(e, /f\.findIndex\(\(x\) => x && x\.tipo === item\.tipo && x\.venueID === item\.venueID\s*&& x\.updateRequestID === item\.updateRequestID\)/,
+    'tirar pela posição (`shift`) leva o item errado quando outra aba mexe na fila');
+  assert.doesNotMatch(e, /f\.shift\(\)/);
+});
+
+test('fechar COM rede na janela do Desfazer: a decisão entra na FILA DE SAÍDA antes do envio, e o pouso só vem com a resposta', () => {
+  // O pouso ia antes do envio `keepalive` (auditoria de 2026-09-25): reaberta
+  // sem rede, a fila guardada não devolvia o pedido. Mas com o "lie-fi" (onLine
+  // verdadeiro, nada passa) o envio morria e a decisão SUMIA: o pouso gravado
+  // escondia o pedido e o placar ficava +1 (auditoria de 2026-09-26, O5). Hoje
+  // quem esconde o pedido na reabertura é a própria fila de saída.
+  const d = fatiar('descarregarAcaoPendente');
+  assert.doesNotMatch(d, /registrarPouso\(/, 'o pouso voltou a ir antes da resposta — ele esconde uma decisão que talvez nunca saia');
+  assert.match(d, /else AppState\.pendingAction\.descarregar\(\);/, 'a descarga com rede deixou de passar pela fila de saída');
+  const s = fatiar('scheduleAction');
+  const i = s.indexOf('descarregar: () => {');
+  assert.ok(i > 0, 'sumiu o `descarregar`');
+  const corpo = s.slice(i, s.indexOf('AppState.pendingAction.execute();', i));
+  const iEnfileira = corpo.indexOf('const r = enfileirarSaida(type, places[0], regiaoDoGesto');
+  assert.ok(iEnfileira > 0, 'a descarga não enfileira ANTES do envio');
+  // Com a marca DESTA aba: a outra aba (a que fica na tela quando esta vai pro
+  // fundo) mandaria de novo a decisão que esta está mandando (R5-1 F1).
+  // (O `extra` leva também o momento do gesto, R6-7-4: a marca vem DEPOIS dele.)
+  assert.ok(corpo.includes('const r = enfileirarSaida(type, places[0], regiaoDoGesto, { ...gestoDoAgendamento, ...reivindicacaoDestaAba() });'),
+    'a descarga anota sem a marca da aba — a outra aba a manda de novo enquanto o envio desta voa');
+  assert.match(corpo, /if \(r\) descargaNaFila\.add\(places\[0\]\);/,
+    'sem a marca, a resposta que chega com a página viva não sabe que o item já está na fila — contaria duas vezes');
+  // E o pouso vem de onde sempre veio: a resposta.
+  assert.match(fatiar('registrarPouso'), /offlineLigado\(\)/);
 });

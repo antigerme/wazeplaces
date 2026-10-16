@@ -2,9 +2,46 @@
 // deixar isso derrubar o initApp. Wrapper tolerante a falha.
 const safeLS = {
     get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
-    set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+    // Devolve se GRAVOU: o aparelho ilegível ou com a cota cheia recusa a escrita, e quem
+    // depende de a gravação ter pegado (a fila de saída, R22-1-A2) precisa saber. Quem não
+    // se importa ignora o retorno, como sempre.
+    set(k, v) { try { localStorage.setItem(k, v); return true; } catch (e) { return false; } },
     remove(k) { try { localStorage.removeItem(k); } catch (e) {} }
 };
+
+// Só as linhas do Waze saem do aparelho no login. O cookies.txt que as
+// extensões exportam é o NAVEGADOR INTEIRO (medido no arquivo do owner: 4.370
+// cookies de 362 domínios, 21 do waze.com): o servidor já filtrava na entrada,
+// mas o chaveiro completo viajava até ele. A régua aqui é a LARGA, qualquer
+// *.waze.com; quem estreita pro host da API é o servidor (`cookieValePraHost`).
+// `#HttpOnly_` é o prefixo de cookie HttpOnly no formato Netscape (curl,
+// extensões do Firefox) e passa como veio: quem o normaliza é o servidor.
+// Sem TAB é o formato de cabeçalho (`a=b; c=d`), que não diz o domínio; é o que
+// a extensão do Chrome manda, já só do Waze, e vai como veio.
+// Os TRÊS servidores do WME: América do Norte, resto do mundo e Israel. Havia
+// um quarto, `world`, que era a América do Norte com outro nome (ver
+// `WAZE_REGIONS` no core, onde está medido que `na-Descartes` não existe).
+const REGIOES_DO_WAZE = ['row', 'na', 'il'];
+
+function soCookiesDoWaze(texto) {
+    const s = String(texto || '');
+    if (!s.includes('\t')) return s.trim();
+    return s.split('\n').filter((linha) => {
+        const t = linha.trim().replace(/^#HttpOnly_/, '');
+        if (!t || t[0] === '#') return false;
+        const dominio = t.split(/\s+/)[0].replace(/^\./, '').toLowerCase();
+        return dominio === 'waze.com' || dominio.endsWith('.waze.com');
+    }).join('\n');
+}
+
+// "Sem sessão" nasce AQUI, no aparelho, e vai CARIMBADO: quem decide derrubar a
+// sessão lê a CATEGORIA. Ia só com o texto traduzido, e o app o reconhecia
+// procurando "sess" — o que o espanhol ("Sesión") não tem (auditoria de
+// 2026-09-25): sem token, quem usava o app em espanhol via "Falha ao carregar"
+// em vez da tela de entrar.
+function semSessao() {
+    return { success: false, error: t('api.error.noSession'), errorKey: 'api.error.noSession', errorCategory: 'unauthorized' };
+}
 
 const API = {
     baseUrl: '/api',
@@ -28,30 +65,92 @@ const API = {
         } catch (e) { /* instrumento nunca derruba o login */ }
     },
 
+    // A ADOÇÃO: com a memória vazia, lê a sessão GUARDADA no aparelho e a grava
+    // na memória desta aba — é o que a abertura com sessão salva faz. Só onde a
+    // intenção é adotar: a abertura (`initApp` e o link de pareamento) e a
+    // adoção da sessão que outra aba guardou (`adotarSessaoDoAparelho`, no
+    // app.js). As ROTAS abaixo mandam a sessão da MEMÓRIA (`this.sessionToken`),
+    // nunca a deste método: com a memória vazia — a renovação da queda, a tela de
+    // entrada —, cada pedido adotava calado a sessão da outra aba. Abrir os
+    // Filtros durante a renovação (a lista de estados) a punha na memória: com a
+    // renovação falhando, a aba ficava na tela de entrada com a sessão alheia, a
+    // volta a ela não adotava mais, e o "Sair" dado lá fechava o "Colar cookies"
+    // daqui (auditoria da rodada 13, R13-1-04, MEDIDO; o R12-1-03 nas rotas).
+    // Sem sessão na memória, a rota responde "sem sessão" sem ir à rede, como
+    // numa aba só.
     getSession() {
         if (!this.sessionToken) this.sessionToken = safeLS.get('waze_session_token');
         return this.sessionToken;
     },
 
+    // O "Sair" foi numa OUTRA aba: o token já saiu do armazenamento, e o
+    // diário de sessões com ele. Esta aba só solta a cópia da MEMÓRIA — sem
+    // isso, o ✕ seguinte dela saía com o token de quem saiu (auditoria de
+    // 2026-09-29, R4-5 A1). Pelo `setSession`, o diário ganharia um "token-"
+    // por cima do "Sair" que acabou de apagá-lo.
+    soltarSessao() { this.sessionToken = null; },
+
+    // Há sessão na MEMÓRIA desta aba? O `getSession` vai ao armazenamento
+    // quando a memória está vazia; aqui a pergunta é só sobre a memória.
+    temSessaoNaMemoria() { return !!this.sessionToken; },
+
+    // Região e país são da ABA, como os outros filtros (`AppState.filters`, lidos
+    // na abertura): lidos do aparelho UMA vez, e daí em diante só o gesto DESTA
+    // aba os troca (`setRegion`/`setCountry`, que também gravam, pra próxima
+    // abertura). Relidos a cada chamada, eram do APARELHO: com o app em duas abas,
+    // a outra que trocava de lugar nos Filtros mandava o ✕ desta pro servidor da
+    // região de lá — "não encontrado", contado como "Já tratado por outro editor",
+    // e o pedido pendente no servidor certo —, e a busca seguinte desta trazia a
+    // fila do país de lá (auditoria de 2026-10-01, R5-1 F5). Assim a decisão leva
+    // a região da fila que a aba mostra. `esquecerLugar`: o "Sair" dado noutra aba
+    // gravou o lugar de fábrica no aparelho, e esta o relê da próxima vez.
+    lugarLido: false,
+    lerLugar() {
+        if (this.lugarLido) return;
+        this.lugarLido = true;
+        const regiao = safeLS.get('waze_region');
+        if (regiao) this.region = regiao;
+        const pais = safeLS.get('waze_country');
+        if (pais) this.countryId = this.paisOuPadrao(pais);
+    },
+    esquecerLugar() { this.lugarLido = false; },
+
+    // O país é um inteiro POSITIVO e SEGURO, na régua do `inteiroDoPais` do
+    // servidor: um número, ou um texto só de dígitos (o `waze_country` guardado
+    // é texto). O resto — 'abc', 0, o '-5' de um `localStorage` mexido à mão,
+    // '1e3', '30abc' e o '99999999999999999999' além de 2^53, que o servidor
+    // recusa com `Number.isSafeInteger` — é o Brasil (30). O `|| 30` deixava
+    // passar o negativo e o `parseInt` lia '1e3' como 1 e '30abc' como 30: a busca
+    // voltava 400 `countryRequired` a cada abertura (R18-6-05, R19-6-01).
+    paisOuPadrao(bruto) {
+        const n = typeof bruto === 'number' ? bruto
+            : typeof bruto === 'string' && /^\s*\d+\s*$/.test(bruto) ? Number(bruto) : NaN;
+        return Number.isSafeInteger(n) && n > 0 ? n : 30;
+    },
+
     setRegion(region) {
-        this.region = region || 'row';
+        this.lerLugar();   // senão a 1ª leitura do país traria de volta a região do aparelho
+        this.region = REGIOES_DO_WAZE.includes(region) ? region : 'row';
         safeLS.set('waze_region', this.region);
     },
 
     getRegion() {
-        const stored = safeLS.get('waze_region');
-        if (stored) this.region = stored;
+        this.lerLugar();
+        // MIGRACAO: regiao-world — `world` era a América do Norte com outro
+        // nome (ver `WAZE_REGIONS` no core); quem a escolheu vai pra `na`.
+        if (this.region === 'world') { this.region = 'na'; safeLS.set('waze_region', 'na'); }
+        if (!REGIOES_DO_WAZE.includes(this.region)) this.region = 'row';
         return this.region;
     },
 
     setCountry(id) {
-        this.countryId = parseInt(id, 10) || 30;
+        this.lerLugar();
+        this.countryId = this.paisOuPadrao(id);
         safeLS.set('waze_country', this.countryId);
     },
 
     getCountry() {
-        const stored = safeLS.get('waze_country');
-        if (stored) this.countryId = parseInt(stored, 10) || 30;
+        this.lerLugar();
         return this.countryId;
     },
 
@@ -77,6 +176,39 @@ const API = {
     // em toda chamada, e o recebido leva dado de terceiro (nome de quem mandou
     // o pedido). O que interessa pra depurar é a FORMA da falha.
     chamadas: [],
+
+    // A MARCA da última limpeza do que a página registrou de QUEM ESTAVA aqui —
+    // o `performance.now()` do "Sair" e da troca de conta (quem a põe é o
+    // `esquecerRegistrosDaPagina`, no app.js). É UMA marca pras duas listas que o
+    // relatório do modo dev leva: a de recursos do navegador e este anel. A
+    // chamada que COMEÇOU antes dela é de quem estava aqui, termine quando
+    // terminar: a resposta que chegava depois da limpeza entrava no anel de quem
+    // entrou, com o corpo do pedido — o id do pedido de terceiro, e a posição e o
+    // id de quem saiu, na carona da presença (MEDIDO; pista do lote 12, L12-1).
+    //
+    // Na TROCA DE CONTA a limpeza não é o "Sair": o login (ou o perfil) que a
+    // revela já é de quem ENTROU, e a abertura dele pode estar no ar. Zerar tudo
+    // tirava do anel o `testar-cookies` do próprio login e, quando a troca só se
+    // descobre pelo perfil (a renovação pela extensão publicada, que não repassa
+    // a conta; o código de pareamento sem ela), a abertura inteira — o `perfil`,
+    // a `lista-paises`, a busca da fila (auditoria da rodada 10, R10-1-02 =
+    // R10-4-07, MEDIDO: 1 de 5 chamadas no anel de quem entrou). Cada registro
+    // leva a SESSÃO que o fez (`s`, ver `_marcaDaChamada`), e a limpeza diz qual
+    // fica (`registrosDaSessao`): a chamada dela que começou antes da marca entra.
+    registrosDesde: 0,
+    registrosDaSessao: null,
+
+    // A sessão de uma chamada, pela MARCA curta do token (`marcaDaSessao`, a do
+    // app — nunca o token): a do pedido, ou, nas rotas de ENTRADA (o login por
+    // cookies, o resgate do pareamento), a que a resposta criou. Sem token nos
+    // dois (o cancelamento de um código), nenhuma.
+    _marcaDaChamada(body, data) {
+        try {
+            const tok = (body && typeof body.sessionToken === 'string' && body.sessionToken)
+                || (data && typeof data.sessionToken === 'string' && data.sessionToken) || null;
+            return tok && typeof marcaDaSessao === 'function' ? marcaDaSessao(tok) : null;
+        } catch (e) { return null; }
+    },
 
     // Cabeçalhos que interessam pra depurar, e SÓ eles. `cf-ray` diz qual
     // datacenter e qual execução respondeu; `cf-cache-status` diz se a BORDA
@@ -122,13 +254,28 @@ const API = {
     // campos saem como marcador: credencial não ajuda a depurar, e o prazo dela
     // já vai no `presencaApp.token` do resumo.
     _ROTAS_COM_CREDENCIAL: ['chat', 'presenca-app'],
-    _semCredencial(bruto) {
+    // E o PAREAMENTO devolve o segredo (`code`, e o `curto` digitável): ele vale
+    // uma sessão NOVA por 5 minutos e não depura nada — o que depura é o prazo e o
+    // sucesso, que ficam. O `sessionToken` de qualquer resposta (o `claim`, o
+    // `testar-cookies`) sai como no corpo do pedido: ele já está no arquivo uma
+    // vez, no localStorage (auditoria de 2026-09-25).
+    _SEGREDOS_POR_ROTA: {
+        'chat': { token: '[credencial do tempo real]', chave: '[credencial do tempo real]' },
+        'presenca-app': { token: '[credencial do tempo real]', chave: '[credencial do tempo real]' },
+        'parear': { code: '[código de pareamento]', curto: '[código de pareamento]' },
+    },
+    _semSegredoNaResposta(endpoint, bruto) {
+        const chaves = Object.assign({}, this._SEGREDOS_POR_ROTA[endpoint] || {});
+        if (bruto.includes('"sessionToken"')) chaves.sessionToken = '[token — ver localStorage]';
+        return Object.keys(chaves).length ? this._semCredencial(bruto, chaves) : bruto;
+    },
+    _semCredencial(bruto, chaves) {
         try {
             const o = JSON.parse(bruto);
             const anda = (v) => {
                 if (!v || typeof v !== 'object') return;
                 for (const k of Object.keys(v)) {
-                    if ((k === 'token' || k === 'chave') && typeof v[k] === 'string') v[k] = '[credencial do tempo real]';
+                    if (Object.prototype.hasOwnProperty.call(chaves, k) && typeof v[k] === 'string') v[k] = chaves[k];
                     else anda(v[k]);
                 }
             };
@@ -153,6 +300,11 @@ const API = {
     },
 
     _registrar(endpoint, inicio, http, data, extra) {
+        // A chamada que COMEÇOU antes da última limpeza é de quem estava aqui
+        // (ver `registrosDesde`): o que chega depois dela não entra — menos a da
+        // sessão que a limpeza deixou ficar (a de quem entrou, na troca de conta).
+        const s = extra && extra.s ? extra.s : null;
+        if (inicio < this.registrosDesde && !(s && s === this.registrosDaSessao)) return;
         try {
             const reg = {
                 t: new Date().toISOString(),
@@ -212,6 +364,9 @@ const API = {
         // AppState.fetching preso e o botão de refresh (com guard) mudo.
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 45000);
+        // A resposta INTEIRA chegou (status, cabeçalhos e corpo)? É o que separa
+        // "a rede falhou" de "chegou e não era JSON" no `catch` (ver `_motivo`).
+        let chegou = false;
         try {
             const response = await fetch(`${this.baseUrl}/${endpoint}`, {
                 method: 'POST',
@@ -236,6 +391,7 @@ const API = {
                 if (v) cab[h] = v;
             }
             const bruto = await response.text();
+            chegou = true;
             let data, naoEraJson = null;
             try {
                 data = JSON.parse(bruto);
@@ -246,9 +402,9 @@ const API = {
                 naoEraJson = bruto.slice(0, 600);
                 throw new Error('resposta não é JSON (HTTP ' + http + ')');
             } finally {
-                const corpo = !this._guardaCorpo() ? null
-                    : this._ROTAS_COM_CREDENCIAL.includes(endpoint) ? this._semCredencial(bruto) : bruto;
+                const corpo = !this._guardaCorpo() ? null : this._semSegredoNaResposta(endpoint, bruto);
                 this._registrar(endpoint, _t0, http, data, {
+                    s: this._marcaDaChamada(body, data),
                     cab,
                     naoEraJson,
                     corpoReq: this._semSegredo(body),
@@ -280,14 +436,23 @@ const API = {
             // `http: 0` é a marca de "nem chegou a responder" — aborto por
             // timeout, rede caída, DNS. Sem distinguir isso de um 500, todo
             // problema de rede vira "erro do servidor" na análise.
+            //
+            // `_motivo` é a marca de "a resposta NEM CHEGOU" (rede, DNS, tempo
+            // esgotado, corpo cortado no meio), e só ela. A que chega mas não é
+            // JSON (502 da borda com a origem fora, 429 da cota do plano grátis,
+            // desafio do WAF) PROVA a rede e segue `transient`, sem a marca: com
+            // ela, a conversa dizia "sem conexão" com a rede boa e os tetos de
+            // um pedido por minuto se soltavam (auditoria de 2026-09-30,
+            // R5-5-3). E sem `httpCode`, que é o status do WAZE pra fila de
+            // saída (um 502 da borda não é o Waze recusando AQUELE pedido).
             const falha = { success: false, error: t('api.error.connection'), errorCategory: 'transient',
-                            _motivo: String((error && error.name) || error).slice(0, 60) };
+                            ...(chegou ? {} : { _motivo: String((error && error.name) || error).slice(0, 60) }) };
             // Só registra aqui o que NÃO passou pelo `finally` do try — ou seja,
             // falha antes da resposta existir (rede, DNS, timeout). Corpo não
             // JSON já foi registrado lá com o status REAL; registrar de novo
             // sobrescreveria o status por 0 e desfaria o conserto.
             if (!/resposta não é JSON/.test(String(error && error.message))) {
-                this._registrar(endpoint, _t0, 0, falha, { corpoReq: this._semSegredo(body) });
+                this._registrar(endpoint, _t0, 0, falha, { s: this._marcaDaChamada(body, null), corpoReq: this._semSegredo(body) });
             }
             return falha;
         } finally {
@@ -296,8 +461,12 @@ const API = {
     },
 
     async testCookies(cookies, region, countryId) {
+        const soDoWaze = soCookiesDoWaze(cookies);
+        if (!soDoWaze.trim()) {
+            return { success: false, errorKey: 'srv.err.cookieFormatExport', error: t('srv.err.cookieFormatExport') };
+        }
         const result = await this._post('testar-cookies', {
-            cookies,
+            cookies: soDoWaze,
             region: region || this.getRegion(),
             countryId: countryId || this.getCountry()
         });
@@ -308,9 +477,9 @@ const API = {
     },
 
     async fetchPlaces(page = 1, filters = {}) {
-        const sessionToken = this.getSession();
+        const sessionToken = this.sessionToken;
         if (!sessionToken) {
-            return { success: false, error: t('api.error.noSession') };
+            return semSessao();
         }
         return this._post('buscar-places', {
             sessionToken,
@@ -324,28 +493,32 @@ const API = {
     // `presenca` (opcional): a posição do card na tela, de carona na ação — o
     // servidor a escreve no mapa do WME na mesma ida (fase 2). Sem ela, o corpo
     // sai exatamente como sempre saiu.
-    async markAsRead(venueID, updateRequestID, presenca) {
-        const sessionToken = this.getSession();
+    // `regiao` é a do GESTO (ver `handleReject`): a ação pode sair segundos ou
+    // dias depois (janela do Desfazer, retentativa, fila de saída), e a região
+    // do filtro pode ter mudado nesse meio. Pedido mandado ao servidor errado
+    // volta "não encontrado", que o app lê como "já tratado" e conta como feito.
+    async markAsRead(venueID, updateRequestID, presenca, regiao) {
+        const sessionToken = this.sessionToken;
         if (!sessionToken) {
-            return { success: false, error: t('api.error.noSession') };
+            return semSessao();
         }
         return this._post('marcar-lido', {
             sessionToken,
-            region: this.getRegion(),
+            region: regiao || this.getRegion(),
             venueID,
             updateRequestID,
             ...(presenca ? { presenca } : {})
         });
     },
 
-    async markAsReadBatch(items) {
-        const sessionToken = this.getSession();
+    async markAsReadBatch(items, regiao) {
+        const sessionToken = this.sessionToken;
         if (!sessionToken) {
-            return { success: false, error: t('api.error.noSession') };
+            return semSessao();
         }
         return this._post('marcar-lido', {
             sessionToken,
-            region: this.getRegion(),
+            region: regiao || this.getRegion(),
             items
         });
     },
@@ -353,28 +526,28 @@ const API = {
     // Guarda (ou solta) o pedido na estrela do próprio editor. `value` vai
     // EXPLÍCITO: o core exige boolean estrito e não tem padrão, porque é uma
     // flag de dois lados e coerção decidiria o lado errado em silêncio.
-    async guardarPedido(venueID, updateRequestID, value) {
-        const sessionToken = this.getSession();
+    async guardarPedido(venueID, updateRequestID, value, regiao) {
+        const sessionToken = this.sessionToken;
         if (!sessionToken) {
-            return { success: false, error: t('api.error.noSession') };
+            return semSessao();
         }
         return this._post('guardar-pedido', {
             sessionToken,
-            region: this.getRegion(),
+            region: regiao || this.getRegion(),
             venueID,
             updateRequestID,
             value: value === true
         });
     },
 
-    async rejectPlace(venueID, updateRequestID, presenca) {
-        const sessionToken = this.getSession();
+    async rejectPlace(venueID, updateRequestID, presenca, regiao) {
+        const sessionToken = this.sessionToken;
         if (!sessionToken) {
-            return { success: false, error: t('api.error.noSession') };
+            return semSessao();
         }
         return this._post('validar-place', {
             sessionToken,
-            region: this.getRegion(),
+            region: regiao || this.getRegion(),
             venueID,
             updateRequestID,
             ...(presenca ? { presenca } : {})
@@ -386,14 +559,21 @@ const API = {
     // no WME). Só é oferecido pra pedido de FOTO: ali não há campo pra ajustar,
     // então a decisão cabe inteira na tela, que é o que a regra de "nunca
     // aprova" existia pra proteger.
-    async aprovarPedido(venueID, updateRequestID) {
-        const sessionToken = this.getSession();
+    //
+    // `regiao`: a do GESTO, como no `rejectPlace`. As quatro escritas do
+    // lightbox (aprovar, excluir, aquecer a exclusão e renomear) saíam com a
+    // região do ENVIO — e o envio sai até 3 s depois (a janela do Desfazer) ou
+    // numa retentativa: trocada a região nesse meio, a escrita ia pro servidor
+    // errado e voltava "não encontrado", que na aprovação conta como feita
+    // (auditoria de 2026-09-29, L26).
+    async aprovarPedido(venueID, updateRequestID, regiao) {
+        const sessionToken = this.sessionToken;
         if (!sessionToken) {
-            return { success: false, error: t('api.error.noSession') };
+            return semSessao();
         }
         return this._post('validar-place', {
             sessionToken,
-            region: this.getRegion(),
+            region: regiao || this.getRegion(),
             venueID,
             updateRequestID,
             approve: true,
@@ -404,55 +584,95 @@ const API = {
     // local antes de gravar e o Waze só lê por bbox — sem as coordenadas ele
     // não tem como buscar o venue de novo.
     // Aquece a releitura do local no servidor, pra ela não custar tempo depois
-    // do "Excluir". Disparada quando o editor TOCA na lixeira: os ~700ms dela
-    // correm enquanto ele lê a pergunta do diálogo.
+    // da exclusão. Disparada quando o editor TOCA na lixeira com o Desfazer
+    // ligado: os ~700ms dela correm dentro da janela do Desfazer.
     //
     // Melhor-esforço de propósito — se falhar, o `excluirFoto` relê na hora e a
-    // pessoa só espera mais. Por isso nem espera resposta nem trata erro.
-    prepararExclusao(venueID, lat, lon) {
-        const sessionToken = this.getSession();
+    // pessoa só espera mais. Por isso não trata erro. Mas devolve a PROMESSA, que
+    // nunca rejeita: o aquecimento entra na vez das escritas de foto do local, e
+    // a exclusão (e a aprovação) do local só sai depois da resposta dele
+    // (`vezDasFotosNoLocal`, auditoria da rodada 12, R12-3-01). Sem sessão não sai
+    // nada, e não há o que esperar.
+    //
+    // `aquecimento`: o id do GESTO (`idDoGestoDaLixeira`), que a exclusão dele
+    // leva também — a lista lida aqui só serve a ela (R13-3-03). Sem ele, o
+    // servidor não lê nada.
+    prepararExclusao(venueID, lat, lon, regiao, aquecimento) {
+        const sessionToken = this.sessionToken;
         if (!sessionToken) return;
-        this._post('excluir-foto', {
-            sessionToken, region: this.getRegion(), action: 'preparar',
-            venueID, imageID: 'preparar', lat, lon,
+        return this._post('excluir-foto', {
+            sessionToken, region: regiao || this.getRegion(), action: 'preparar',
+            venueID, imageID: 'preparar', lat, lon, aquecimento,
         }).catch(() => {});
     },
 
     // Renomear o local. Escrita de dado de LOCAL — a única do app — e por isso
     // o `nome` vai CRU: quem apara é o servidor (`trim`, teto) e quem recusa de
     // verdade é o Waze, que valida permissão e lockRank na gravação.
-    async renomearLocal(venueID, nome) {
-        const sessionToken = this.getSession();
+    async renomearLocal(venueID, nome, regiao) {
+        const sessionToken = this.sessionToken;
         if (!sessionToken) {
-            return { success: false, error: t('api.error.noSession') };
+            return semSessao();
         }
         return this._post('renomear-local', {
-            sessionToken, region: this.getRegion(), venueID, nome,
+            sessionToken, region: regiao || this.getRegion(), venueID, nome,
         });
     },
 
-    async excluirFoto(venueID, imageID, lat, lon) {
-        const sessionToken = this.getSession();
+    // `aquecimento`: o gesto do toque na lixeira, quando ele saiu (ver o
+    // `prepararExclusao`).
+    async excluirFoto(venueID, imageID, lat, lon, regiao, aquecimento) {
+        const sessionToken = this.sessionToken;
         if (!sessionToken) {
-            return { success: false, error: t('api.error.noSession') };
+            return semSessao();
         }
         return this._post('excluir-foto', {
             sessionToken,
-            region: this.getRegion(),
+            region: regiao || this.getRegion(),
             venueID,
             imageID,
             lat,
-            lon
+            lon,
+            aquecimento
         });
     },
 
-    async getProfile() {
-        const sessionToken = this.getSession();
+    // `regiao` só pra quem PERGUNTA a outro servidor (ver `paisDoPerfil`).
+    async getProfile(regiao) {
+        const sessionToken = this.sessionToken;
         if (!sessionToken) {
-            return { success: false, error: t('api.error.noSession') };
+            return semSessao();
         }
-        return this._post('perfil', {
+        const corpo = {
             sessionToken,
+            region: regiao || this.getRegion()
+        };
+        // O "Manter conectado": a preferência do aparelho, repetida a cada
+        // `perfil` pra o servidor alcançá-la sozinho se uma troca se perdeu.
+        // Só vai quando a preferência está DEFINIDA (o `app.js` devolve
+        // `undefined` antes de ler o aparelho) e como booleano ESTRITO.
+        const manter = typeof manterConectadoParaOServidor === 'function' ? manterConectadoParaOServidor() : undefined;
+        if (typeof manter === 'boolean') corpo.manter = manter;
+        const r = await this._post('perfil', corpo);
+        // O que ESTE pedido mandou, pra quem lê a resposta saber a que ela responde:
+        // se a pessoa trocou o interruptor depois, a resposta é velha.
+        if (typeof corpo.manter === 'boolean' && r && typeof r === 'object') r.manterEnviado = corpo.manter;
+        return r;
+    },
+
+    // O interruptor "Manter conectado", no GESTO: liga ou desliga a renovação
+    // da sessão pelo servidor. `on` é booleano ESTRITO (o servidor recusa o que
+    // não for). Sem retentativa: é um gesto, e quem falha avisa e volta ao
+    // estado real (ver `aoMudarManterConectado`).
+    async manterConectado(on) {
+        const sessionToken = this.sessionToken;
+        if (!sessionToken) {
+            return semSessao();
+        }
+        return this._post('sessao', {
+            action: 'manter',
+            sessionToken,
+            on: on === true,
             region: this.getRegion()
         });
     },
@@ -461,8 +681,8 @@ const API = {
     // GESTO de desligar (`visivel: false`) — mover e ligar vão de carona nas
     // ações, sem requisição nova.
     async presencaWaze(campos) {
-        const sessionToken = this.getSession();
-        if (!sessionToken) return { success: false, error: t('api.error.noSession') };
+        const sessionToken = this.sessionToken;
+        if (!sessionToken) return semSessao();
         return this._post('presenca-waze', {
             sessionToken,
             region: this.getRegion(),
@@ -474,37 +694,39 @@ const API = {
     // `token: true`, o token do tempo real. `campos` traz pais, userId,
     // conhecidos e, quando houver, a instalação e os ids a confirmar.
     async presencaApp(campos) {
-        const sessionToken = this.getSession();
-        if (!sessionToken) return { success: false, error: t('api.error.noSession') };
+        const sessionToken = this.sessionToken;
+        if (!sessionToken) return semSessao();
         return this._post('presenca-app', { sessionToken, region: this.getRegion(), ...campos });
     },
 
     // O chat do WME: `abrir`, `enviar`, `lida` (e as outras ações da rota).
     async chat(campos) {
-        const sessionToken = this.getSession();
-        if (!sessionToken) return { success: false, error: t('api.error.noSession') };
+        const sessionToken = this.sessionToken;
+        if (!sessionToken) return semSessao();
         return this._post('chat', { sessionToken, region: this.getRegion(), ...campos });
     },
 
-    async listCountries() {
-        const sessionToken = this.getSession();
+    // `regiao` pra quem mostra a lista de OUTRA região antes de ela valer (a
+    // troca de região no modal de Filtros, antes do "Aplicar").
+    async listCountries(regiao) {
+        const sessionToken = this.sessionToken;
         if (!sessionToken) {
-            return { success: false, error: t('api.error.noSession') };
+            return semSessao();
         }
         return this._post('lista-paises', {
             sessionToken,
-            region: this.getRegion()
+            region: regiao || this.getRegion()
         });
     },
 
-    async listStates(countryId) {
-        const sessionToken = this.getSession();
+    async listStates(countryId, regiao) {
+        const sessionToken = this.sessionToken;
         if (!sessionToken) {
-            return { success: false, error: t('api.error.noSession') };
+            return semSessao();
         }
         return this._post('lista-estados', {
             sessionToken,
-            region: this.getRegion(),
+            region: regiao || this.getRegion(),
             countryId: parseInt(countryId, 10)
         });
     },
@@ -514,7 +736,7 @@ const API = {
     // sente ao pedir pra sair) e a remota vira melhor-esforço com retentativa.
     // Sem o parâmetro, usa o token guardado e limpa como antes.
     async destroySession(tokenExplicito) {
-        const sessionToken = tokenExplicito || this.getSession();
+        const sessionToken = tokenExplicito || this.sessionToken;
         if (!sessionToken) return { success: true };
         const result = await this._post('sessao', {
             action: 'destroy',
@@ -529,10 +751,25 @@ const API = {
     // `comCodigo` pede o registro CURTO (6 chars, digitável) em vez do longo do
     // QR. São registros diferentes no servidor, com forças diferentes — ver
     // `derivarChave` no core. O padrão é o forte, de propósito.
-    async criarPareamento({ comCodigo = false } = {}) {
-        const sessionToken = this.getSession();
-        if (!sessionToken) return { success: false, error: t('api.error.noSession') };
-        return this._post('parear', { action: 'create', sessionToken, comCodigo });
+    // `conta`: de quem é a sessão, pro aparelho que resgatar saber na hora.
+    //
+    // A sessão é a DESTA aba, a da MEMÓRIA — nunca a que o `getSession` iria
+    // buscar no aparelho com ela vazia: o código é uma CÓPIA da sessão que ele
+    // leva. Tocado durante a renovação da queda (a Ajuda ainda mostra o botão),
+    // ele adotava calado a sessão que outra aba guardou e criava um código com
+    // ela (auditoria da rodada 12, R12-1-03, MEDIDO). Sem sessão aqui, não sai:
+    // "não deu pra gerar o código", como sem sessão nenhuma no aparelho.
+    async criarPareamento({ comCodigo = false, conta = null } = {}) {
+        const sessionToken = this.sessionToken;
+        if (!sessionToken) return semSessao();
+        return this._post('parear', { action: 'create', sessionToken, comCodigo, ...(conta ? { conta } : {}) });
+    },
+
+    // O "Sair" cancela os códigos de pareamento que ESTE aparelho emitiu (ver o
+    // `cancel` no core). Melhor esforço: sem rede, o código vence em 5 min.
+    async cancelarPareamento(code) {
+        if (!code) return { success: true };
+        return this._post('parear', { action: 'cancel', code });
     },
 
     async resgatarPareamento(code) {

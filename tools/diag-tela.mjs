@@ -18,15 +18,16 @@
 //     tracejada com a marca de QUEBRADA quando o aparelho disse que ela estava;
 //   · pixel de canvas não vive no DOM — usa o `dataURL` do momento quando ele
 //     existe, e diz "origem cruzada" quando o navegador se recusou a dá-lo;
-//   · a fonte Inter é binária e o diagnóstico a lê como texto, então a
-//     renderização usa a fonte do sistema: o texto pode medir um pouco diferente.
+//   · a fonte vem do REPOSITÓRIO (o diagnóstico não a traz): quando ela não
+//     carrega na remontagem, o rodapé diz, e o texto pode medir diferente.
 //
 // A página é montada SEM JAVASCRIPT e SEM REDE de propósito: o DOM capturado já
 // é o resultado; re-executar scripts mudaria o instante que se quer olhar.
 import { carregarPlaywright, abrirChromium } from './navegador.mjs';
 import { readFileSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { lerDiagnostico } from './diag-ler.mjs';
-import { basename, join } from 'node:path';
+import { basename, join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 // `--cru` tira as MARCAS da ferramenta (hachura na imagem que faltou, moldura no
 // canvas e no FAB). Elas existem porque espaço vazio se confunde com "estava
@@ -49,20 +50,116 @@ mkdirSync(saida, { recursive: true });
 
 // Os dois formatos convivem: o primeiro diagnóstico guardava UM `dom`; o do FAB
 // guarda N `momentos`. Ler os dois evita que arquivo antigo vire inútil.
-const momentos = Array.isArray(d.momentos) && d.momentos.length
-  ? d.momentos
-  : (d.dom ? [{ t: d._gerado, motivo: 'arquivo v1', dom: d.dom,
-                imagens: [], canvas: [], modais: [], painel: '?' }] : []);
+//
+// Relatório SEM captura (a pessoa baixou sem tocar no botão) remonta o `dom` da
+// hora de baixar — e o rótulo dizia "arquivo v1 · painel=?" num v10, como se o
+// relatório fosse do primeiro formato e ninguém soubesse o que estava na tela
+// (auditoria de 2026-09-26). A versão é a DELE, e o painel e os modais são os
+// que o próprio relatório mediu (`resumo.telaAgora`).
+function momentosDoRelatorio(d) {
+  if (Array.isArray(d.momentos) && d.momentos.length) return d.momentos;
+  if (!d.dom) return [];
+  const ta = (d.resumo && d.resumo.telaAgora) || {};
+  return [{ t: d._gerado, motivo: `relatório v${d._versaoDoDiag ?? '?'}, sem captura (a tela na hora de baixar)`,
+            dom: d.dom, imagens: [], canvas: [], modais: Array.isArray(ta.modais) ? ta.modais : [],
+            painel: ta.painel || '?' }];
+}
+const atuais = momentosDoRelatorio(d);
+// E as capturas das OUTRAS ABERTURAS guardadas no aparelho (o app fechado e
+// reaberto com o modo dev ligado): são justamente as do defeito que atravessa
+// um fechar e reabrir, e ficavam de fora da remontagem (auditoria de
+// 2026-09-25). Desde que o relatório leva também o que a OUTRA ABA aberta gravou
+// (R6-4-5), "primeiro as anteriores" deixou de ser a ordem do tempo: a da outra
+// aba pode ter começado DEPOIS desta (R7-4-04). Vão todas pela hora da captura
+// (`m.t`), com a abertura no rótulo — "[outra aba …]" pra a que viveu junto com
+// a do relatório (`simultanea`, ou, em relatório anterior à marca, a que gravou
+// depois de esta abrir). PURA, conferida sem navegador (test/diag-ferramentas).
+function momentosEmOrdem(d, atuais) {
+  const inicioDesta = Date.parse(d && d.aberturaAtual && d.aberturaAtual.inicio);
+  const juntoComEsta = (a) => a.simultanea === true
+    || (Number.isFinite(inicioDesta) && Number.isFinite(a.salvoEm) && a.salvoEm > inicioDesta);
+  const outras = (Array.isArray(d && d.aberturasAnteriores) ? d.aberturasAnteriores : [])
+    .flatMap((a, ia) => (Array.isArray(a && a.momentos) ? a.momentos : [])
+      .filter((m) => m && m.dom)
+      .map((m) => ({ ...m, motivo: `[${juntoComEsta(a) ? 'outra aba' : 'abertura'} ${a.id || ia + 1}] ` + (m.motivo || '') })));
+  // Só a forma ISO (a do app): o `Date.parse` do V8 aceita quase qualquer texto.
+  const hora = (m) => {
+    const t = m && typeof m.t === 'string' && /^\d{4}-\d\d-\d\dT/.test(m.t) ? Date.parse(m.t) : NaN;
+    return Number.isFinite(t) ? t : Infinity;
+  };
+  return [...outras, ...(Array.isArray(atuais) ? atuais : [])]
+    .map((m, i) => ({ m, i, t: hora(m) }))
+    .sort((x, y) => (x.t - y.t) || (x.i - y.i))
+    .map((x) => x.m);
+}
+const momentos = momentosEmOrdem(d, atuais);
+
+// O endereço `file:` da página remontada, pra pasta de saída RELATIVA também.
+// Era `'file://' + caminho`: com uma pasta relativa (`tela-x`, que o uso
+// permite), o primeiro nome do caminho virava o HOST da URL — em minúsculas — e
+// a navegação morria em `net::ERR_INVALID_URL` (auditoria da rodada 10,
+// R10-4-09). Espaço, `#` e `%` no caminho também quebravam: a URL não os
+// codificava. `resolve` faz o caminho absoluto a partir da pasta de onde a
+// ferramenta foi chamada, e o `pathToFileURL` codifica o resto.
+function urlDoArquivo(caminho) {
+  return pathToFileURL(resolve(caminho)).href;
+}
+
+// As SENTINELAS: as do RELATÓRIO (`resumo.alertas`) e as de CADA CAPTURA, no
+// instante dela (`m.alertas`, relatório v4+). As da captura são as que importam
+// AQUI: o relatório costuma ser baixado com os Filtros abertos, quando as
+// sentinelas de toque calam de propósito, e o defeito estava na tela quando a
+// pessoa tocou no botão — ou seja, na captura que esta ferramenta remonta. Ela
+// lia só as do relatório e dizia "nenhum" com o esqueleto por cima do card na
+// imagem que ela mesma gerava (auditoria de 2026-10-01, R6-4-6). PURA: devolve
+// as chaves de cada momento (a linha dele), as capturas que acusaram algo (o
+// `resumo.json`) e o texto do terminal — e é conferida sem navegador
+// (test/diag-ferramentas). `nomes[i]` é o arquivo da imagem do momento `i`.
+function sentinelasDaTela(d, momentos, nomes) {
+  const doRelatorio = (d && d.resumo && Array.isArray(d.resumo.alertas)) ? d.resumo.alertas : [];
+  const daCaptura = (m) => (Array.isArray(m && m.alertas) ? m.alertas : [])
+    .filter((a) => a && typeof a.chave === 'string');
+  const porMomento = momentos.map((m) => daCaptura(m).map((a) => a.chave));
+  const nasCapturas = momentos
+    .map((m, i) => ({ arquivo: nomes[i], quando: m.t, motivo: m.motivo, painel: m.painel, alertas: daCaptura(m) }))
+    .filter((c) => c.alertas.length);
+  const detalhe = (al) => {
+    const extra = Object.entries(al).filter(([k]) => k !== 'chave' && k !== 'msg')
+      .map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`).join(' ');
+    return `[${al.chave}] ${String(al.msg || '')}${extra ? '  (' + extra + ')' : ''}`;
+  };
+  const texto = [];
+  if (doRelatorio.length) {
+    texto.push(`⚠ ${doRelatorio.length} alerta(s) do app — invariante conhecida quebrada NO APARELHO:`);
+    for (const al of doRelatorio) texto.push('  · ' + detalhe(al));
+  }
+  if (nasCapturas.length) {
+    texto.push(`⚠ ${nasCapturas.length} captura(s) com alerta do app — quebrada NO INSTANTE em que a pessoa tocou no botão:`);
+    for (const c of nasCapturas) {
+      texto.push(`  ${c.arquivo}  ${c.motivo || ''}  painel=${c.painel ?? '?'}`);
+      for (const al of c.alertas) texto.push('    · ' + detalhe(al));
+    }
+  }
+  return {
+    alertas: doRelatorio,
+    alertasNasCapturas: nasCapturas.map((c) => ({ ...c, alertas: c.alertas.map((a) => a.chave) })),
+    porMomento,
+    texto,
+  };
+}
+const nomeDoMomento = (i) => `momento-${String(i + 1).padStart(2, '0')}.png`;
+const sentinelas = sentinelasDaTela(d, momentos, momentos.map((_, i) => nomeDoMomento(i)));
+
 if (!momentos.length) {
   console.error('o arquivo não tem nem `momentos` nem `dom` — nada pra remontar');
   process.exit(1);
 }
 
 const codigo = d.codigo || {};
-const css = Object.entries(codigo)
+const cssDoAparelho = Object.entries(codigo)
   .filter(([u, v]) => /\.css($|\?)/.test(u) && v && typeof v.corpo === 'string')
   .map(([, v]) => v.corpo).join('\n');
-if (!css) console.warn('aviso: nenhum CSS no arquivo — a tela sai sem estilo');
+if (!cssDoAparelho) console.warn('aviso: nenhum CSS no arquivo — a tela sai sem estilo');
 
 // A FONTE vem do repositório, não do diagnóstico. O diagnóstico lê todo recurso
 // como TEXTO (é o que serve pro HTML/JS/CSS), e um `.woff2` lido assim chega
@@ -70,25 +167,46 @@ if (!css) console.warn('aviso: nenhum CSS no arquivo — a tela sai sem estilo')
 // o que arruína qualquer comparação com a tela de verdade. A fonte é ARQUIVO DO
 // PROJETO: casar pelo nome e embutir em base64 devolve a métrica exata.
 //
+// E ela entra NO LUGAR do `url(…)` da PRÓPRIA `@font-face` do app, que vem no
+// CSS do aparelho: a família, o peso e o `unicode-range` são os que o app
+// declara. Até a auditoria de 2026-09-26 a ferramenta registrava a fonte com um
+// nome INVENTADO ("Inter var", 100–900), que o CSS do app (`Inter`, 300–700)
+// nunca pede — a face embutida ficava `unloaded`, a remontagem saía na fonte do
+// sistema, e `fontesEmbutidas` afirmava o contrário. Registrar pela regra do app
+// é o que faz a família nunca mais divergir: se o app trocar o nome, a
+// remontagem segue.
+//
 // Só casa por NOME DE ARQUIVO dentro de `fonts/` deste repositório: nada é
 // buscado na rede, e diagnóstico de outro app simplesmente não encontra par.
-//
-// Procura nos RECURSOS da página, e não só no `codigo`: desde v2026.09.10-04 o
-// coletor deixa a fonte FORA do `codigo` (binário lido como texto não serve), e
-// esta busca olhava só lá — toda tela remontada desde então saiu com a fonte do
-// sistema, sem aviso. A correção valeu no coletor e não no leitor.
-const fontes = [];
-const urlsDaPagina = [...new Set([...Object.keys(codigo),
-  ...(Array.isArray(d.recursos) ? d.recursos.map((r) => r && r.url).filter((u) => typeof u === 'string') : [])])];
-for (const u of urlsDaPagina) {
-  const m = /\/fonts\/([\w.-]+\.woff2?)$/.exec(u);
-  if (!m) continue;
-  const local = new URL('../fonts/' + m[1], import.meta.url);
-  if (!existsSync(local)) continue;
-  const b64 = readFileSync(local).toString('base64');
-  fontes.push({ nome: m[1], url: u, b64Bytes: b64.length,
-                css: `@font-face{font-family:"Inter var";font-style:normal;font-weight:100 900;`
-                   + `font-display:swap;src:url(data:font/woff2;base64,${b64}) format("woff2");}` });
+function embutirFontes(css, lerFonte) {
+  const fontes = [];
+  const novo = String(css).replace(/url\(\s*(['"]?)([^'")]*\/fonts\/([\w.-]+\.woff2?))\1\s*\)/g, (tudo, _aspas, url, nome) => {
+    const b64 = lerFonte(nome);
+    if (!b64) return tudo;
+    if (!fontes.some((f) => f.nome === nome)) fontes.push({ nome, url, b64Bytes: b64.length });
+    return `url(data:font/woff2;base64,${b64})`;
+  });
+  return { css: novo, fontes };
+}
+const { css, fontes } = embutirFontes(cssDoAparelho, (nome) => {
+  const local = new URL('../fonts/' + nome, import.meta.url);
+  return existsSync(local) ? readFileSync(local).toString('base64') : null;
+});
+
+// A ESCALA do texto do aparelho (relatório com `computado.escala`, R21-4-03): a raiz em px. A remontagem
+// saía SEMPRE com a raiz de 16 px — a letra e as caixas de 1× —, mesmo quando a pessoa usava o texto do
+// sistema aumentado (com a raiz a 24 px só na CSSOM, o `outerHTML` não tem rastro dela, e a remontagem
+// ganhava as linhas Tipo/Criador que na tela real ficavam cortadas). O da CAPTURA vale (é o instante dela); o
+// do relatório é o da hora de baixar. Número inteiro-ou-fração entre 8 e 96, nada mais entra num estilo.
+// Relatório de antes do campo: `null`, e a remontagem é a de sempre. PURA, conferida sem navegador.
+function escalaDaTela(d, m) {
+  const de = (x) => {
+    const e = x && x.computado && x.computado.escala;
+    const px = e && e.raizPx;
+    return typeof px === 'number' && Number.isFinite(px) && px >= 8 && px <= 96 ? px : null;
+  };
+  const px = de(m) ?? de(d);
+  return px;
 }
 
 const janela = (d.ambiente && d.ambiente.tela && d.ambiente.tela.janela) || '390x844';
@@ -134,9 +252,11 @@ function preparar(m) {
     animation-fill-mode: forwards !important; animation-iteration-count: 1 !important;
     transition-duration: 0s !important; transition-delay: 0s !important;
   }`;
-  const fonteCss = fontes.map((f) => f.css).join('\n');
+  // A raiz do aparelho, depois do CSS do app (o mesmo seletor, o último ganha): sem ela a remontagem é a de 16 px.
+  const raizPx = escalaDaTela(d, m);
+  const escala = raizPx !== null && raizPx !== 16 ? `<style>html{font-size:${raizPx}px}</style>` : '';
   html = html.replace(/<\/head>/i,
-    `<style>${fonteCss}</style><style>${css}</style><style>${semAnimacao}</style><style>${marca}</style></head>`);
+    `<style>${css}</style>${escala}<style>${semAnimacao}</style><style>${marca}</style></head>`);
   for (const src of quebradas) {
     html = html.split(src).join(src + '" data-diag-quebrada="1');
   }
@@ -200,9 +320,20 @@ for (let i = 0; i < momentos.length; i++) {
     process.exit(1);
   }
   writeFileSync(tmp, pronto);
-  await page.goto('file://' + tmp, { waitUntil: 'load' });
+  await page.goto(urlDoArquivo(tmp), { waitUntil: 'load' });
+  // A FONTE CARREGOU? Medido na página, e não deduzido da lista acima: o
+  // `evaluate` roda mesmo com o JavaScript da página desligado. É a família que
+  // o CSS do app pede pro corpo (`Inter`), e esperar as fontes antes do print
+  // tira a corrida entre a troca de fonte (`font-display: swap`) e a imagem.
+  const fonte = await page.evaluate(async () => {
+    try {
+      await document.fonts.ready;
+      const familia = getComputedStyle(document.body).fontFamily.split(',')[0].trim().replace(/^["']|["']$/g, '');
+      return { familia, carregou: document.fonts.check(`16px "${familia}"`) };
+    } catch (e) { return { erro: String(e && e.message).slice(0, 80) }; }
+  });
 
-  const nome = `momento-${String(i + 1).padStart(2, '0')}.png`;
+  const nome = nomeDoMomento(i);
   await page.screenshot({ path: join(saida, nome), fullPage: false });
   await ctx.close();
   linhas.push({
@@ -210,44 +341,49 @@ for (let i = 0; i < momentos.length; i++) {
     modais: (m.modais || []).join(',') || '—',
     toasts: (m.toastsNaTela || []).length,
     imagensQuebradas: (m.imagens || []).filter((x) => x.quebrada).length,
+    fonte: fonte && fonte.familia ? `${fonte.familia}${fonte.carregou ? '' : ' (NÃO carregou)'}` : '?',
+    // A raiz com que ESTE momento foi remontado (null: a de 16 px, por falta de dado ou por ser a normal).
+    textoPx: (() => { const px = escalaDaTela(d, m); return px !== null && px !== 16 ? px : null; })(),
+    // As sentinelas DESTA captura, no instante dela (ver `sentinelasDaTela`).
+    alertas: sentinelas.porMomento[i],
   });
 }
 await browser.close();
 
-// As SENTINELAS vêm antes de tudo. Quem roda esta ferramenta está procurando o
-// que está errado; se o app já sabe, ele diz aqui, e não numa linha perdida de
-// 1 MB de JSON.
-const alertas = (d.resumo && d.resumo.alertas) || [];
+// As SENTINELAS vêm antes de tudo — as do relatório e as de cada captura (ver
+// `sentinelasDaTela`). Quem roda esta ferramenta está procurando o que está
+// errado; se o app já sabe, ele diz aqui, e não numa linha perdida de 1 MB de JSON.
+const { alertas, alertasNasCapturas } = sentinelas;
 
 const resumo = {
   de: basename(arquivo),
   versaoDaApp: (d.app && d.app.rotulo) || null,
   alertas,
+  alertasNasCapturas,
   janela, dpr, tema: (d.ambiente && d.ambiente.escuro) ? 'escuro' : 'claro',
-  cssBytes: css.length,
+  cssBytes: cssDoAparelho.length,
+  // Embutidas NA `@font-face` do app — e se a família CARREGOU em cada
+  // momento está em `momentos[].fonte`, medido na página remontada.
   fontesEmbutidas: fontes.map((f) => f.nome),
   momentos: linhas,
   // O que a remontagem NÃO consegue — dito aqui pra ninguém ler a imagem como
-  // se fosse foto.
+  // se fosse foto. A da fonte só entra quando ela NÃO carregou: ela estava
+  // sempre aqui, inclusive quando o rodapé devia dizer o contrário.
   ressalvas: [
     'imagem de outra origem não carrega: moldura tracejada (rosa = o aparelho disse que estava quebrada)',
     'canvas sem dataURL fica com moldura âmbar — o navegador recusou por origem cruzada',
-    'fonte do sistema no lugar da Inter: o texto pode medir um pouco diferente',
+    ...(linhas.some((l) => / \(NÃO carregou\)$|^\?$/.test(l.fonte))
+      ? ['a fonte do app NÃO carregou em algum momento (ver `momentos[].fonte`): ali o texto sai na fonte do sistema e pode medir diferente']
+      : []),
     'sem JavaScript e sem rede de propósito — o DOM capturado já é o resultado',
   ],
 };
 writeFileSync(join(saida, 'resumo.json'), JSON.stringify(resumo, null, 1));
-if (alertas.length) {
-  console.log(`\n⚠ ${alertas.length} alerta(s) do app — invariante conhecida quebrada NO APARELHO:`);
-  for (const al of alertas) {
-    const extra = Object.entries(al).filter(([k]) => k !== 'chave' && k !== 'msg')
-      .map(([k, v]) => `${k}=${v}`).join(' ');
-    console.log(`  · [${al.chave}] ${al.msg}${extra ? '  (' + extra + ')' : ''}`);
-  }
-  console.log('');
-}
+if (sentinelas.texto.length) console.log('\n' + sentinelas.texto.join('\n') + '\n');
 console.log(`${linhas.length} momento(s) remontado(s) em ${saida}   (lido de ${_origemDoDiag})`);
 for (const l of linhas) {
   console.log(`  ${l.arquivo}  ${l.motivo}  painel=${l.painel}  modais=${l.modais}`
-    + `  toasts=${l.toasts}  imgsQuebradas=${l.imagensQuebradas}`);
+    + `  toasts=${l.toasts}  imgsQuebradas=${l.imagensQuebradas}  fonte=${l.fonte}`
+    + (l.textoPx ? `  texto×${Math.round(l.textoPx / 16 * 100) / 100}` : '')
+    + (l.alertas.length ? `  alertas=${l.alertas.join(',')}` : ''));
 }
