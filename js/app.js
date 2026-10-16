@@ -6784,6 +6784,10 @@ function assinaturaDeBusca(semOrdem) {
 // é o mesmo cuidado do `fetchNextPage`, e é ele que mantém o aquecimento
 // mirando no card que vem (o `showCurrentPlace` reagenda em cima do novo topo).
 function reordenarFilaNaTela() {
+    // Com páginas ainda no Waze, a ordem só vale sobre a fila INTEIRA: o card
+    // espera por elas (ver `reordenarEsperandoAsPaginas`). Sem páginas a buscar,
+    // é a troca imediata de sempre, logo abaixo.
+    if (ordemPrecisaDaFilaInteira() && AppState.hasMore && reordenarEsperandoAsPaginas()) return;
     // A ordem nova é o gesto mais recente: ela encerra o foco no autor, senão a
     // série dele seguiria na frente de uma ordem que a pessoa acabou de pedir.
     limparFocoAutor();
@@ -6795,6 +6799,71 @@ function reordenarFilaNaTela() {
     // A ordem escolhida só vale sobre a fila inteira: com páginas ainda no
     // Waze, elas vêm AGORA — a próxima busca só sairia com 3 cards na fila.
     if (ordemPrecisaDaFilaInteira()) buscarORestoDaFila();
+}
+
+// A ordem nova com PÁGINAS ainda no Waze (a fila de 500+): o primeiro da fila
+// é o primeiro da fila INTEIRA, e não o mais perto da página 1 com o resto
+// entrando atrás dele. MEDIDO (auditoria da rodada 24, R24-6-A7, Brasil 500+199):
+// trocar pra "Perto de casa" mostrava o card a 55 km e deixava um de 2 km em 2º,
+// porque as páginas seguintes só vinham DEPOIS da troca de card — a promessa de
+// `ordemPrecisaDaFilaInteira` ("lê TODAS as páginas antes do primeiro card")
+// valia só na busca nova. Aqui o card da tela FICA enquanto as páginas vêm (as
+// mesmas que a busca nova leria, uma vez), o resto já passa à ordem nova, e a
+// troca do card sai no fim — a não ser que a pessoa já tenha tratado aquele
+// card (a fila andou, o resto está ordenado), ou esteja com ele na mão (o
+// gesto, uma camada por cima, uma janela do Desfazer ou uma aprovação/lote no
+// ar): aí a troca ESPERA, e sai quando o gesto acaba, a camada fecha ou a trava
+// do card solta, se o card ainda for o mesmo (`atenderReordenacaoAdiada`).
+//
+// Devolve `false` quando não é o caso (sem card na tela, treino, sem rede): quem
+// chamou segue a troca imediata. Sem páginas a buscar nem chega aqui.
+let reordenacaoVez = 0;
+let reordenacaoAdiada = null;   // { vez, naTela }: a troca do card que espera o gesto/a camada
+function reordenarEsperandoAsPaginas() {
+    if (Treino.ativo || !AppState.authenticated || navigator.onLine === false
+        || !AppState.currentPlace || AppState.queue[0] !== AppState.currentPlace) return false;
+    limparFocoAutor();
+    const vez = ++reordenacaoVez;
+    const naTela = AppState.currentPlace;
+    const epoca = AppState.fetchEpoch, sessao = epocaDaSessao, treino = Treino.entradas;
+    // O RESTO já na ordem nova (a página 1): quem tratar o card antes de as
+    // outras chegarem segue pela ordem que pediu, não pela de data.
+    sortQueue({ semTrocarOCardDaTela: true });
+    aoMudarAFilaPorBaixo();
+    // Uma busca que já estava no ar (o prefetch) é compartilhada, e pode ter
+    // decidido parar antes de a ordem mudar: uma segunda passada fecha o resto.
+    const jaNoAr = AppState.fetching;
+    (async () => {
+        try {
+            await fetchNextPage();
+            if (jaNoAr && AppState.hasMore && epoca === AppState.fetchEpoch) await fetchNextPage();
+        } catch (e) { /* a falha da busca tem o tratamento dela; a troca segue com o que chegou */ }
+        if (vez !== reordenacaoVez || epoca !== AppState.fetchEpoch || sessao !== epocaDaSessao
+            || treino !== Treino.entradas || Treino.ativo) return;
+        reordenacaoAdiada = { vez, naTela };
+        atenderReordenacaoAdiada();
+    })();
+    return true;
+}
+
+// A troca do card da `reordenarEsperandoAsPaginas`, quando as páginas chegaram:
+// agora, se o card da tela ainda é o mesmo e está livre; mais tarde, se ele está
+// na mão da pessoa (`aoFimDoGesto`, `aoFecharCamada`, `aplicarTravaDeAcao`);
+// nunca, se a pessoa já o tratou ou outra ordem veio depois.
+function atenderReordenacaoAdiada() {
+    const a = reordenacaoAdiada;
+    if (!a) return;
+    if (a.vez !== reordenacaoVez || Treino.ativo || !AppState.authenticated
+        || AppState.currentPlace !== a.naTela || AppState.queue[0] !== a.naTela) { reordenacaoAdiada = null; return; }
+    if (cardSobGesto(cardDaFrente()) || !semCamadaAberta() || acoesTravadas()) return;
+    reordenacaoAdiada = null;
+    sortQueue();
+    // O mais perto de tudo já era o card da tela: nada a redesenhar.
+    if (AppState.queue[0] === a.naTela) return;
+    AppState.currentPlace = AppState.queue[0];
+    // O foco do teclado que estava no card vai ao equivalente no card novo.
+    mantendoFocoNoCard(() => { removeCurrentCardEl(); showCurrentPlace(); }, { mesmoBotao: true });
+    updatePendingCount();
 }
 
 // Traz as páginas que faltam (ver `ordemPrecisaDaFilaInteira`). O que chega
@@ -14983,6 +15052,25 @@ async function startFetching() {
         if (AppState.queue.length > 0 || Treino.ativo) return;
     }
 
+    // A ordem de DISTÂNCIA salva ("Perto de casa", "Perto do trabalho") e a fila
+    // que chegou ANTES do perfil: a casa vem com ele, e o card montado agora
+    // sairia por data — o primeiro a 39 km, com um mais perto logo atrás (MEDIDO
+    // na produção, 2 de 3 aberturas; auditoria da rodada 24, R24-2-03). Com a fila
+    // na mão, o card espera o perfil (a mesma espera de teto curto da fila vazia,
+    // `esperarOLugarDaFilaVazia`): a busca já saiu, e o perfil sai de qualquer
+    // jeito — nenhuma requisição a mais. Quando ele chega, o `guardarReferencias`
+    // ordena a fila inteira (ainda não há card), e o primeiro é o mais perto. Sem
+    // perfil dentro do teto, abre por data como sempre, e o que chegar depois
+    // ordena o resto (`completarPerfilChegado`). O "Perto de mim" (GPS) não
+    // persiste, então não passa por aqui.
+    if (!AppState.profile && AppState._profilePromise && AppState.queue.length && !AppState.currentPlace
+        && epoca === AppState.fetchEpoch && AppState.authenticated && ordemSalvaEsperaOPerfil(AppState.filters.sortOrder)) {
+        buscaEsperaOPerfil = epoca;
+        updatePendingCount();
+        try { await esperarOLugarDaFilaVazia(AppState._profilePromise); } catch (e) {} finally { if (buscaEsperaOPerfil === epoca) buscaEsperaOPerfil = false; }
+        if (epoca !== AppState.fetchEpoch || Treino.ativo) return;
+    }
+
     // A SESSÃO caiu durante a busca: nada se desenha nem se anuncia — nem o card,
     // nem o "Tudo limpo!", que o `showNoPlaces` diz na região viva que o
     // `showAuthScreen` acabou de limpar (auditoria da rodada 14, R14-1-02). A
@@ -15076,6 +15164,7 @@ function cardSobGesto(card) {
 // e quando a saída termina: o que esperava o card parar roda agora.
 function aoFimDoGesto() {
     redesenharCardAdiado();
+    atenderReordenacaoAdiada();
     if (fabEsperaOGesto) posicionarFabDev();
 }
 
@@ -15256,6 +15345,8 @@ function aoFecharCamada(viaHistorico) {
         if (viaHistorico) comoFuncionaEsperaGesto = true;
         else pedirComoFuncionaAdiado();
     }
+    // A troca de card da ordem nova que esperava a camada fechar (R24-6-A7).
+    atenderReordenacaoAdiada();
     pedirAvisosAdiados();
 }
 
@@ -17594,6 +17685,11 @@ function aplicarTravaDeAcao() {
     // da última linha: fechado, ele o devolve ao ✕ que o teclado acabou de
     // ganhar (R7-7-01); e o foco prometido ao teclado pode pousar agora (C10).
     if (!travado) dispensarAvisoDaTrava();
+    // A troca de card da ordem nova que esperava a trava acabar (R24-6-A7): a
+    // janela do Desfazer, a aprovação ou o lote no ar são decisão em curso naquele
+    // card, e ele não sai debaixo delas. ANTES do foco: o foco prometido ao
+    // teclado pousa no card que fica.
+    if (!travado) atenderReordenacaoAdiada();
     if (!travado) pedirComoFuncionaAdiado();
     aplicarFocoDoTeclado();
 }
@@ -27394,8 +27490,9 @@ const Treino = {
             AppState.currentPlace = AppState.queue[0];
             showCurrentPlace();
             // A ordem escolhida só vale sobre a fila inteira: as páginas que
-            // faltam vêm agora, como no `reordenarFilaNaTela`.
-            if (s.ordemMudou && ordemPrecisaDaFilaInteira()) buscarORestoDaFila();
+            // faltam vêm agora, como no `reordenarFilaNaTela` — e o card troca
+            // pelo mais perto de TODAS quando elas chegam (R24-6-A7).
+            if (s.ordemMudou && ordemPrecisaDaFilaInteira() && !(AppState.hasMore && reordenarEsperandoAsPaginas())) buscarORestoDaFila();
             maybePrefetch();
         }
         // A fila guardada do offline que a abertura sem rede leu com o treino

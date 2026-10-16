@@ -128,6 +128,7 @@ function montarAvisos({ camada = null, visivel = true, treino = false, confirmad
     // O estado de MÓDULO (os `let` do app).
     epocaDaSessao: 0, avisosAdiados: null, avisosAdiadosPedido: false, comoFuncionaEsperaGesto: false,
     pedirComoFuncionaAdiado: () => {},
+    atenderReordenacaoAdiada: () => {},   // a troca de card que espera a camada fechar: test/ordem-paginada
   };
   const app = rodar(deps, [declaracao('UNDO_GATE_BASE'), declaracao('CONSEQUENCIA_AVISADA'), ...fontes(FUNCOES_DOS_AVISOS)],
     ['handleActionResult', 'registrarJanelaSemUndo', 'aoFecharCamada', 'avisosAdiadosAoVoltar']);

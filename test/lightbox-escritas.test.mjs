@@ -868,10 +868,10 @@ test('L9 a pílula do nome: travada na janela, rótulo na edição, viva fora do
   const rodar = (travado, editando) => new Function('document', 'acoesTravadas', 'cardDaFrente', 'editandoNome',
     'aprovandoAgora', 'excluindoAgora', 'renomeacaoNoAr', 'Lightbox', 'atualizarBotaoSalvarNome',
     'aplicarFocoDoTeclado', 'dispensarAvisoDaTrava', 'guardarFocoDaTrava', 'pedirComoFuncionaAdiado', 'manterFocoNoLightbox',
-    'exclusaoDoLocalNoAr',
+    'exclusaoDoLocalNoAr', 'atenderReordenacaoAdiada',
     fatiar('aplicarTravaDeAcao') + '\naplicarTravaDeAcao();')(
     { getElementById: (id) => el[id] || null }, () => travado, () => null, () => editando,
-    false, false, () => false, { place: null }, () => {}, () => {}, () => {}, () => {}, () => {}, () => {}, () => false);
+    false, false, () => false, { place: null }, () => {}, () => {}, () => {}, () => {}, () => {}, () => {}, () => false, () => {});
   rodar(false, false);
   assert.equal(el.lightboxNomeBtn.disabled, false, 'CONTROLE: sem janela e sem edição a pílula ficou morta');
   rodar(true, false);
@@ -1091,11 +1091,12 @@ test('L24 a escrita de foto SEM janela no ar segura o botão, mesmo quando a tra
   // no card (lote 8 do card, C10 e C14); aqui não são o assunto.
   const app = new Function('document', 'acoesTravadas', 'cardDaFrente', 'editandoNome', 'renomeacaoNoAr', 'Lightbox',
     'atualizarBotaoSalvarNome', 'aplicarFocoDoTeclado', 'dispensarAvisoDaTrava', 'pedirComoFuncionaAdiado', 'exclusaoDoLocalNoAr',
+    'atenderReordenacaoAdiada',
     'let aprovandoAgora = false, excluindoAgora = false;\n'
     + ['estadoAprovando', 'lixeiraOcupada', 'aplicarTravaDeAcao'].map(fatiar).join('\n')
     + '\nreturn { estadoAprovando, lixeiraOcupada, aplicarTravaDeAcao };')(
     { getElementById: (id) => el[id] || null }, () => false, () => null, () => false, () => false, { place: null }, () => {},
-    () => {}, () => {}, () => {}, () => false);
+    () => {}, () => {}, () => {}, () => false, () => {});
   app.estadoAprovando(true);
   assert.equal(el.lightboxApprove.disabled, true, 'CONTROLE: com a aprovação no ar o "Aprovar" não travou');
   app.aplicarTravaDeAcao();                         // abrir/fechar a edição do nome, fechar o lightbox
@@ -2673,7 +2674,7 @@ function trancaComFoco({ aberta = true } = {}) {
     renomeacaoNoAr: () => false, exclusaoDoLocalNoAr: () => false, Lightbox: { isOpen: () => aberta, place: null }, atualizarBotaoSalvarNome: () => {},
     aplicarFocoDoTeclado: () => {}, dispensarAvisoDaTrava: () => {}, guardarFocoDaTrava: () => {},
     // o "Como funciona" adiado que a trava solta pede (R7-7-01, do lote do Histórico): aqui não é o assunto
-    pedirComoFuncionaAdiado: () => {},
+    pedirComoFuncionaAdiado: () => {}, atenderReordenacaoAdiada: () => {},
   };
   const app = new Function(...Object.keys(deps), 'let aprovandoAgora = false, excluindoAgora = false;\n'
     + ['focavelNaTela', 'manterFocoNoLightbox', 'aplicarTravaDeAcao'].map(fatiar).join('\n')
@@ -2865,7 +2866,7 @@ function edicaoComFoco() {
   const deps = {
     document: doc, acoesTravadas: () => estado.travado, cardDaFrente: () => null, editandoNome: () => true,
     renomeacaoNoAr: () => false, exclusaoDoLocalNoAr: () => false, Lightbox: { isOpen: () => true, place: { name: 'Padaria 1' } },
-    aplicarFocoDoTeclado: () => {}, dispensarAvisoDaTrava: () => {}, guardarFocoDaTrava: () => {}, pedirComoFuncionaAdiado: () => {},
+    aplicarFocoDoTeclado: () => {}, dispensarAvisoDaTrava: () => {}, guardarFocoDaTrava: () => {}, pedirComoFuncionaAdiado: () => {}, atenderReordenacaoAdiada: () => {},
   };
   const app = new Function(...Object.keys(deps), 'let aprovandoAgora = false, excluindoAgora = false;\n'
     + ['focavelNaTela', 'manterFocoNoLightbox', 'nomeParaGravar', 'atualizarBotaoSalvarNome', 'aplicarTravaDeAcao'].map(fatiar).join('\n')
@@ -3828,7 +3829,7 @@ function pilulaDeVerdade({ exclusaoNoAr = false, nomeNoAr = false } = {}) {
     Treino: { ativo: false }, Lightbox: { place: B, isOpen: () => true }, editandoNome: () => false, fecharEdicaoNome: () => {},
     acoesTravadas: () => false, cardDaFrente: () => null, guardarFocoDaTrava: () => {}, aprovandoAgora: false, excluindoAgora: false,
     renomeacoesNoAr: new Set(nomeNoAr ? ['v1'] : []), escritasDeFotoNoLocal: escritas, atualizarBotaoSalvarNome: () => {},
-    manterFocoNoLightbox: () => {}, dispensarAvisoDaTrava: () => {}, pedirComoFuncionaAdiado: () => {}, aplicarFocoDoTeclado: () => {},
+    manterFocoNoLightbox: () => {}, dispensarAvisoDaTrava: () => {}, pedirComoFuncionaAdiado: () => {}, atenderReordenacaoAdiada: () => {}, aplicarFocoDoTeclado: () => {},
     atualizarAcoesDeFoto: () => {},
   };
   const nomes = ['mostrarNomeNoLightbox', 'aplicarTravaDeAcao', 'exclusaoDoLocalNoAr', 'renomeacaoNoAr', 'podeRenomearAqui',
