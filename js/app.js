@@ -1700,7 +1700,7 @@ function setupAuthListeners() {
     });
     $('closeAccessDenied').addEventListener('click', () => closeModal('accessDeniedModal'));
     // Região default sempre 'row' pra fluxos novos (público alvo BR/Latam).
-    // Quem precisa de NA/IL/world muda no modal "Filtros e Preferências"
+    // Quem precisa de NA/IL muda no modal "Filtros e Preferências"
     // depois de logar (filterRegion). Não exibimos picker no authScreen
     // porque era fricção desnecessária pra 95% dos usuários.
 }
@@ -12368,7 +12368,8 @@ async function diagCorpo() {
         _leia_isto: 'Este arquivo contém o waze_session_token, que é CREDENCIAL VIVA da conta do Waze '
             + 'de quem gerou. Trate como senha. Pra anular: sair do app, o que destrói a sessão no '
             + 'servidor; se o app avisar que a limpeza no servidor não completou, o token ainda vale até '
-            + 'ficar ' + SESSAO_DIAS_EXIBIDO + ' dias sem uso. '
+            + 'ficar ' + SESSAO_DIAS_EXIBIDO + ' dias sem uso (com o “Manter conectado” ligado o servidor renova a '
+            + 'sessão sozinho, e o prazo conta da última renovação). '
             + 'NÃO contém os cookies do Waze — eles são de outra origem e não ficam neste aparelho.',
         _versaoDoDiag: DIAG_VERSAO,
         _formato: DIAG_FORMATO,
@@ -23820,7 +23821,7 @@ function enfileirarSaida(tipo, place, regiao, extra, calado, lista) {
              // a sessão que outra aba guardou (R13-1-04). Sem sessão, `null`: dono
              // desconhecido, e o esvaziamento não o manda.
              s: marcaDestaAba(),
-             // E a REGIÃO do Waze (row/na/il/world), pelo mesmo motivo: enviado
+             // E a REGIÃO do Waze (row/na/il), pelo mesmo motivo: enviado
              // depois de a pessoa trocar de região, o pedido iria pro servidor
              // errado, voltaria "não encontrado" e contaria como feito.
              regiao: regiao || API.getRegion(),

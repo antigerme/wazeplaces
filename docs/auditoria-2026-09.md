@@ -6,17 +6,21 @@ recolhido): uma sessão nova lê isto e continua de onde parou. Quando a auditor
 terminar, este arquivo vira o registro final dela (o que foi auditado, o que
 mudou, o que ficou pra decisão) — ou sai, se o owner preferir.
 
-**Retomada automática:** existe uma Routine ("Retomar auditoria do Waze
-Places", `trig_01VAJ9pzh87pVxN4RvmZGCky`) que manda, de hora em hora (minuto
-:33 UTC), uma mensagem de retomada pra MESMA sessão. Ela aponta pra este
-arquivo. **Apague-a com `delete_trigger` quando tudo estiver pronto.** (O
-lembrete único de 2026-09-26 00:23 UTC já disparou.) A primeira parada de
-verdade foi em 2026-09-25 ~23:40 UTC, com o limite voltando à 01:20 — a sessão
-retomou sozinha, com os agentes continuados por `SendMessage`.
+**Retomada automática:** existiu uma Routine ("Retomar auditoria do Waze Places",
+`trig_01VAJ9pzh87pVxN4RvmZGCky`) que mandava uma mensagem de retomada pra MESMA sessão. Hoje
+está DESLIGADA (`enabled: false`, cron diário `5 15 * * *`); apague-a com `delete_trigger` quando
+tudo estiver pronto. A primeira parada de verdade foi em 2026-09-25 ~23:40 UTC, com o limite
+voltando à 01:20 — a sessão retomou sozinha, com os agentes continuados por `SendMessage`.
 
 ---
 
-## 0. Estado agora (2026-10-15 ~14:20 UTC)
+## 0. Estado agora (2026-10-17 ~08:00 UTC)
+
+- **Lote 30 em produção** (PR #279, b5076e0, v2026.10.17-03): 13 arquivos iguais aos mesclados e `prod-auditoria` 189 ✓ · 0 ✗
+  com as duas contas. Desde o lote 26 entraram: o «Manter conectado» (o servidor renova o cookie do Waze, que morre em
+  ~24–26 h sem renovação; padrão ligado; Cron `*/30`), as rodadas 24–26 e os lotes 27–30. A rodada 27 (convergência) está em
+  andamento; as provas em produção do Cron são em 2026-10-18 00:50 UTC (+26 h) e 12:50 UTC (+38 h). O que segue abaixo é o
+  estado de 2026-10-15 (lote 26), mantido como registro.
 
 - **Lote 26 em produção** (PR #273, 94266c1, v2026.10.15-02): os 13 arquivos que o app carrega iguais, byte a byte, aos
   mesclados, e o `prod-auditoria.mjs` inteiro com as duas contas deu **189 ✓ · 0 ✗**. Os dois cabeçalhos de borda que

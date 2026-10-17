@@ -8,6 +8,17 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.10.17-04
+
+Rodada 27 da auditoria (convergência, sobre a v2026.10.17-03 que está no ar). Os consertos do lote 30 conferiram (cada um com sabotagem que reprova); sobraram prazos escritos de forma diferente em telas diferentes e promessas de capacidade um pouco otimistas.
+
+### Corrigido
+- **O prazo da sessão guardada diz o mesmo em todo lugar** (R27-3-01): a Segurança da Ajuda, a nota da tela de entrada, o aviso do «Sair» que não chegou ao servidor e o LEIA-ME do diagnóstico (nos 4 idiomas e no aviso dentro do `diagnostico.json`) agora contam o prazo a partir do último uso **ou da última renovação** quando o «Manter conectado» está ligado, como a Privacidade já dizia.
+- **A capacidade do «Manter conectado» é dita com a rotatividade** (R27-1-03): ~100 pessoas se a lista for estável, ~80 com folga se entra e sai gente a toda hora (com 100 vivas e ~5 trocas por dia, ~1 % das sessões passam de 24 h). O gargalo medido é a própria varredura (lote de 6 no teto de 20 s); a cota de escrita do KV é o limite seguinte. Acima disso o desenho precisa mudar (renovar as de carimbo mais antigo primeiro).
+- **Um teste amarra o Cron do `wrangler.jsonc` ao `MANTER_CRON_MIN`** (R27-1-02): a fatia da vez usa o número da execução de 30 min, e um cron de outro intervalo faria a varredura pular fatias, sem erro. Sabotado, reprova.
+- **Textos**: o README não promete mais que a região `world` «passa pra `na`» (ela é recusada com 400; cai em `row` e o perfil leva ao servidor onde a pessoa edita); o README diz que o «Manter conectado» renova «uma ou duas vezes por dia»; o CLAUDE.md lista o `{manterDias}` entre as variáveis do dicionário, diz «execução % K» (não «hora %») e que o 403 só apaga com a sessão de 20 h ou mais; o `docs/auditoria-2026-09.md` conta o estado de hoje e a Routine desligada; os dois docs históricos que diziam «~28 dias» ganharam a nota de que o valor do cookie morre em ~24–26 h.
+- O carimbo da sessão é a hora da última gravação, não a idade exata do valor do cookie (o `renovarPrazo` regrava com `agora − 1 h`); o comentário do módulo diz isso e que o guard de 20 h erra a favor da entrada (R27-1-01).
+
 ## v2026.10.17-03
 
 Rodada 26 da auditoria (convergência). Um auditor refez a medição da capacidade do «Manter conectado» com condições mais duras (carimbos iniciais espalhados, o teto de 20 s por execução, o Waze mais lento) e **não reproduziu o «0 % até 125 pessoas» da versão anterior**: a fatia escolhida pela chave da entrada dava 3–8 % de sessões acima de 24 h a partir de 100 pessoas (e 4 a 19 % no pior Waze). O número estava errado e o conserto estava incompleto.

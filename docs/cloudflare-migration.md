@@ -166,6 +166,8 @@ export const kvStore = (env) => ({
 O KV tem **TTL nativo** — a sessão some sozinha após 21 dias. Isso apaga
 `cleanExpiredSessions()` inteira.
 
+> **[Superado]** A sessão hoje é DESLIZANTE (gotcha #41) e o VALOR do cookie do Waze morre em ~24–26 h sem renovação; o «Manter conectado» renova pelo Cron (ver o CLAUDE.md). O raciocínio de «~28 dias» abaixo é histórico.
+>
 > **Ajuste de design importante:** hoje o PHP faz `touch()` a cada uso pra
 > estender a sessão. No KV, cada `touch` seria uma escrita, e o free tier só dá
 > **1.000 escritas/dia**. A solução é *não* renovar a cada uso: setar TTL de 21
