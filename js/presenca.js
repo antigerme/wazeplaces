@@ -2027,9 +2027,11 @@ function presencaPagarDividaDe(id, noAparelho = chatDividas()) {
         presencaQuitarDivida(id);
         return;
     }
+    // Com o `abrir` ainda no ar, quem decide é a CHEGADA da página (`presencaPagarNaChegada`): a lista que saiu antes
+    // dele não prova que a mensagem vista foi coberta (R28-5-01, e este caminho pelo `presencaSincronizar`, R29-1-01).
+    if (presencaPrimeiraPaginaNoAr(Presenca.historico.get(id))) return;
     if (presencaDividaTemNaoVista(id)) { presencaQuitarDivida(id); return; }
     if (noAparelho[id] && presencaOutraAbaPagando(noAparelho[id].pagando)) return;
-    if (presencaPrimeiraPaginaNoAr(Presenca.historico.get(id))) return;
     // Sai da MEMÓRIA com o pedido (no ar, quem a carrega é o `lidaNoAr`); a
     // GUARDADA no aparelho só sai quando ele chegar — a página pode morrer
     // com ele no ar (R8-5-04).

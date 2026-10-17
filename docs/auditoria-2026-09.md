@@ -14,7 +14,12 @@ voltando à 01:20 — a sessão retomou sozinha, com os agentes continuados por 
 
 ---
 
-## 0. Estado agora (2026-10-17 ~08:00 UTC)
+## 0. Estado agora (2026-10-17 ~14:00 UTC)
+
+- **Lote 33 em produção** (PR #282, 8259fa1, v2026.10.17-06): 13 arquivos iguais e `prod-auditoria` 189 ✓ · 0 ✗ com as duas
+  contas (na 4ª rodada; as anteriores: corrida do Waze no `Issues/Read` e lista de presença ainda sem a outra conta). A rodada 29
+  (diff dos lotes 32–33, ponta a ponta, documentos) gerou o lote 34. As provas em produção do Cron seguem em 2026-10-18
+  00:55 UTC (+26 h) e 12:55 UTC (+38 h).
 
 - **Lote 30 em produção** (PR #279, b5076e0, v2026.10.17-03): 13 arquivos iguais aos mesclados e `prod-auditoria` 189 ✓ · 0 ✗
   com as duas contas. Desde o lote 26 entraram: o «Manter conectado» (o servidor renova o cookie do Waze, que morre em

@@ -535,3 +535,25 @@ test('R28-2-01 (controle): sem decisão no meio, a leitura NÃO se repete (custo
   assert.deepEqual(r.faltam, []);
   assert.deepEqual(r.pedidas, [1, 2], `leu de novo sem motivo: ${r.pedidas}`);
 });
+
+// ── R29-1-02: a releitura vale a leitura de antes — `hasMore` fica verdadeiro durante ela ──────────────────────
+test('R29-1-02: falha de rede na página 1 da RELEITURA não deixa `hasMore` falso (o «Tudo limpo!» viria com pedido pendente)', async () => {
+  const waze = wazeVivo(4, { porPagina: 2 });
+  const original = waze.buscar.bind(waze);
+  let m = null;
+  let leituras1 = 0;
+  waze.buscar = async (page, filtros) => {
+    if (page === 1) leituras1++;
+    if (page === 1 && leituras1 === 2) return { success: false, error: 'rede', errorCategory: 'transient' };   // a releitura cai
+    const r = await original(page, filtros);
+    if (page === 1 && leituras1 === 1) {
+      waze.tratar('V1|R1', 'rejeitar');
+      m.deps.pousosDaPagina.set('V1|R1', Date.now() + 1);
+    }
+    return r;
+  };
+  m = montar(waze);
+  await m.app.fetchNextPage();
+  assert.equal(leituras1, 2, 'PRÉ-CONDIÇÃO: a releitura não aconteceu');
+  assert.equal(m.AppState.hasMore, true, 'o `hasMore` ficou falso: nada voltaria a buscar o V3, que está pendente no Waze');
+});

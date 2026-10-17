@@ -1,7 +1,7 @@
 // "Manter conectado" — o lado do CLIENTE (Preferências).
 //
 // O Waze invalida o cookie ~24 h depois se ninguém o renova; com o interruptor
-// ligado o servidor (um Cron) renova a sessão de poucas em poucas horas. O que o
+// ligado o servidor (um Cron) renova a sessão uma ou duas vezes por dia. O que o
 // cliente promete, e cada teste aqui existe pra reprovar se uma promessa quebrar:
 //   1. o padrão mora em UMA constante (`MANTER_CONECTADO_PADRAO`), opt-OUT;
 //   2. o `perfil` manda `manter` (booleano ESTRITO) só com a preferência definida,
@@ -334,7 +334,7 @@ test('Ajuda/Privacidade: a garantia do servidor vale SEM o interruptor; COM ele,
   const SEM = { pt: /vale <strong>sem<\/strong>/, en: /holds <strong>without<\/strong>/, es: /vale <strong>sin<\/strong>/, fr: /vaut <strong>sans<\/strong>/ };
   const COM = { pt: /com ele <strong>ligado<\/strong>, o servidor guarda uma chave/, en: /with it <strong>on<\/strong>, the server keeps a key/,
     es: /con él <strong>activado<\/strong>, el servidor guarda una clave/, fr: /avec lui <strong>activé<\/strong>, le serveur conserve une clé/ };
-  const APAGA = { pt: /“Sair” \(a chave é apagada\)/, en: /“Log out” \(the key is erased\)/, es: /«Salir» \(la clave se borra\)/, fr: /« Se déconnecter » \(la clé est effacée\)/ };
+  const APAGA = { pt: /“Sair” \(a chave desta sessão é apagada\)/, en: /“Log out” \(this session’s key is erased\)/, es: /«Salir» \(la clave de esta sesión se borra\)/, fr: /« Se déconnecter » \(la clé de cette session est effacée\)/ };
   for (const l of LINGUAS) {
     const z = D[l]['help.privacy.zeroKnowledge'];
     assert.ok(z.includes(CITA[l]), `${l}: a Ajuda não cita o nome do interruptor (${CITA[l]})`);

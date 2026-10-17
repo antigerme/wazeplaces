@@ -8,6 +8,21 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.10.17-10
+- **Fila (desfeito):** buscar no `online` quando a fila chega a 1–3 cards foi tentado e **desfeito**: o `online` chega antes do sinal, a busca falhava, marcava o «lie-fi» e travava ✕ ✓ do card de foto sem sinal (smoke do offline, seção 6e). Limite conhecido, baixo: quem fica sem sinal com 1 card só vê a reposição na decisão seguinte.
+
+## v2026.10.17-09
+- **Treino:** o aviso do efeito (✕ ↑ ✓), que ficava 5 s no rodapé, deixa o toque passar: ele cobria os três botões e engolia o primeiro toque depois do gesto.
+- **Francês:** «marquage en lot» também no aviso do treino (era «groupé»; o mesmo conceito tinha dois nomes).
+
+## v2026.10.17-07
+Terceiro retoque da rodada 29: três arestas pequenas do que entrou nos lotes 32–33 e os textos que ainda falavam de «pessoas».
+
+- **Presença:** a conversa cuja primeira página ainda está no ar não paga o «lida» devido antes de a página chegar (a dívida fica, e a página a paga).
+- **Fila:** quando a releitura acontece porque uma decisão pousou no meio da leitura, o «há mais» volta a valer durante ela (uma falha de rede ali largava o «Tudo limpo!» com pedidos pendentes).
+- **Código de pareamento:** digitar de novo no campo apaga o erro da tentativa anterior («Digite o código…» ficava com o campo preenchido).
+- **Textos:** o «Manter conectado» conta **sessões**, não pessoas (cada login é uma sessão; um aparelho com três logins conta três) — `wrangler.jsonc`, o módulo e o CLAUDE.md; a tabela de capacidade ficou numa só (no módulo) e a promessa com entrada e saída é ~80, não «~100». A Ajuda diz que o «Sair» apaga a chave **desta sessão**. O comentário do prazo do cookie e o estado da auditoria foram corrigidos.
+
 ## v2026.10.17-06
 
 Rodada 28, o ponta a ponta (R28-8): três defeitos pequenos que mudam o que a pessoa vê. Cada um tem teste que reprova quando o conserto é desfeito.
