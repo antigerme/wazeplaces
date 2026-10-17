@@ -95,9 +95,11 @@ export default {
   // de pessoa) vai pro log do Worker, o único lugar onde `console` é permitido.
   async scheduled(event, env, ctx) {
     const tarefa = (async () => {
-      if (!env || !env.ENCRYPTION_KEY || !env.SESSIONS) return null;
+      // Sair calado esconderia a pane: uma chave ruim é indistinguível de «o Cron não disparou» (R28-6-05).
+      // Só texto fixo — nada da chave, do KV ou de pessoa vai pro log.
+      if (!env || !env.ENCRYPTION_KEY || !env.SESSIONS) { console.error('manter-conectado: sem ENCRYPTION_KEY ou sem o KV SESSIONS'); return null; }
       const { keyBytes, problema } = chaveDoSecret(env.ENCRYPTION_KEY);
-      if (problema) return null;
+      if (problema) { console.error('manter-conectado: ENCRYPTION_KEY inválida'); return null; }
       try {
         const resumo = await varrerMantidosDoStore({ store: storeDoKv(env), keyBytes });
         console.log('manter-conectado', JSON.stringify(resumo));

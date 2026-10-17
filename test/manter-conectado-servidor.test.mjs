@@ -735,3 +735,11 @@ test('o cron do wrangler.jsonc é `*/MANTER_CRON_MIN` — a fatia da vez usa o n
   assert.ok(m, 'CONTROLE: o wrangler.jsonc não declara um cron');
   assert.equal(m[1], `*/${MANTER_CRON_MIN} * * * *`, 'o cron do Worker não é o intervalo que a fatia supõe (MANTER_CRON_MIN)');
 });
+
+// ── R28-6-04: a faixa do jitter do servidor é a da regra do dono (tools/waze-jitter.mjs) ─────────────────────────
+test('a pausa do «Manter conectado» usa a MESMA faixa do jitter do dono (1500–4000 ms)', async () => {
+  const { JITTER_MIN_MS, JITTER_MAX_MS } = await import('../tools/waze-jitter.mjs');
+  const { PAUSA_MIN_MS, PAUSA_MAX_MS } = await import('../server/manter-conectado.mjs');
+  assert.equal(PAUSA_MIN_MS, JITTER_MIN_MS, 'o mínimo da pausa do servidor divergiu do jitter do dono');
+  assert.equal(PAUSA_MAX_MS, JITTER_MAX_MS, 'o máximo da pausa do servidor divergiu do jitter do dono');
+});

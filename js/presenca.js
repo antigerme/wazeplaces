@@ -842,7 +842,9 @@ function presencaAplicarLista(r, inicio, pais, via = 'carona', { soConversas = f
             const devendo = Presenca.lidaDevendo.has(id);
             const voo = devendo ? null : presencaLidaNoAr(id);
             if (presencaDividaTemNaoVista(id, voo ? voo.ate : Infinity)) {
-                if (devendo) presencaQuitarDivida(id);
+                // A lista que saiu ANTES de o `abrir` voltar não quita a dívida com ele ainda no ar: o que a pessoa
+                // viu nesse meio só é coberto pelo "lida" que o `abrir` (ou o pagamento da chegada) manda (R28-5-01).
+                if (devendo) { if (!presencaPrimeiraPaginaNoAr(Presenca.historico.get(id))) presencaQuitarDivida(id); }
                 else c.naoLidas = presencaNaoLidasDepoisDoLida(id, c);
             } else c.naoLidas = 0;
         }
@@ -2730,7 +2732,12 @@ async function presencaCarregarConversa(id, { antes = null } = {}) {
     if (presencaJuntarMsgs(h, msgs)) presencaCalarFalhaQueSumiu(id);
     // `maisAntigas` diz se há página ANTES da que chegou. Na primeira, é a
     // resposta; numa página antiga, idem — a de cima da lista é sempre a última.
-    h.maisAntigas = !!r.maisAntigas;
+    // Na reabertura, a primeira página volta com `maisAntigas: true` mesmo depois de a conversa inteira já ter sido
+    // carregada: se o histórico daqui tem mensagem mais antiga que a mais antiga desta página, o que a pessoa já
+    // puxou vale (R28-5-02) — senão o "Ver mensagens anteriores" voltava e gastava um pedido pra trazer nada.
+    const menorDaPagina = msgs.length ? Math.min(...msgs.map((m) => m.ts)) : null;
+    const jaTinhaMaisAntigas = !antes && h.carregada && menorDaPagina !== null && h.msgs.some((x) => x.ts < menorDaPagina);
+    if (!jaTinhaMaisAntigas) h.maisAntigas = !!r.maisAntigas;
     h.carregada = true;
     if (antes) h.antigas = null;
     else { h.primeiraFalhou = false; h.naoVistoAoAbrir = 0; }
@@ -3251,7 +3258,11 @@ function presencaDizerNaPilula() {
     // nenhuma (R25-5-03). Quem fala é o `#conversaAnuncio`, só com a contagem.
     if (Presenca.aberta) {
         const dentro = document.getElementById('conversaAnuncio');
-        if (dentro && n > 0 && presencaLigada() && AppState.authenticated) dentro.textContent = presencaRotuloNaoLidas(n);
+        if (dentro && n > 0 && presencaLigada() && AppState.authenticated) {
+            dentro.textContent = presencaRotuloNaoLidas(n);
+            // O teto de 4 s vale também aqui: sem isto, três mensagens a 300 ms viravam três escritas na região viva (R28-5-03).
+            Presenca.pilulaDitaEm = Date.now();
+        }
         return;
     }
     if (!el || n === 0 || !presencaLigada() || !AppState.authenticated) return;

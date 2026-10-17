@@ -601,9 +601,9 @@ function linhasDaCaptura(m, recuo = '') {
   const alertasM = Array.isArray(m.alertas) ? (m.alertas.length ? m.alertas.map((a) => a.chave).join(', ') : 'nenhum') : AUSENTE;
   // A captura feita DENTRO do treino (R8-4-06): a `fila` da 3ª linha conta os exemplos.
   const noTreino = m.treino && m.treino.ativo === true ? ` · DENTRO DO TREINO (${m.treino.exemplos ?? '?'} exemplos na fila)` : '';
-  out(`${recuo}${hora(m.t)}  ${m.motivo} · tela ${m.tela} · painel ${m.painel === undefined ? AUSENTE : painelComVariante(m)} · card montado ${m.cardMontado === undefined ? AUSENTE : m.cardMontado} · modais ${j(m.modais)}${noTreino}`);
+  out(`${recuo}${hora(m.t)}  ${m.motivo} · tela ${v(m.tela)} · painel ${m.painel === undefined ? AUSENTE : painelComVariante(m)} · card montado ${m.cardMontado === undefined ? AUSENTE : m.cardMontado} · modais ${j(m.modais)}${noTreino}`);
   out(`${recuo}    rede ${m.rede === undefined ? AUSENTE : j(m.rede)} · offline ${m.offline === undefined ? AUSENTE : j(m.offline)}`);
-  out(`${recuo}    fila ${m.estado?.fila} · restam ${m.estado?.serverTotal} · hasMore ${m.estado?.hasMore} · loadError ${m.estado?.loadError} · imagens quebradas ${quebradas} · alertas: ${alertasM}`);
+  out(`${recuo}    fila ${v(m.estado?.fila)} · restam ${v(m.estado?.serverTotal)} · hasMore ${v(m.estado?.hasMore)} · loadError ${v(m.estado?.loadError)} · imagens quebradas ${quebradas} · alertas: ${alertasM}`);
 }
 
 secao('CAPTURAS');

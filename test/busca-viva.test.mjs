@@ -498,3 +498,40 @@ test('O6: o teto da recomposição vale também com card na fila — e 401 de A�
   const ok = rodar({}, 0);
   assert.deepEqual([ok.AppState.hasMore, ok.AppState.loadError, ok.depois, ok.chamadas], [true, false, 1, ['prefetch']]);
 });
+
+// ── R28-2-01: a página anda TAMBÉM entre as páginas da MESMA leitura ───────────────────────────────────────────
+// O Waze calcula cada página sobre a lista do MOMENTO do pedido. Uma decisão que pousa depois de a página 1 ser
+// calculada e antes de a 2 ser calculada faz os do topo da 2 subirem pra 1 (já lida): sem a releitura, a busca
+// acabava com `hasMore` falso e o app dizia "Tudo limpo!" com pedido pendente.
+async function leituraComDecisaoNoMeio(decidir) {
+  const waze = wazeVivo(4, { porPagina: 2 });
+  const original = waze.buscar.bind(waze);
+  let m = null;
+  let feito = false;
+  waze.buscar = async (page, filtros) => {
+    const r = await original(page, filtros);
+    if (decidir && page === 1 && !feito) {
+      feito = true;
+      waze.tratar('V1|R1', 'rejeitar');                       // pousou no Waze depois de a página 1 ser calculada
+      m.deps.pousosDaPagina.set('V1|R1', Date.now() + 1);
+    }
+    return r;
+  };
+  m = montar(waze);
+  await m.app.fetchNextPage();
+  const naFila = new Set(m.AppState.queue.map(chave));
+  const faltam = waze.pendentes.map(chave).filter((k) => !naFila.has(k));
+  return { faltam, pedidas: waze.pedidas.slice(), hasMore: m.AppState.hasMore, fila: [...naFila] };
+}
+
+test('R28-2-01: decisão no MEIO da leitura de várias páginas — a busca relê uma vez e nenhum pendente fica de fora', async () => {
+  const r = await leituraComDecisaoNoMeio(true);
+  assert.deepEqual(r.faltam, [], `pendentes no Waze que não entraram na fila: ${JSON.stringify(r)}`);
+  assert.deepEqual(r.pedidas, [1, 2, 1, 2], `a releitura não aconteceu (ou aconteceu mais de uma vez): ${r.pedidas}`);
+});
+
+test('R28-2-01 (controle): sem decisão no meio, a leitura NÃO se repete (custo zero)', async () => {
+  const r = await leituraComDecisaoNoMeio(false);
+  assert.deepEqual(r.faltam, []);
+  assert.deepEqual(r.pedidas, [1, 2], `leu de novo sem motivo: ${r.pedidas}`);
+});

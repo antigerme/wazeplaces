@@ -308,7 +308,7 @@ test('i18n: título, descrição e aviso nas 4 línguas; o rótulo do HTML é o 
     for (const k of ['prefs.manter.label', 'prefs.manter.desc', 'toast.manterFalhou']) {
       assert.ok(D[l][k] && D[l][k].length > 5, `${l}: falta ${k}`);
     }
-    assert.doesNotMatch(D[l]['prefs.manter.desc'], /\d/, `${l}: a descrição escreve um número (de horas?) — só "a cada poucas horas"`);
+    assert.doesNotMatch(D[l]['prefs.manter.desc'], /\d/, `${l}: a descrição escreve um número (de horas?) — só "uma ou duas vezes por dia" (o 1 e o 2 são palavras)`);
   }
   assert.match(HTML, new RegExp(`data-i18n="prefs.manter.label">${D.pt['prefs.manter.label']}<`));
   assert.match(HTML, new RegExp(`data-i18n="prefs.manter.desc">${D.pt['prefs.manter.desc'].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}<`));
@@ -318,10 +318,10 @@ test('i18n: título, descrição e aviso nas 4 línguas; o rótulo do HTML é o 
 
 test('a descrição é honesta: o ganho, o preço e o desligar apaga — nas 4 línguas', () => {
   const ESPERADO = {
-    pt: [/a cada poucas horas/, /sem o seu aparelho/, /Desligar apaga/],
-    en: [/every few hours/, /without your device/, /Turning it off erases/],
-    es: [/cada pocas horas/, /sin tu dispositivo/, /Al desactivarlo, se borra/],
-    fr: [/toutes les quelques heures/, /sans votre appareil/, /Le désactiver efface/],
+    pt: [/uma ou duas vezes por dia/, /sem o seu aparelho/, /Desligar apaga/],
+    en: [/once or twice a day/, /without your device/, /Turning it off erases/],
+    es: [/una o dos veces al día/, /sin tu dispositivo/, /Al desactivarlo, se borra/],
+    fr: [/une ou deux fois par jour/, /sans votre appareil/, /Le désactiver efface/],
   };
   for (const l of LINGUAS) {
     assert.ok(ESPERADO[l], `CONTROLE: língua nova (${l}) sem a frase esperada neste teste`);

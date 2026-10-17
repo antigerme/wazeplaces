@@ -89,6 +89,23 @@ test('Worker: o `scheduled` não lança sem binding, com chave ruim ou com o KV 
   } finally { amb.restaurar(); }
 });
 
+test('Worker: o `scheduled` com binding ou chave ruim AVISA no log (R28-6-05), sem vazar a chave', async () => {
+  const amb = ambiente();
+  const erroReal = console.error;
+  const linhas = [];
+  console.error = (...a) => linhas.push(a.join(' '));
+  try {
+    const { default: worker } = await import('../worker/index.mjs');
+    const ctx = { waitUntil: () => {} };
+    await worker.scheduled({}, {}, ctx);
+    await worker.scheduled({}, { ENCRYPTION_KEY: 'YWJj', SESSIONS: kvDeMentira() }, ctx);
+    assert.equal(linhas.length, 2, `o Cron ruim saiu calado: ${JSON.stringify(linhas)}`);
+    assert.match(linhas[0], /sem ENCRYPTION_KEY/);
+    assert.match(linhas[1], /ENCRYPTION_KEY inválida/);
+    assert.ok(!linhas.join('\n').includes('YWJj'), 'a chave foi pro log');
+  } finally { console.error = erroReal; amb.restaurar(); }
+});
+
 // ─── VM ─────────────────────────────────────────────────────────────────────
 
 const esperarAte = async (cond, rotulo, tetoMs = 15000) => {

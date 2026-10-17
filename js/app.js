@@ -139,7 +139,10 @@ function formatarCodigoPareamento(bruto) {
 // junto com ele.
 const PAIR_ALFABETO = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
 function extrairCodigoPareamento(texto) {
-    const s = String(texto || '')
+    // Um código ou um link cabem em muito menos que 4.000 caracteres: o teto existe porque o 3º `replace` é quadrático
+    // em texto sem espaço feito de trechos separados por `-` ou `.` (colar 32 KB de «a-a-a…» travava a aba por ~3 s;
+    // R28-1-01). Literal aqui e não constante: os harnesses fatiam só esta função.
+    const s = String(texto || '').slice(0, 4000)
         .replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, ' ')
         .replace(/\bwww\.\S+/gi, ' ')
         .replace(/\b(?:[a-z0-9-]+\.)+[a-z]{2,}[/?#]\S*/gi, ' ')
@@ -14621,6 +14624,13 @@ function fetchNextPage() {
         // Reposição = a fila já teve pedido antes desta busca (não é a abertura).
         const reposicao = pedidosQueEntraramNaFila.size > 0;
         let semNadaSeguidas = 0;
+        // R28-2-01: a página anda TAMBÉM entre as páginas da MESMA leitura. Se um pedido é decidido (aqui, ou por
+        // outra aba) depois de a página k ser calculada e antes de a k+1 ser calculada, os do topo da k+1 sobem
+        // pra k — já lida — e nunca entrariam na fila: a busca acabava com `hasMore` falso e o "Tudo limpo!" vinha
+        // com pedidos pendentes. Quando a leitura de várias páginas chega ao fim e algo pousou (ou está no ar)
+        // desde que ela começou, relê UMA vez do topo; o que já passou pela fila sai no filtro de sempre.
+        let comecoDaLeitura = Date.now();
+        let jaReiniciou = false;
         try {
             for (let pagina = 1; ; pagina++) {
                 // VIGIA a busca: fila congelada não grita, a tela só para — e
@@ -14791,7 +14801,18 @@ function fetchNextPage() {
                 }
                 semNadaSeguidas = (result.places || []).length > 0 ? 0 : semNadaSeguidas + 1;
 
-                if (!result.hasMore) break;
+                if (!result.hasMore) {
+                    if (!jaReiniciou && busca.paginas > 1
+                        && (pedidosEmAndamento.size > 0 || [...pousosDaPagina.values()].some((t) => t >= comecoDaLeitura))) {
+                        jaReiniciou = true;
+                        comecoDaLeitura = Date.now();
+                        semNadaSeguidas = 0;
+                        pagina = 0;
+                        dlog('busca.releu', { paginas: busca.paginas });
+                        continue;
+                    }
+                    break;
+                }
                 // Com uma ordem que não é a do Waze, a busca segue pelas páginas
                 // até o fim (ou o teto): ordenar só a primeira era a ordem valendo
                 // pra 500 de 554 (ver `ordemPrecisaDaFilaInteira`).
