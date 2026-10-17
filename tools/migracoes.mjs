@@ -43,25 +43,6 @@ export const PRAZO_PADRAO_DIAS = 30;
 
 export const MIGRACOES = [
   {
-    id: 'regiao-world',
-    desde: '2026-09-25',
-    revisarEm: '2026-10-25',
-    familia: 'aparelho',
-    onde: 'server/core.mjs',
-    oque: 'A região `world` virando `na`: no `requireRegion` do core (pedido de '
-        + 'cliente antigo), no `getRegion` do api.js (a escolha guardada no '
-        + 'aparelho) e no cartão da conversa do presenca.js (mandado por versão '
-        + 'anterior). `world` era a 4ª opção do filtro e sempre apontou pro '
-        + 'servidor da América do Norte (`/Descartes/`); a opção `na` apontava pra '
-        + '`na-Descartes`, que NÃO EXISTE (medido: 404 em tudo). A v2026.09.25-03 '
-        + 'corrigiu o `na` e tirou o `world` do seletor.',
-    removerQuando: 'Todo aparelho de testador tiver aberto a versão nova (o '
-        + '`getRegion` regrava `na` na primeira leitura) e o cache do service '
-        + 'worker da versão anterior tiver saído de circulação. O cartão da '
-        + 'conversa é o único resíduo que dura mais: cartão antigo no histórico do '
-        + 'chat abre com a região `row` se a linha sair, o que só erra o link do WME.',
-  },
-  {
     id: 'historico-onde',
     desde: '2026-09-14',
     revisarEm: '2027-10-20',
@@ -106,44 +87,6 @@ export const MIGRACOES = [
         + 'no WhatsApp, e é justamente o que se usa pra comparar antes/depois. '
         + 'Tirar isto hoje quebraria o replay do arquivo que o owner mandou '
         + 'hoje de manhã.',
-  },
-  {
-    id: 'saida-sem-marca',
-    desde: '2026-09-26',
-    revisarEm: '2026-10-26',
-    familia: 'aparelho',
-    onde: 'js/app.js',
-    oque: 'O `adotarSaidaSemMarca` no `initApp`. A partir desta versão cada item '
-        + 'da fila de saída leva a marca da SESSÃO do gesto (`s`), e o item SEM '
-        + 'conta de outra sessão tem dono desconhecido: não vai ao Waze (O3 da '
-        + 'auditoria de 2026-09-26 — o item nulo saía no nome de qualquer conta '
-        + 'que entrasse depois). Item gravado ANTES não tem a marca; o que ainda '
-        + 'espera envio na abertura com sessão foi feito nela, e é adotado.',
-    removerQuando: 'Todo aparelho de testador tiver aberto esta versão COM '
-        + 'sessão (a adoção grava a marca na primeira abertura) — ou entrado de '
-        + 'novo, quando o item sem marca sai como dono desconhecido. Sem a '
-        + 'adoção, o item de versão anterior de quem segue logado seria '
-        + 'descartado na primeira abertura: uma decisão feita offline perdida '
-        + 'justamente no deploy.',
-  },
-  {
-    id: 'fila-guardada-desde',
-    desde: '2026-09-22',
-    revisarEm: '2026-10-22',
-    familia: 'aparelho',
-    onde: 'js/app.js',
-    oque: 'O `: guardada.t` no `offlineTentarAbrirSemRede`. A partir de '
-        + 'v2026.09.22-06 a fila guardada do offline leva `desde` — o instante '
-        + 'em que a LISTA foi tirada —, e é contra ele que os pousos filtram a '
-        + 'reabertura sem rede (o pedido tratado com rede depois da foto não '
-        + 'volta como card). Fila guardada ANTES disso não tem o campo, e o '
-        + 'mais perto que se sabe é a hora em que ela foi gravada.',
-    removerQuando: 'Toda fila guardada tiver sido regravada por '
-        + 'v2026.09.22-06 ou depois — o que acontece na primeira busca ou '
-        + 'varredura COM rede, ou seja no primeiro uso com sinal. Passou do '
-        + 'prazo? Some com o `: guardada.t` e deixe `desde` ser exigido: sem '
-        + 'ele o filtro usa 0 e tira TODO pouso gravado, que é o lado seguro '
-        + '(esconder o que foi decidido, nunca mostrá-lo de novo).',
   },
   {
     id: 'diag-beacon-da-borda',

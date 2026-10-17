@@ -336,7 +336,7 @@ function abaEmDuvida() {
     atualizarSeloDeConquista() {},
     // O que a trava de verdade toca fora do card: nada travando, nada aberto.
     aprovacaoDaTelaNoAr: () => false, loteDeLidosDaTelaNoAr: () => false, guardarFocoDaTrava() {}, editandoNome: () => false, manterFocoNoLightbox() {},
-    dispensarAvisoDaTrava() {}, pedirComoFuncionaAdiado() {}, aplicarFocoDoTeclado() {},
+    dispensarAvisoDaTrava() {}, pedirComoFuncionaAdiado() {}, atenderReordenacaoAdiada() {}, aplicarFocoDoTeclado() {},
     cancelarPendenciasDoLightbox() {}, aprovacoesAtravessamAQueda() {},
     // O lote da sessão que acabou deixa de contar no "Sair" (R16-1-03).
     soltarOsLotesDaSessaoQueAcabou() {}, updateInFlightIndicator() {},

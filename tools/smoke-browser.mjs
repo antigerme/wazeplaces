@@ -1741,6 +1741,49 @@ for (const [nomeA, viewport] of APARELHOS_FONTE) {
     out.comFoco = hit(document.getElementById('applyFilters'));
     return out;
   };
+  // R24-7-01 (lote 28): dentro da escada o CORPO do formulário tem a altura do conteúdo (não é um 2º rolante de 32 px) e os controles recebem o dedo e o foco.
+  // `vistos` = quantos dos controles da aba Filtros recebem o dedo (centro) em ALGUM ponto da rolagem do CARTÃO; `foco` = os da aba Preferências, depois de `focus()`
+  // (a rolagem que o Tab faria), com o centro recebendo o dedo — o rodapé preso e o cabeçalho não podem cobri-los.
+  const medirCorpoFiltros = async () => {
+    openModal('filtersModal'); switchFilterTab('filtersTabFilters');
+    await new Promise((ok) => setTimeout(ok, 200));
+    const card = document.querySelector('#filtersModal > div');
+    const corpo = card.querySelector(':scope > .overflow-y-auto');
+    const recebe = (e) => {
+      const q = e.getBoundingClientRect(); if (!q.width || !q.height) return false;
+      const n = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2);
+      return !!n && (n === e || e.contains(n) || (e.closest('label') && e.closest('label').contains(n)));
+    };
+    const ctrls = [...corpo.querySelectorAll('#filtersPanelFilters input, #filtersPanelFilters select, #filtersPanelFilters button')].filter((e) => e.offsetParent);
+    const vistos = new Set();
+    for (let y = 0; y <= card.scrollHeight; y += 20) { card.scrollTop = y; ctrls.forEach((e, i) => { if (recebe(e)) vistos.add(i); }); }
+    // `faixaPx`: o que sobra do cartão acima do rodapé preso. Com o rodapé EMPILHADO mais alto que o cartão (500% de 1280×800 = 256×160: 141 px de rodapé
+    // num cartão de 136) ele cobre o cartão inteiro, e nenhum controle pode receber o dedo — um limite do rodapé preso, que não é do corpo.
+    const rodape = card.querySelector(':scope > .dialogo-acoes:last-child');
+    const out = { corpoPx: Math.round(corpo.getBoundingClientRect().height), corpoSH: corpo.scrollHeight, corpoOverflowY: getComputedStyle(corpo).overflowY, vistos: vistos.size, de: ctrls.length, foco: {},
+      faixaPx: Math.round(card.clientHeight - rodape.getBoundingClientRect().height) };
+    card.scrollTop = 0;
+    switchFilterTab('filtersTabPrefs');
+    await new Promise((ok) => setTimeout(ok, 200));
+    for (const id of ['prefOfflineDisponivel', 'prefPresenca', 'prefPularGuarda', 'langSelect']) {
+      document.getElementById('filtersTabPrefs').focus(); card.scrollTop = 0;
+      document.getElementById(id).focus();
+      // O WebKit ANIMA a rolagem do foco (a 280×653 a 2× o cartão anda ~4.000 px) e a animação começa DEPOIS de uns quadros parada em 0: «parado» é o foco À VISTA e a rolagem
+      // sem mudar em 4 quadros seguidos (o elemento que passa pela faixa no meio da animação não conta), com teto de quadros — se o fim for coberto, o teto estoura e a falha sai.
+      for (let i = 0, igual = 0, ultimo = -1; i < 150 && !(igual >= 4 && recebe(document.getElementById(id))); i++) { await new Promise((ok) => requestAnimationFrame(ok)); igual = card.scrollTop === ultimo ? igual + 1 : 0; ultimo = card.scrollTop; }
+      out.foco[id] = recebe(document.getElementById(id));
+    }
+    return out;
+  };
+  const checaCorpoDosFiltros = (r, c, rot) => {
+    // Fora da escada o corpo é o rolante de sempre (nenhum pixel muda); dentro, o cartão rola o formulário e o corpo mostra o conteúdo inteiro.
+    if (r.cartaoOverflowY !== 'auto') { checa(c.corpoOverflowY === 'auto', `${rot}: fora da escada o corpo dos Filtros deixou de rolar (${c.corpoOverflowY})`, JSON.stringify(c)); return; }
+    checa(c.corpoOverflowY === 'visible' && c.corpoPx >= c.corpoSH - 1, `${rot}: o corpo dos Filtros segue como segundo rolante (${c.corpoPx} px de ${c.corpoSH})`, JSON.stringify(c));
+    if (c.faixaPx < 44) return;   // o rodapé preso cobre o cartão todo: o que se mede aqui é o corpo (acima), não os controles
+    checa(c.de >= 10 && c.vistos === c.de, `${rot}: só ${c.vistos} de ${c.de} controles dos Filtros recebem o dedo rolando o cartão`, JSON.stringify(c));
+    const cobertos = Object.entries(c.foco).filter(([, v]) => !v).map(([k]) => k);
+    checa(cobertos.length === 0, `${rot}: o foco leva ${cobertos.join(', ')} para sob o cabeçalho ou o rodapé preso`, JSON.stringify(c));
+  };
   const CASOS_FILTROS = [
     ['Fold 280×653', { width: 280, height: 653 }, [1, 1.5, 1.7, 1.8, 1.9, 2]],
     ['SE 320×568', { width: 320, height: 568 }, [1, 1.5, 1.7, 1.8, 1.9, 2]],
@@ -1774,6 +1817,7 @@ for (const [nomeA, viewport] of APARELHOS_FONTE) {
         checa(r.aplicar.inicial === 'ok' && r.cancelar.inicial === 'ok',
           `Filtros Fold ×1,7 · ${lang}: o rodapé que já se alcançava em repouso passou a ficar cortado`, JSON.stringify(r));
       }
+      if (lang === 'pt' || lang === 'fr') checaCorpoDosFiltros(r, await page.evaluate(medirCorpoFiltros), `Filtros ${rot} ×${escala} · ${lang}`);
       await fecharL25(page);
     }
     checa(erros.length === 0, `Filtros ${rot} ×${escala}: erro de JS`, erros[0]);
@@ -2755,6 +2799,7 @@ for (const [nomeA, viewport] of APARELHOS_FONTE) {
       checa(r.aplicar.inicial === 'ok' && r.cancelar.inicial === 'ok', `Filtros no zoom ${rot} (${w}×${h}) · ${lang}: o "Aplicar"/"Cancelar" não recebe o dedo SEM rolar`, JSON.stringify(r));
       checa(r.comFoco === 'ok', `Filtros no zoom ${rot} (${w}×${h}) · ${lang}: o foco do teclado não traz o "Aplicar" à vista`, JSON.stringify(r));
       checa(r.cartaoOverflowY === 'auto', `Filtros no zoom ${rot} (${w}×${h}) · ${lang}: o cartão não rola (a janela ficou fora da escada)`, JSON.stringify(r));
+      if (lang === 'pt' || lang === 'fr') checaCorpoDosFiltros(r, await page.evaluate(medirCorpoFiltros), `Filtros no zoom ${rot} (${w}×${h}) · ${lang}`);
       await fecharL25(page);
     }
     checa(erros.length === 0, `Filtros no zoom ${rot}: erro de JS`, erros[0]);
@@ -2791,6 +2836,17 @@ for (const [nomeA, viewport] of APARELHOS_FONTE) {
     await entrarL25(page, 'pt');
     const r = await page.evaluate(medirAlcanceFiltros);
     checa(r.aplicar.inicial !== 'ok' || r.cancelar.inicial !== 'ok' || r.aplicar.depois !== 'ok', 'Filtros no zoom 400%: CONTROLE — sem a escada o "Aplicar" segue ao alcance; a medida está cega', JSON.stringify(r));
+    await ctx.close();
+  }
+  {
+    // CONTROLE do corpo (R24-7-01): com o corpo de volta a segundo rolante (a regra do lote 27) o MESMO 400×225 (1600×900 a 400%) mostra 0 dos controles e cobre o foco.
+    const { ctx, page } = await novaPaginaL25({ width: 400, height: 225 }, 1, { estilo: '#filtersModal > div > .overflow-y-auto { flex: 1 1 0% !important; overflow-y: auto !important; }' });
+    await entrarL25(page, 'pt');
+    const r = await page.evaluate(medirAlcanceFiltros);
+    const c = await page.evaluate(medirCorpoFiltros);
+    // (O foco não entra no controle: com a rolagem do cartão zerada antes de cada `focus()` o Chromium o leva a um lugar à vista mesmo com o corpo de 32 px; só os
+    // controles que recebem o dedo e a altura do corpo distinguem as duas árvores nos dois motores — no WebKit o foco do Fold a 2× também reprova na de antes.)
+    checa(r.cartaoOverflowY === 'auto' && c.vistos < c.de && c.corpoPx < c.corpoSH / 4, 'Filtros no zoom 400%: CONTROLE — com o corpo como 2º rolante os controles seguem à vista; a medida está cega', JSON.stringify({ r, c }));
     await ctx.close();
   }
 
@@ -10246,6 +10302,11 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   const page = await ctx.newPage();
   const erros = [];
   page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 160)));
+  // O que a PÁGINA fez fora do roteiro (o CI do WebKit reprovou aqui duas vezes sem reproduzir local): queda do processo e navegações do
+  // quadro principal depois da carga. Entra na mensagem de erro, pra a próxima falha dizer a causa em vez de um timeout.
+  const eventosDaPagina = [];
+  page.on('crash', () => eventosDaPagina.push('CRASH'));
+  page.on('framenavigated', (f) => { if (f === page.mainFrame()) eventosDaPagina.push('nav:' + f.url().slice(0, 50)); });
   await page.addInitScript(() => {
     const d = new Date(), p = (n) => String(n).padStart(2, '0');
     const k = (x) => `${x.getFullYear()}-${p(x.getMonth() + 1)}-${p(x.getDate())}`;
@@ -10274,7 +10335,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
         logado: AppState.authenticated, perfil: !!AppState.profile, filtrosAbertos: !document.getElementById('filtersModal').classList.contains('hidden'),
         aba: ['filtersTabFilters', 'filtersTabPrefs', 'filtersTabHistory'].find((i) => document.getElementById(i).getAttribute('aria-selected') === 'true') || null,
         gravado: !!localStorage.getItem('waze_places_history'), url: location.href.slice(0, 60), idioma: getLang() })).catch((x) => ({ erroAoLer: String(x).slice(0, 80) }));
-      throw new Error(`${e.message} — estado: ${JSON.stringify(estado)}; erros: ${JSON.stringify(erros.slice(0, 2))}`);
+      throw new Error(`${e.message} — estado: ${JSON.stringify(estado)}; erros: ${JSON.stringify(erros.slice(0, 2))}; eventos: ${JSON.stringify(eventosDaPagina)}`);
     }
     let snap;
     try { snap = await page.locator('#filtersPanelHistory').ariaSnapshot({ timeout: 30000 }); }
@@ -10286,7 +10347,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
           oculto: (document.getElementById('filtersPanelHistory') || {}).hidden, aba: ['filtersTabFilters', 'filtersTabPrefs', 'filtersTabHistory'].find((i) => document.getElementById(i).getAttribute('aria-selected') === 'true') || null,
           modalAberto: !document.getElementById('filtersModal').classList.contains('hidden'), logado: AppState.authenticated, idioma: getLang() })),
         new Promise((ok) => setTimeout(() => ok('a página não respondeu em 5 s (travada)'), 5000))]).catch((x) => `evaluate falhou: ${String(x).slice(0, 100)}`);
-      throw new Error(`ariaSnapshot do Histórico (${onde}/${lang}) estourou: ${String(e.message).split('\n')[0]} — página: ${JSON.stringify(vivo)}; erros: ${JSON.stringify(erros.slice(0, 2))}`);
+      throw new Error(`ariaSnapshot do Histórico (${onde}/${lang}) estourou: ${String(e.message).split('\n')[0]} — página: ${JSON.stringify(vivo)}; erros: ${JSON.stringify(erros.slice(0, 2))}; eventos: ${JSON.stringify(eventosDaPagina)}`);
     }
     const id = `${onde}/${lang}`;
     for (const frase of FRASES[lang]) checa(snap.includes(frase), `${id}: a árvore de acessibilidade não diz "${frase}"`, snap.split('\n').filter((l) => /\d/.test(l)).join(' | ').slice(0, 260));
@@ -10312,6 +10373,10 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     });
     checa(geo.n === 4 && geo.igual, `${id}: a frase \`sr-only\` mexeu na geometria das linhas (o visual não é o mesmo)`, JSON.stringify(geo));
     await page.evaluate(() => closeModal('filtersModal'));
+    // Gotcha #65 (a): o `closeModal` AGENDA um `history.back()`, e o `openModal` do idioma seguinte EMPILHARIA no mesmo quadro — o voltar
+    // pendente come a entrada nova e, no WebKit, tira a página do app (sem `AppState`, "The operation is insecure"). Foi o que reprovou o CI
+    // do WebKit duas vezes neste bloco, sem nunca reproduzir local (a máquina rápida deixa o voltar acabar antes). Espera o FIM do voltar.
+    await esperarOuExplodir(page, () => !CamadaVoltar.consumindo && document.getElementById('filtersModal').classList.contains('hidden'), `o voltar do fechamento dos Filtros (${lang})`);
   }
   checa(erros.length === 0, `${onde}: erro de JS`, erros[0]);
   await ctx.close();
@@ -13108,9 +13173,12 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     // esta feature existe pra acabar. O que NÃO pode acontecer é contar duas
     // vezes: a 1ª resposta nunca foi processada, então o Histórico ganha UM.
     await page.evaluate(() => {
+      // Com a marca da SESSÃO do gesto (`s`), como o app grava: o item sem conta e sem marca (de versão anterior à
+      // marca) deixou de ser adotado pela abertura — a migração `saida-sem-marca` cumpriu o prazo (lote 28) — e agora
+      // sairia como «sem dono», sem ir ao Waze.
       localStorage.setItem('waze_places_saida', JSON.stringify([{ tipo: 'reject',
         venueID: 'reenvio', updateRequestID: 77, creatorId: null, nome: null,
-        dup: false, t: Date.now(), dia: '2026-01-01', onde: '30' }]));
+        dup: false, t: Date.now(), dia: '2026-01-01', onde: '30', s: marcaDaSessao(API.getSession()) }]));
       const h = JSON.parse(localStorage.getItem('waze_places_history') || '{}');
       h._total = { read: 0, rejected: 0 }; h['2026-01-01'] = { read: 0, rejected: 0 };
       localStorage.setItem('waze_places_history', JSON.stringify(h));

@@ -221,6 +221,14 @@ test('R21-7-07 · o cartão dos Filtros rola numa ESCADA de janelas em rem (cont
   assert.equal(rodape.decl.bottom, '0');
   assert.equal(rodape.decl.background, 'inherit');
   assert.ok(!REGRAS.some((x) => /#filtersModal\s*>\s*div\s*>\s*\.dialogo-acoes/.test(x.sel) && x.condicao === ''), 'o rodapé dos Filtros fica preso também fora da escada');
+  // R24-7-01 (lote 28): o CORPO do formulário (`flex-1 overflow-y-auto`, 2º rolante) tem altura do conteúdo e deixa de rolar dentro da escada: encolhia ao próprio
+  // `py-4` (32 px, 0 de conteúdo, 0 de 17 controles à vista) e o foco parava sob o cabeçalho. Fora da escada ele é o rolante de sempre (nenhuma regra a 1×).
+  const corpoDosFiltros = regrasComuns(lerBlocos(b.corpo), b.cabeca).find((x) => x.sel === '#filtersModal > div > .overflow-y-auto');
+  assert.ok(corpoDosFiltros, 'o corpo dos Filtros voltou a ser um segundo rolante dentro da escada (a regra `#filtersModal > div > .overflow-y-auto` sumiu): 0 de 17 controles à vista nas janelas de zoom');
+  assert.equal(corpoDosFiltros.decl.flex, 'none');
+  assert.equal(corpoDosFiltros.decl.overflow, 'visible');
+  assert.ok(!REGRAS.some((x) => /#filtersModal\s*>\s*div\s*>\s*\.overflow-y-auto/.test(x.sel) && x.condicao !== b.cabeca), 'a regra do corpo dos Filtros vale fora da escada (ou numa 2ª consulta que a primeira ocorrência não cobre)');
+  assert.match(HTML, /<div class="flex-1 overflow-y-auto overscroll-contain px-6 py-4">\s*<!-- ══ ABA FILTROS ══ -->/, 'o corpo dos Filtros mudou de classe: a regra da escada o alcança por `> .overflow-y-auto`');
   // O rodapé preso cobre o fim da rolagem: o `scroll-padding-bottom` faz o foco do teclado parar ACIMA dele (17 de 17 controles ficavam
   // sob o rodapé no Fold a 2×). Dois grupos: o rodapé empilhado (linha de até 15,4rem) e o lado a lado. As condições são linhas DA escada.
   // O lado a lado (o degrau largo) vem PRIMEIRO no arquivo: ele alcança também as janelas estreitas (até 15,4rem), onde o rodapé é o empilhado,

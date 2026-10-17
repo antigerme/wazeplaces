@@ -1,7 +1,7 @@
 // CACHE_NAME = 'waze-places-' + serial de zona DNS (YYYYMMDDnn). js/version.js é a
 // FONTE ÚNICA do serial; a auditoria (test/version.test.mjs) trava a paridade/formato.
 // Serial novo = shell novo = ciclo de atualização. Bump = mexer AQUI e no version.js.
-const CACHE_NAME = 'waze-places-2026101601';
+const CACHE_NAME = 'waze-places-2026101701';
 // Cache dos tiles provisionados. Nome PRÓPRIO e fora do bump de propósito:
 // ver a nota no `activate`.
 const TILES_CACHE = 'waze-places-tiles';
@@ -39,15 +39,33 @@ const swConta = { doCache: 0, cacheSemEntrada: 0, esperouLeitura: 0, foraDaLista
 // está guardado" e o pedido vai à rede, como iria sem worker. 1,5 s é folga
 // larga pro cache que responde (milissegundos) e curta pro que não responde.
 const SW_CACHE_TETO_MS = 1500;
+// Mas «lento» NÃO é «mudo» (R24-4-03): o teto curto troca a espera por um PALPITE
+// («não está guardado») e o palpite só é inofensivo com rede, onde o pedido vai à
+// rede como iria sem worker. SEM rede, esperar a leitura do cache lento é a única
+// saída — vencido o teto curto, o worker tenta a rede e, SE ELA FALHAR, volta a
+// esperar a MESMA leitura por este teto bem maior. Cache mudo continua não
+// pendurando: com rede vai à rede em ~1,5 s, sem rede o erro vem depois disto.
+const SW_CACHE_ESPERA_SEM_REDE_MS = 10000;
 // O que o `comTeto` devolve quando QUER distinguir "não deu pra ler" de "leu e não tem".
 const VENCIDO = Symbol('vencido');
 // Resolve com `vencido` se a promessa passa do teto OU rejeita. Nunca rejeita.
-function comTeto(promessa, vencido) {
+function comTeto(promessa, vencido, teto = SW_CACHE_TETO_MS) {
   return new Promise((resolve) => {
-    const relogio = setTimeout(() => { swConta.cacheVencido++; resolve(vencido); }, SW_CACHE_TETO_MS);
+    const relogio = setTimeout(() => { swConta.cacheVencido++; resolve(vencido); }, teto);
     Promise.resolve(promessa).then(
       (v) => { clearTimeout(relogio); resolve(v); },
       () => { clearTimeout(relogio); resolve(vencido); },
+    );
+  });
+}
+// A segunda espera da MESMA leitura (a rede falhou): teto longo, sem contar de novo
+// em `cacheVencido` (a operação já foi contada ao passar do teto curto).
+function esperarCacheLento(promessa) {
+  return new Promise((resolve) => {
+    const relogio = setTimeout(() => resolve(undefined), SW_CACHE_ESPERA_SEM_REDE_MS);
+    Promise.resolve(promessa).then(
+      (v) => { clearTimeout(relogio); resolve(v); },
+      () => { clearTimeout(relogio); resolve(undefined); },
     );
   });
 }
@@ -67,32 +85,59 @@ function lembrarPaginaDoCache(id) {
 // tiles, sobrescrevia a nova, e o tile recém-guardado sumia do mapa sem rede
 // (auditoria de 2026-09-25).
 let hidratacaoGeracao = 0;
+// `tilesHidratados` diz que a lista PODE SER USADA (a leitura terminou OU o worker
+// desistiu dela por teto); `listaLida` diz que a leitura TERMINOU de verdade. A
+// diferença é a do cache lento: a lista que o worker deu por vazia porque a Cache
+// API demorou não prova que o tile não está guardado, e sem rede o tile fora dela
+// ainda tem que tentar o cache devagar (R24-4-03).
+let listaLida = false;
+let leituraAtual = Promise.resolve();
 function hidratarTiles() {
   const geracao = ++hidratacaoGeracao;
   tilesHidratados = false;
+  listaLida = false;
+  // Cada etapa (has, open, keys) tem teto PRÓPRIO: um teto sobre a soma
+  // transformava três operações de 0,6 s numa lista «vazia» (R24-4-03). Passou do
+  // teto, o worker DESISTE de esperar (o portão abre, com a lista que já se tinha)
+  // mas a leitura segue sem teto no fundo: se um dia terminar, atualiza a lista.
+  let desistir;
+  const portao = new Promise((ok) => { desistir = ok; });
+  const etapa = (p) => {
+    const relogio = setTimeout(() => { swConta.cacheVencido++; desistir(); }, SW_CACHE_TETO_MS);
+    return Promise.resolve(p).then(
+      (v) => { clearTimeout(relogio); return v; },
+      (e) => { clearTimeout(relogio); throw e; },
+    );
+  };
   const leitura = (async () => {
     let lista = new Set();
     try {
       // `caches.has` antes de `open`: `open` CRIA o cache, e quem nunca ligou o
       // offline não precisa ganhar um vazio a cada partida do worker.
-      if (await caches.has(TILES_CACHE)) {
-        const c = await caches.open(TILES_CACHE);
-        lista = new Set((await c.keys()).map((r) => r.url));
+      if (await etapa(caches.has(TILES_CACHE))) {
+        const c = await etapa(caches.open(TILES_CACHE));
+        lista = new Set((await etapa(c.keys())).map((r) => r.url));
       }
     } catch (e) { lista = new Set(); }
     if (geracao !== hidratacaoGeracao) return;
     tilesGuardados = lista;
     swHidratadoEm = Date.now();
     tilesHidratados = true;
+    listaLida = true;
   })();
-  // Com TETO: a leitura que não termina não pode segurar o tile nem a ativação.
-  // Vencido, a lista que já se tinha (vazia, se o worker acabou de acordar)
-  // passa a valer — o tile que ela não conhece vai à rede —, e a leitura tardia,
-  // se um dia terminar, ainda a atualiza (a geração é a mesma).
-  hidratacao = comTeto(leitura, undefined).then(() => {
+  leituraAtual = leitura;
+  // O que segura o tile e a ativação é o PORTÃO: a leitura que não termina não
+  // pode prendê-los. Vencido, a lista que já se tinha (vazia, se o worker acabou
+  // de acordar) passa a valer — com rede o tile que ela não conhece vai à rede.
+  hidratacao = Promise.race([leitura, portao]).then(() => {
     if (geracao === hidratacaoGeracao) tilesHidratados = true;
   });
   return hidratacao;
+}
+// A leitura MAIS NOVA, até o fim DE VERDADE (para o ramo sem rede). Quem espera
+// tem teto próprio (`esperarCacheLento`); as voltas são só cinto.
+function esperarLeituraCompleta(voltas = 0) {
+  return leituraAtual.then(() => (listaLida || voltas >= 5 ? undefined : esperarLeituraCompleta(voltas + 1)));
 }
 // Espera a leitura MAIS NOVA da lista. Esperar só a promessa capturada no
 // pedido não basta (auditoria de 2026-09-26, O11): pedido durante a leitura N,
@@ -262,15 +307,34 @@ self.addEventListener('fetch', event => {
       if (event.request.destination !== 'image') return;
       // `caches.match` com o nome, e não `open` + `match`: o `open` CRIARIA o
       // cache que o "Sair" ou o desligar acabou de apagar.
-      // Com TETO (R23-4-02): o cache que não responde vale como "sem entrada".
-      const doCache = () => comTeto(caches.match(event.request, { cacheName: TILES_CACHE }), VENCIDO)
-        // Mesmo aqui: se o cache falhar, devolve à rede em vez de quebrar. O vencido já foi
-        // contado em `cacheVencido`: não conta de novo como "sem entrada".
-        .then((hit) => { if (hit === VENCIDO) return fetch(event.request); swConta[hit ? 'doCache' : 'cacheSemEntrada']++; return hit || fetch(event.request); })
-        .catch(() => fetch(event.request));
+      // Com TETO (R23-4-02): o cache que não responde vale como "sem entrada" —
+      // COM rede. SEM rede (R24-4-03) o palpite não serve: o cache LENTO que
+      // responde é a única saída, então a rede que falha manda voltar a esperar a
+      // MESMA leitura por `SW_CACHE_ESPERA_SEM_REDE_MS`. Cache mudo não responde
+      // nunca: aí o erro da rede é o que a imagem teria sem worker, só mais tarde.
+      const doCache = () => {
+        const leitura = caches.match(event.request, { cacheName: TILES_CACHE });
+        return comTeto(leitura, VENCIDO).then((hit) => {
+          // O vencido já foi contado em `cacheVencido`: não conta de novo como "sem entrada".
+          if (hit !== VENCIDO) { swConta[hit ? 'doCache' : 'cacheSemEntrada']++; return hit || fetch(event.request); }
+          return fetch(event.request).catch((erro) => esperarCacheLento(leitura).then((h) => {
+            if (h) { swConta.doCache++; return h; }
+            throw erro;
+          }));
+        });
+      };
+      // A lista NÃO foi lida até o fim (o worker desistiu dela por teto): o tile que
+      // ela não conhece pode estar guardado. Com rede, vai à rede; sem rede, espera
+      // a leitura da lista (e do tile) por quanto der.
+      const daRedeOuDaListaLenta = () => fetch(event.request).catch((erro) =>
+        esperarCacheLento(esperarLeituraCompleta()).then(() => {
+          if (tilesGuardados.has(url.href)) return doCache();
+          throw erro;
+        }));
       if (tilesHidratados) {
         // O caminho de sempre, ESTRITAMENTE ADITIVO: sem entrada, não responde.
         if (tilesGuardados.has(url.href)) event.respondWith(doCache());
+        else if (!listaLida) event.respondWith(daRedeOuDaListaLenta());
         else swConta.foraDaLista++;
       } else {
         swConta.esperouLeitura++;
@@ -283,8 +347,10 @@ self.addEventListener('fetch', event => {
         // guardado, o worker busca por conta própria — o que a CSP do script
         // dele permite (`connect-src` com o host do tile, cobrado em
         // `test/csp-vm.test.mjs`) e dá o mesmo que o navegador daria.
-        event.respondWith(esperarListaComTeto().then(() =>
-          (tilesGuardados.has(url.href) ? doCache() : fetch(event.request))));
+        event.respondWith(esperarListaComTeto().then(() => {
+          if (tilesGuardados.has(url.href)) return doCache();
+          return listaLida ? fetch(event.request) : daRedeOuDaListaLenta();
+        }));
       }
     }
     return;
@@ -331,17 +397,23 @@ self.addEventListener('fetch', event => {
     // o que revalidar e a revalidação vira download inteiro — era o caso da VM.
     // A cópia GUARDADA deste pedido (ou `undefined`).
     // Com TETO (R23-4-02): sem rede e com a Cache API muda, `Response.error()`
-    // ao fim do teto é melhor que pendurar a navegação.
-    const daCopiaGuardada = () => comTeto(caches.match(event.request, isHTML ? { ignoreSearch: true } : undefined), undefined).then(cached => {
-      if (cached) return cached;
-      // Fallback HTML só pra navegação. NUNCA devolver HTML pra request de JS/CSS
-      // (browser engasga ao tentar parsear HTML como script — ver gotcha #11).
-      // `ignoreSearch` acima e `/` aqui: o atalho do manifest abre
-      // `/?action=filters`, que nunca foi guardado com essa query — e o
-      // `/index.html` de antes era uma resposta redirecionada, recusada.
-      if (isHTML) return comTeto(caches.match('/'), undefined);
-      return undefined;
-    });
+    // ao fim do teto é melhor que pendurar a navegação. UM teto sobre a cadeia
+    // inteira (a página e, depois, o `/`), e o teto é o LONGO (R24-4-03): este caminho só
+    // roda com a rede já falha (o `.catch`) ou com a borda respondendo 5xx (a origem fora
+    // do ar, que é a mesma coisa), e aí o cache lento que responde é a única saída — dois
+    // tetos curtos em série davam `Response.error()` a um `caches.match` de 1,6 s, que
+    // antes do lote 27 esperava. A resposta 5xx, se houver, segue como último recurso.
+    const daCopiaGuardada = () => comTeto(
+      caches.match(event.request, isHTML ? { ignoreSearch: true } : undefined).then(cached => {
+        if (cached) return cached;
+        // Fallback HTML só pra navegação. NUNCA devolver HTML pra request de JS/CSS
+        // (browser engasga ao tentar parsear HTML como script — ver gotcha #11).
+        // `ignoreSearch` acima e `/` aqui: o atalho do manifest abre
+        // `/?action=filters`, que nunca foi guardado com essa query — e o
+        // `/index.html` de antes era uma resposta redirecionada, recusada.
+        if (isHTML) return caches.match('/');
+        return undefined;
+      }), undefined, SW_CACHE_ESPERA_SEM_REDE_MS);
     const navegacao = event.request.mode === 'navigate';
     event.respondWith(
       fetch(event.request)
@@ -374,10 +446,12 @@ self.addEventListener('fetch', event => {
     return;
   }
 
+  // Com TETO (R23-4-02): vencido, vale como "não guardado" e vai à rede; se a
+  // rede falhar, volta a esperar o cache lento (R24-4-03).
+  const leituraDoAsset = caches.match(event.request);
   event.respondWith(
-    // Com TETO (R23-4-02): vencido, vale como "não guardado" e vai à rede.
-    comTeto(caches.match(event.request), undefined).then(cached => {
-      if (cached) return cached;
+    comTeto(leituraDoAsset, VENCIDO).then(cached => {
+      if (cached && cached !== VENCIDO) return cached;
       return fetch(event.request).then(response => {
         if (!response || response.status !== 200 || response.type !== 'basic') {
           return response;
@@ -385,6 +459,9 @@ self.addEventListener('fetch', event => {
         const responseToCache = response.clone();
         caches.open(CACHE_NAME).then(cache => cache.put(event.request, responseToCache)).catch(() => {});
         return response;
+      }).catch((erro) => {
+        if (cached !== VENCIDO) throw erro;
+        return esperarCacheLento(leituraDoAsset).then((h) => { if (h) return h; throw erro; });
       });
     })
   );

@@ -323,7 +323,7 @@ function montarServidores({ perfis, segurar = [], regiao = 'row', pais = 30, vaz
     'caixaDaMinhaAreaEm', 'anotarEditaveis', 'editaveisLidos', 'pedirListaDePaises', 'loadProfileAndAuxData', 'definirPerfil'];
   for (const opcional of ['lerServidorDaMinhaArea', 'areasGerenciadasLidas', 'servidorNuncaLido', 'areaNoutroServidorSemDecisao',
     'decisaoSemResposta', 'refazerDecisaoSemResposta', 'minhaAreaFalhouPorRedeEm', 'esperarOLugarDaFilaVazia',
-    'decideOLugarDeAgora', 'janelaDoDesfazerAberta'])
+    'decideOLugarDeAgora', 'janelaDoDesfazerAberta', 'ordemSalvaEsperaOPerfil'])
     if (achar(opcional)) nomes.push(opcional);
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, 'let filaDeOnde = null; let rebuscasAuto = 0; let filaEsperaPerfil = false;\n'

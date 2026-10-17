@@ -235,6 +235,10 @@ test('as 13 chaves novas existem nas QUATRO línguas', () => {
 test('o plural tem chave própria: "1 pedidos" não sai em língua nenhuma', () => {
   const corpo = fatiar('atualizarLinhaDoOffline');
   assert.match(corpo, /n === 1 \? 'prefs\.offline\.prontoA' : n === 0 \? 'prefs\.offline\.prontoAZero' : 'prefs\.offline\.prontoAPlural'/);
+  // O ramo «sem sinal e tudo guardado» só existe com `n` verdadeiro: o ternário do zero ali era código morto (R24-6).
+  const semSinal = /if \(semRede && fotosValem && n\) \{[^]*?return;/.exec(corpo);
+  assert.ok(semSinal, 'o ramo «sem sinal com tudo guardado» sumiu');
+  assert.ok(!/prontoAZero/.test(semSinal[0]), 'DEFEITO: o ramo que só vale com n ≥ 1 voltou a escolher o texto do ZERO (código morto)');
   assert.match(corpo, /n === 1 \? 'prefs\.offline\.esperaA' : 'prefs\.offline\.esperaAPlural'/);
 });
 
@@ -334,15 +338,24 @@ test('o estado parcial existe nas quatro línguas e não diz "Pronto"', () => {
 // o SW não responde e o navegador faz o que sempre fez.
 test('o SW só responde pelo tile que JÁ está guardado (nunca promete rede)', () => {
   const i = SW_SEM.indexOf('url.origin !== self.location.origin');
-  const bloco = SW_SEM.slice(i, i + 900);
+  const bloco = SW_SEM.slice(i, SW_SEM.indexOf("if (url.pathname.startsWith('/api/')) return;", i));
   assert.match(bloco, /tilesGuardados\.has\(/,
     'a decisão de responder tem que consultar a lista SÍNCRONA do que está guardado');
-  // e o respondWith tem que estar DENTRO desse if, não antes dele
-  const iHas = bloco.indexOf('tilesGuardados.has(');
-  const iResp = bloco.indexOf('event.respondWith');
+  // e o respondWith tem que estar DENTRO do if, não antes dele: a decisão mora no `if (tilesHidratados)`
+  const iDecide = bloco.indexOf('if (tilesHidratados) {');
+  assert.ok(iDecide > 0, 'a decisão síncrona por `tilesHidratados` sumiu');
+  const decisao = bloco.slice(iDecide);
+  const iHas = decisao.indexOf('tilesGuardados.has(');
+  const iResp = decisao.indexOf('event.respondWith');
   assert.ok(iHas > 0 && iResp > iHas,
     'o `respondWith` tem que vir DEPOIS da checagem — senão o SW promete responder'
     + ' por tile que ele não tem, e a imagem quebra quando a rede falha');
+  // R24-4-03: o tile que a lista não conhece só ganha resposta quando a lista NÃO foi lida até o fim, e aí a
+  // resposta começa pela REDE (ela só espera o cache lento DEPOIS de a rede falhar): continua ADITIVO.
+  assert.match(bloco, /const daRedeOuDaListaLenta = \(\) => fetch\(event\.request\)\.catch\(/,
+    'a resposta pelo tile fora da lista tem que começar pela rede');
+  assert.match(bloco, /else if \(!listaLida\) event\.respondWith\(daRedeOuDaListaLenta\(\)\);\s*else swConta\.foraDaLista\+\+;/,
+    'o tile fora da lista, com a lista lida até o fim, tem que sair sem `respondWith`');
 });
 
 // ── O service worker é EFÊMERO, e a lista de tiles tem que sobreviver a isso ─
@@ -828,8 +841,13 @@ test('o service worker responde ao DIAG e a releitura da lista SEGURA os tiles',
     'o worker parou de contar o que serviu do cache');
   // A releitura (aviso da varredura) também tem que SEGURAR o tile, senão o
   // tile guardado agora e pedido logo em seguida cai na lista velha.
-  const hid = SW_SEM.slice(SW_SEM.indexOf('function hidratarTiles('), SW_SEM.indexOf('const leitura = (async'));
-  assert.ok(hid.length > 20 && hid.length < 400, `o recorte de hidratarTiles saiu de lugar (${hid.length} caracteres): a âncora \`const leitura = (async\` mudou e o guard leria o arquivo todo`);
+  const hid = SW_SEM.slice(SW_SEM.indexOf('function hidratarTiles('), SW_SEM.indexOf('let desistir;'));
+  assert.ok(hid.length > 20 && hid.length < 400, `o recorte de hidratarTiles saiu de lugar (${hid.length} caracteres): a âncora \`let desistir;\` mudou e o guard leria o arquivo todo`);
+  // R24-4-03: cada etapa da leitura (has, open, keys) tem teto PRÓPRIO — um teto sobre a soma dava a lista
+  // por vazia a um cache lento (0,6 s por operação) e o tile guardado ia a uma rede que não há.
+  for (const etapa of ['caches.has(TILES_CACHE)', 'caches.open(TILES_CACHE)', 'c.keys()']) {
+    assert.ok(SW_SEM.includes(`await etapa(${etapa})`), `a etapa ${etapa} perdeu o teto próprio`);
+  }
   assert.match(hid, /tilesHidratados = false;/,
     'a releitura da lista deixou de segurar os tiles — o recém-guardado vai pra rede');
 });
@@ -878,6 +896,24 @@ test('SW: tudo que a página carrega está nos CRÍTICOS, e eles são atômicos'
 test('SW: a navegação sem rede cai na página guardada mesmo com query (atalho do manifest)', () => {
   const sw = readFileSync(new URL('../service-worker.js', import.meta.url), 'utf8');
   assert.match(sw, /caches\.match\(event\.request, isHTML \? \{ ignoreSearch: true \} : undefined\)/);
-  assert.match(sw, /if \(isHTML\) return comTeto\(caches\.match\('\/'\), undefined\)/);
+  assert.match(sw, /if \(isHTML\) return caches\.match\('\/'\);/);
   assert.doesNotMatch(sw, /caches\.match\('\/index\.html'\)/);
+});
+
+// R24-4-01: na seção 9p, a volta da rede (`setOffline(false)`) dispara o `online` na aba B se ela ainda está aberta; B
+// regrava a fila (carimbo TB) depois de A gravar a dela (TA) e A termina `cobre:false · pronto:false` — 7 de 12 rodadas
+// reprovavam sob carga. O gesto que o cenário mede é o de A: nos modos em que B já fez o que tinha de fazer, ela é
+// FECHADA antes da volta da rede. `close()` simples, e NÃO `fecharComoOUsuario` (no Chromium devolve antes de a página
+// sumir e o `setOffline` seguinte falha com «Target … closed»); na «mesma» B fica (o controle quer as duas abas vivas).
+test('smoke do offline (9p): a aba B é fechada ANTES de a rede voltar, e só fora do controle «mesma»', () => {
+  const SMOKE = readFileSync(new URL('../tools/smoke-offline.mjs', import.meta.url), 'utf8')
+    .split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  const i = SMOKE.indexOf('const cenario9p = async');
+  assert.ok(i > 0, 'o cenário 9p sumiu');
+  const cenario = SMOKE.slice(i, SMOKE.indexOf('const varr9p = await cenario9p'));
+  const iFecha = cenario.indexOf("if (modo !== 'mesma') await B.pg.close();");
+  const iVolta = cenario.indexOf('await ctx.setOffline(false);');
+  assert.ok(iFecha > 0, 'a aba B deixou de ser fechada (close() simples) fora do controle «mesma»');
+  assert.ok(iVolta > iFecha, 'a aba B tem que ser fechada ANTES de a rede voltar (o `online` dela regrava a fila por cima da de A)');
+  assert.doesNotMatch(cenario.slice(iFecha, iFecha + 80), /fecharComoOUsuario/, 'fecharComoOUsuario(B.pg) devolve antes de a página sumir no Chromium');
 });

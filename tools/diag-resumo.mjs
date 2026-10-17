@@ -45,6 +45,8 @@ const j = (x, max = 240) => {
   const s = JSON.stringify(x);
   return s.length > max ? s.slice(0, max) + '…' : s;
 };
+// Campo que o relatório de uma versão não trazia: nunca a palavra `undefined` na triagem (R24-4-08).
+const v = (x) => (x === undefined ? AUSENTE : x);
 const hora = (t) => {
   const dt = typeof t === 'number' ? new Date(t) : new Date(String(t));
   return Number.isNaN(dt.getTime()) ? String(t) : dt.toISOString().slice(11, 23);
@@ -94,7 +96,7 @@ const outraAbaPorId = new Set((Array.isArray(d.aberturasAnteriores) ? d.abertura
   .filter(juntoComEsta).map((a) => a.id));
 out(`arquivo: ${origem}, ${Math.round(bytes / 1024)} KB · relatório v${d._versaoDoDiag ?? '?'} · app ${d.app?.rotulo ?? d.app?.versao ?? '?'} · gerado ${d._gerado ?? '?'}`);
 const amb = d.ambiente || {};
-out(`aparelho: ${(amb.ua || '?').replace(/^Mozilla\/5\.0 /, '').slice(0, 90)} · tela ${amb.tela?.w}×${amb.tela?.h}@${amb.tela?.dpr} · janela ${amb.tela?.janela} · instalada: ${amb.standalone} · online: ${amb.online}`);
+out(`aparelho: ${(amb.ua || '?').replace(/^Mozilla\/5\.0 /, '').slice(0, 90)} · tela ${v(amb.tela?.w)}×${v(amb.tela?.h)}@${v(amb.tela?.dpr)} · janela ${v(amb.tela?.janela)} · instalada: ${v(amb.standalone)} · online: ${v(amb.online)}`);
 // A ESCALA do texto (relatório com `computado.escala`, R21-4-03): a letra grande decide onde a barra ✕ ↑ ✓ cabe,
 // e antes o arquivo não trazia número nenhum dela. N = a raiz em px ÷ 16; só se diz quando ele não é 1, e a
 // caixa RENDERIZADA de `1rem` (÷ a de `16px`) confere: se a raiz diz uma escala e a caixa outra, o layout não a
@@ -142,7 +144,7 @@ const textoDoTreino = (tr) => (tr === undefined ? AUSENTE : !tr || tr.ativo === 
 
 secao('TELA NA HORA DO RELATÓRIO');
 const ta = r.telaAgora || {};
-out(`tela ${ta.tela} · painel ${painelComVariante(ta)} · card montado: ${ta.cardMontado === undefined ? AUSENTE : ta.cardMontado} · modais ${j(ta.modais)} · lightbox ${ta.lightbox} · treino ${textoDoTreino(ta.treino)}`);
+out(`tela ${v(ta.tela)} · painel ${ta.painel === undefined ? AUSENTE : painelComVariante(ta)} · card montado: ${ta.cardMontado === undefined ? AUSENTE : ta.cardMontado} · modais ${j(ta.modais)} · lightbox ${v(ta.lightbox)} · treino ${textoDoTreino(ta.treino)}`);
 if (ta.treino && ta.treino.ativo === true) {
   const g = d.treino && typeof d.treino === 'object' ? d.treino : {};
   const n = (x) => (Array.isArray(x) ? x.length : '?');
@@ -167,7 +169,7 @@ if (ta.treino && ta.treino.ativo === true) {
 // Desde o v10 o "já tratado" (outro editor chegou antes, que pro app é sucesso)
 // sai das falhas e vem à parte; antes dele, `falhas` somava os dois.
 const jaTratadas = typeof r.jaTratadas === 'number' ? ` · já tratadas ${r.jaTratadas}` : '';
-out(`rede: ${r.rede === undefined ? AUSENTE : r.rede} · offline: ${r.offline === undefined ? AUSENTE : r.offline} · chamadas ${r.chamadas} (falhas ${r.falhas}${jaTratadas}) · erros de JS ${r.errosDeJs} · capturas ${r.momentos}`);
+out(`rede: ${r.rede === undefined ? AUSENTE : r.rede} · offline: ${r.offline === undefined ? AUSENTE : r.offline} · chamadas ${v(r.chamadas)} (falhas ${v(r.falhas)}${jaTratadas}) · erros de JS ${v(r.errosDeJs)} · capturas ${v(r.momentos)}`);
 if ((ta.modais || []).length) {
   out('ATENÇÃO: relatório gerado com modal aberto — as sentinelas de TOQUE calam nessa hora; olhe as capturas.');
 }
@@ -180,7 +182,7 @@ if (off === undefined) out(AUSENTE);
 // chegou — fila guardada, janela gravada e tiles no cache ficam de fora, o resto vale.
 else if (off.semResposta === true) {
   out('a leitura da base e do cache do mapa NÃO chegou no orçamento do relatório (o navegador não respondeu) — só o estado da memória da página vale:');
-  out(`ligado ${off.ligado} · resultado ${off.resultado} · varrendo ${off.varrendo} · janela servida ${off.janelaServida} / atual ${off.janelaAtual} · tiles guardados que falharam ${off.tilesGuardadosQueFalharam ?? AUSENTE}`);
+  out(`ligado ${v(off.ligado)} · resultado ${v(off.resultado)} · varrendo ${v(off.varrendo)} · janela servida ${v(off.janelaServida)} / atual ${v(off.janelaAtual)} · tiles guardados que falharam ${off.tilesGuardadosQueFalharam ?? AUSENTE}`);
   pausaDoOffline(off);
 }
 // DESLIGADO não é "ausente nesta versão": o app sai cedo da seção e não guarda
@@ -192,8 +194,8 @@ else if (off.ligado === false) {
 } else {
   // `{ erro }` é a leitura do registro da janela que FALHOU (R20, A2): não é "nunca preparou" (`null`).
   const janelaNaoLida = !!(off.janelaGuardada && typeof off.janelaGuardada === 'object' && off.janelaGuardada.erro);
-  out(`ligado ${off.ligado} · resultado ${off.resultado} · varrendo ${off.varrendo} · janela servida ${off.janelaServida} / atual ${off.janelaAtual} / gravada ${janelaNaoLida ? 'NÃO LIDA (não deu pra ler o registro da janela)' : off.janelaGuardada === undefined ? '—' : off.janelaGuardada}`);
-  out(`fila guardada ${j(off.filaGuardada)} · tiles no cache ${j(off.tilesNoCache)} · tiles guardados que falharam ${off.tilesGuardadosQueFalharam}`);
+  out(`ligado ${v(off.ligado)} · resultado ${v(off.resultado)} · varrendo ${v(off.varrendo)} · janela servida ${v(off.janelaServida)} / atual ${v(off.janelaAtual)} / gravada ${janelaNaoLida ? 'NÃO LIDA (não deu pra ler o registro da janela)' : off.janelaGuardada === undefined ? '—' : off.janelaGuardada}`);
+  out(`fila guardada ${j(off.filaGuardada)} · tiles no cache ${j(off.tilesNoCache)} · tiles guardados que falharam ${v(off.tilesGuardadosQueFalharam)}`);
   if (off.ligado) out(`pousos gravados depois da fila guardada: ${off.pousosGravados === undefined ? AUSENTE : off.pousosGravados}`);
   if (off.ligado) pausaDoOffline(off);
   {
@@ -305,7 +307,10 @@ const sa = r.saida;
 if (sa === undefined) out(AUSENTE);
 else if (sa.erro) out('erro ao medir: ' + sa.erro);
 else {
-  out(`esperando envio ${sa.n} · pedidos distintos ${sa.distintas} · REPETIDOS ${sa.repetidas} · tipos ${j(sa.tipos)} · o mais velho espera há ${sa.maisAntigaMin ?? '—'} min`);
+  out(`esperando envio ${v(sa.n)} · pedidos distintos ${v(sa.distintas)} · REPETIDOS ${v(sa.repetidas)} · tipos ${j(sa.tipos)} · o mais velho espera há ${sa.maisAntigaMin ?? '—'} min`);
+  // O aparelho que LÊ e não GRAVA (R24-4-08): decisões que JÁ saíram e que ele não deixou tirar da fila ficam
+  // escondidas do número de cima — sem esta linha, «esperando envio 1» com 2 itens no localStorage cru não tinha explicação.
+  if (sa.lembradosSemGravar > 0) out(`${sa.lembradosSemGravar} decisões já enviadas que o aparelho não deixou tirar da fila (o armazenamento recusa a gravação: cota cheia ou modo restrito) — o app as esconde, mas elas seguem no localStorage.`);
   if (sa.repetidas > 0) out('ATENÇÃO: a mesma decisão está na fila mais de uma vez — algum caminho devolveu um pedido já decidido.');
 }
 
@@ -512,7 +517,7 @@ secao('CÓDIGO NO APARELHO');
 
 secao('SERVICE WORKER');
 const sw = d.serviceWorker || {};
-out(`controlando ${sw.controlando} · registros ${j((sw.registros || []).map((x) => ({ estado: x.estadoAtivo, esperando: !!x.esperando, instalando: !!x.instalando })))}`);
+out(`controlando ${v(sw.controlando)} · registros ${j((sw.registros || []).map((x) => ({ estado: x.estadoAtivo, esperando: !!x.esperando, instalando: !!x.instalando })))}`);
 const sp = sw.proprio;
 if (sp === undefined) out('por ele mesmo: ' + AUSENTE);
 else if (!sp) out('por ele mesmo: sem controlador (nada a perguntar)');
@@ -596,7 +601,7 @@ function linhasDaCaptura(m, recuo = '') {
   const alertasM = Array.isArray(m.alertas) ? (m.alertas.length ? m.alertas.map((a) => a.chave).join(', ') : 'nenhum') : AUSENTE;
   // A captura feita DENTRO do treino (R8-4-06): a `fila` da 3ª linha conta os exemplos.
   const noTreino = m.treino && m.treino.ativo === true ? ` · DENTRO DO TREINO (${m.treino.exemplos ?? '?'} exemplos na fila)` : '';
-  out(`${recuo}${hora(m.t)}  ${m.motivo} · tela ${m.tela} · painel ${painelComVariante(m)} · card montado ${m.cardMontado === undefined ? AUSENTE : m.cardMontado} · modais ${j(m.modais)}${noTreino}`);
+  out(`${recuo}${hora(m.t)}  ${m.motivo} · tela ${m.tela} · painel ${m.painel === undefined ? AUSENTE : painelComVariante(m)} · card montado ${m.cardMontado === undefined ? AUSENTE : m.cardMontado} · modais ${j(m.modais)}${noTreino}`);
   out(`${recuo}    rede ${m.rede === undefined ? AUSENTE : j(m.rede)} · offline ${m.offline === undefined ? AUSENTE : j(m.offline)}`);
   out(`${recuo}    fila ${m.estado?.fila} · restam ${m.estado?.serverTotal} · hasMore ${m.estado?.hasMore} · loadError ${m.estado?.loadError} · imagens quebradas ${quebradas} · alertas: ${alertasM}`);
 }

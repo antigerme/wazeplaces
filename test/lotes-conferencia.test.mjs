@@ -73,7 +73,8 @@ function buracoNegro(nome, chamou) {
 function montar(nomes, deps) {
   for (const [k, v] of Object.entries({ loteDeLidosEmVoo: false, escritasConferindo: 0, aprovandoAgora: false,
     excluindoAgora: false, renomeacoesNoAr: new Set(), extPerguntando: false, extRenovando: false,
-    aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(), alvosDoLoteDeLidosNoAr: new Map() })) if (!(k in deps)) deps[k] = v;
+    aprovacoesNoAr: new Set(), aprovacoesDaQueda: new Map(), alvosDoLoteDeLidosNoAr: new Map(),
+    saidaTiradosSemGravar: new Map() })) if (!(k in deps)) deps[k] = v;
   const chamou = [];
   const escopo = new Proxy(deps, {
     has: (t, k) => typeof k === 'string' && (k in t || !(k in globalThis)),

@@ -33,8 +33,8 @@ import {
 // `/Descartes/` (8 países, e a fila dos EUA com 512 pedidos). O app mandava
 // todo editor dos EUA e do Canadá pra um servidor inexistente — só a opção
 // "World" funcionava, por acaso, porque apontava pra `/Descartes/`. O WME tem
-// TRÊS servidores (NA, ROW, IL), e o app agora também: `world` virou sinônimo
-// de `na` (ver `requireRegion`). O chat (`na-wmp`) tem prefixo e existe:
+// TRÊS servidores (NA, ROW, IL), e o app agora também: o apelido `world`
+// (sinônimo de `na`) saiu (ver `requireRegion`). O chat (`na-wmp`) tem prefixo e existe:
 // o backend dele é outro (ver `WAZE_WMP`).
 export const WAZE_REGIONS = {
   row: 'https://www.waze.com/row-Descartes/app/v1',
@@ -1283,10 +1283,7 @@ function requireRegion(data) {
   // é nenhuma das três é 400: cair em `row` calado mandava a decisão (rejeitar,
   // marcar lido, excluir foto) ao servidor errado — que responde "não encontrado",
   // e o app lê isso como "já tratado" e conta como feito (R17-6-A2).
-  let region = data && data.region ? String(data.region).toLowerCase().trim() : 'row';
-  // MIGRACAO: regiao-world — `world` era a 4ª opção do filtro e sempre foi o
-  // servidor da América do Norte com outro nome (ver `WAZE_REGIONS`).
-  if (region === 'world') region = 'na';
+  const region = data && data.region ? String(data.region).toLowerCase().trim() : 'row';
   // `hasOwn`: `constructor` e cia. são "verdadeiros" num objeto comum.
   if (!Object.hasOwn(WAZE_REGIONS, region)) apiError('Pedido inválido', 400, 'srv.err.badRequest');
   return region;
@@ -2402,7 +2399,9 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
     // Por ID e não por índice, pela mesma razão do `approvedImageIds`: o
     // carrossel reordena e o frontend remove foto excluída da lista, então
     // posição não identifica nada.
-    const imageDates = {};
+    // Sem protótipo (R24-6 A3): o id da foto vem do Waze e é CHAVE; num `{}` o id `__proto__` não
+    // gravava (perdia data e autor) e `constructor`/`toString` já existiam como herança.
+    const imageDates = Object.create(null);
     // QUEM mandou cada foto, por id. O campo é `creatorUserId` no objeto de
     // imagem, e o WME mostra exatamente isso ("Enviado 01/11/2014 por
     // Coskobeu") — foi o owner que apontou, com um local em que aparece.
@@ -2422,7 +2421,7 @@ export function buildPlacesFromSearch(rd, { filterTypes = null, unreadOnly = tru
     // dicionário vira o próprio número — feio, nunca invisível (mesma regra do
     // `creatorName`). Conta apagada vem do Waze como "Inactive User", e sai
     // assim mesmo: é o que o WME mostra, e traduzir seria inventar identidade.
-    const imageAuthors = {};
+    const imageAuthors = Object.create(null);
     for (const img of listaDoWaze(venue.images, { objetos: false })) {
       if (!img || !img.id) continue;
       allImageUrls.push(WAZE_IMAGE_BASE + img.id);
@@ -3221,7 +3220,7 @@ async function handleExcluirFoto(data, { sessions }) {
   let confirmado = null;
   try {
     const eco = JSON.parse(result.response);
-    const v = eco && eco.venues && eco.venues[venueID];
+    const v = eco && eco.venues && Object.hasOwn(eco.venues, venueID) ? eco.venues[venueID] : null;
     if (v && Array.isArray(v.images)) confirmado = !v.images.some((i) => i && i.id === imageID);
   } catch { /* sem eco legível: seguimos com o 200, que já é a resposta do Waze */ }
   if (confirmado === false) {
@@ -3290,7 +3289,7 @@ async function handleRenomearLocal(data, { sessions }) {
   let confirmado = null;
   try {
     const eco = JSON.parse(result.response);
-    const v = eco && eco.venues && eco.venues[venueID];
+    const v = eco && eco.venues && Object.hasOwn(eco.venues, venueID) ? eco.venues[venueID] : null;
     if (v && typeof v.name === 'string') confirmado = v.name === nome;
   } catch { /* sem eco legível: seguimos com o 200 do Waze */ }
   if (confirmado === false) {

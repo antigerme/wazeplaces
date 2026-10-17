@@ -495,13 +495,42 @@ function animateSwipeOut(direction, callback) {
 
     // O callback recebe o card que SAIU — o do gesto —, não o que estiver na
     // frente quando ele rodar: nesses 350 ms a fila pode andar por baixo.
-    setTimeout(() => {
-        animating = false;
+    const concluir = (soltarAEntrada) => {
+        if (soltarAEntrada) animating = false;
         if (cardSaindo === card) cardSaindo = null;
         updateSwipeIndicator(0, 0);
         try { if (callback) callback(card); }
         finally { avisarFimDoGesto(card); }
-    }, 350);
+    };
+    // Com "Reduzir movimento" o card SOME NA HORA (o CSS zera a duração), e os
+    // 350 ms que sobravam eram espera pura, sem animação nenhuma: o próximo
+    // pedido só assumia ~0,35 s depois — MEDIDO, 476 ms no Chromium e 511 ms no
+    // WebKit contra ~120 ms de quem não pediu (auditoria da rodada 24,
+    // R24-8-03). A saída conclui no mesmo quadro, mas fora da pilha de quem
+    // chamou (uma microtarefa): o botão, a tecla e o arraste chamam isto no meio
+    // do tratamento do evento deles, e o callback decide pedido. Uma vez só,
+    // pelo mesmo caminho dos três.
+    //
+    // O que NÃO muda é quando a ENTRADA volta a valer: os mesmos 350 ms. Eles
+    // eram também o freio do toque duplo — a guarda `animating` do
+    // `triggerSwipe` e do início do arraste —, e sem ele o segundo toque de um
+    // duplo-clique (a ~60–300 ms) caía no card NOVO, já na frente: MEDIDO com o
+    // Desfazer desligado, 2 pedidos rejeitados onde antes saía 1, em qualquer
+    // intervalo abaixo de 350 ms, pelo botão e pela seta. Rejeitar não volta.
+    // O card troca na hora; o dedo só é aceito de novo quando seria.
+    if (movimentoReduzido()) {
+        setTimeout(() => { animating = false; }, 350);
+        Promise.resolve().then(() => concluir(false));
+    } else {
+        setTimeout(() => concluir(true), 350);
+    }
+}
+
+// O sistema pede menos movimento? Lido a cada saída (a preferência muda com o
+// app aberto). Sem `matchMedia` (ou se ele lançar), movimento normal.
+function movimentoReduzido() {
+    try { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); }
+    catch (e) { return false; }
 }
 
 // Acende o indicador do gesto em curso. `upOpacity` é opcional: as chamadas

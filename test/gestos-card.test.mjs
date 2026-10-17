@@ -787,6 +787,7 @@ function montarCardDeFotoTravado() {
   g.ctx.__errosNoFim = [];
   // (O canto do FAB que espera o gesto, R10-4-05, é medido no test/fab-dev.)
   g.ctx.posicionarFabDev = () => {};
+  g.ctx.atenderReordenacaoAdiada = () => {};   // a troca de card que espera o gesto: test/ordem-paginada
   vm.runInContext(['let provandoFotoDe = null, redesenhoDoCardAdiado = null, fabEsperaOGesto = false;',
     ...['fotosDoCard', 'cardSobGesto', 'aoFimDoGesto', 'recuperarCardSemFoto', 'redesenharCardAdiado'].map(fatiarApp),
     // O swipe.js ENGOLE o erro de quem ouve o fim do gesto (nunca derruba o
