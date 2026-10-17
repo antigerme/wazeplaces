@@ -653,3 +653,20 @@ test('perfil: o KV que falha ao ligar devolve manterConectado null — o cliente
     assert.equal(bom.body.manterConectado, true, 'CONTROLE: com o KV bom liga');
   } finally { c.amb.restaurar(); }
 });
+
+// ── R25-1-06: o `perfil` que chega DEPOIS do «Sair» não recria a entrada ─────────────────────────────────────
+test('manterLigar: sessão que já foi apagada (o «Sair» chegou antes do perfil em voo) NÃO deixa entrada ka_ nenhuma', async () => {
+  const c = await cenario();
+  try {
+    const token = await c.novo('SAIU');
+    const hash = await c.hashDe(token);
+    await c.store.delete(hash);                                   // o «Sair» apagou a sessão
+    const r = await c.sessions.manterLigar(token, 'row');
+    assert.equal(r, false, 'ligou o «Manter conectado» de uma sessão que não existe');
+    assert.equal(c.store.mem.has('ka_' + hash), false, 'sobrou a entrada ka_ de uma sessão apagada (token cifrado só com o Secret)');
+    // CONTROLE: com a sessão de pé, liga.
+    const viva = await c.novo('VIVA');
+    assert.equal(await c.sessions.manterLigar(viva, 'row'), true);
+    assert.equal(c.store.mem.has('ka_' + await c.hashDe(viva)), true);
+  } finally { c.amb.restaurar(); }
+});

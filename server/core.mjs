@@ -1109,6 +1109,10 @@ export function makeSessions({ store, keyBytes }) {
       }
       const blob = await encryptCookies(JSON.stringify({ token, region: regiao }), await derivarChave(keyBytes, MANTER_SALT));
       await store.put(chave, agora + '|' + blob, KA_TTL);
+      // O `perfil` em voo quando a pessoa tocou em «Sair» chega DEPOIS do apagamento e recriaria a entrada de uma sessão que já
+      // não existe (token cifrado só com o Secret, até a próxima varredura). Confere de novo e desfaz (R25-1-06): +1 leitura,
+      // só quando há escrita (no máximo uma por dia por pessoa).
+      if ((await store.get(hash)) == null) { try { await store.delete(chave); } catch { /* a varredura apaga */ } return false; }
       return true;
     },
     // Lê antes de apagar (a cota de apagamento do KV é a curta). Devolve `false`.

@@ -23166,7 +23166,12 @@ function tirarDaFilaDeSaida(tipo, place) {
 function marcarNaSaida(item, campos) {
     const f = carregarFilaDeSaida();
     const k = chaveDoItemDaSaida(item);
-    const iguais = f.filter((x) => x && x.t === item.t && x.tipo === item.tipo && chaveDoItemDaSaida(x) === k);
+    // Quem chama sem o `t` (o 401 de um item que o `handleActionResult` já viu na fila) acha pelo PEDIDO: tipo + os dois ids.
+    // Com a impressão digital completa do lote 28 ele nunca casava e o `u401` não era gravado (R25-4-01).
+    const porPedido = item.t === undefined;
+    const iguais = f.filter((x) => x && x.tipo === item.tipo && (porPedido
+        ? (x.venueID === item.venueID && x.updateRequestID === item.updateRequestID)
+        : (x.t === item.t && chaveDoItemDaSaida(x) === k)));
     if (!iguais.length) return false;
     for (const it of iguais) Object.assign(it, campos);
     salvarFilaSemOs(f, [], [{ item: iguais[0], campos }]);
@@ -23671,7 +23676,9 @@ function chaveDoItemDaSaida(x) {
     if (!x || typeof x !== 'object') return '#' + String(x);
     const c = {};
     for (const k of Object.keys(x)) {
-        if (k !== 'tt' && k !== 'tf' && k !== 'u401' && k !== 'rv' && k !== 'rvEm') c[k] = x[k];
+        // `conta` entra depois, quando o perfil chega (`carimbarContaNaSaida`): com ela na impressão digital o item de ANTES e o de DEPOIS
+        // deixavam de ser o mesmo, a decisão no ar saía 2× e o `tt` do 5xx se perdia (R25-4-02).
+        if (k !== 'tt' && k !== 'tf' && k !== 'u401' && k !== 'rv' && k !== 'rvEm' && k !== 'conta') c[k] = x[k];
     }
     try { return JSON.stringify(c); } catch (e) { return '#' + Object.keys(c).join(','); }
 }

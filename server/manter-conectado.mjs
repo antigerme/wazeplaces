@@ -48,11 +48,18 @@
 //                + por sessão RENOVADA (até `lote` = 6): 1 leitura da entrada,
 //                  1 `fetch` ao Waze, 1 leitura + 1 gravação do `refreshCookies`
 //                + 1 `fetch` de confirmação por sessão que levou 401/403
-//                = 1 + 15 + 6×5 = 46 no pior caso — sob o teto de 50. Escrita:
-//                no máximo 6 por execução (a da sessão).
+//                = 1 + 15 + 6×5 = 46 no pior caso — sob o teto de 50 —, MAIS 1 apagamento
+//                por entrada morta/vencida vista na frente (medido: 9 mortas na frente
+//                de 6 devidas com 403 e depois 200 = 53–55 operações; a que passa de 50
+//                lança dentro de um `try` e vira «adiada», sem perda). Se as operações
+//                de KV de fato contam nas 50 é premissa NÃO verificada no Cloudflare.
+//                Escrita: no máximo 6 por execução (a da sessão) + a regravação diária
+//                da entrada de quem abre o app (`manterLigar`).
 //   por dia:       cron de 30 min = 48 execuções × 6 = 288 renovações no teto.
-//                Cada sessão mantida é renovada a cada ~10,5 h (10 h devida + até
-//                30 min de espera da próxima execução) = ~2,3 gravações por dia,
+//                Cada sessão mantida é VISITADA a cada K execuções (a fatia da vez, K =
+//                ceil(n / 10): 13 com 125 pessoas = 6,5 h) e renovada na visita em que
+//                está devida (10 h): intervalo medido de 12,5 h com 125 pessoas, ~2
+//                gravações por dia,
 //                então 288 renovações/dia cobrem ~125 pessoas — e o teto REAL é a
 //                cota de ESCRITA do KV (1.000/dia, compartilhada com o app): ~430
 //                pessoas sozinhas, bem menos com o uso normal somado. O prazo de

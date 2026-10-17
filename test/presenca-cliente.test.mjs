@@ -1081,7 +1081,9 @@ test('leitor de tela (R24-5-01): no máximo uma frase por janela — a rajada vi
   c.P.presencaAplicarLista({ online: [], conversas: [conversa(CAF, 'cafanha', 6, 0)] }, 2, 30);
   c.P.Presenca.vivas.clear(); c.P.presencaRenderPilula();
   await c.rodarTimers();
-  assert.equal(reg(), 'presenca.pill.msgPlural{"n":4}', 'o total que CAI mudou a região');
+  // Leu (o total foi a zero): a frase velha SAI da região (R25-5-04) — limpar não é falar: nada a caminho, nada novo dito.
+  assert.equal(reg(), '', 'o total que CAI a zero deixou a frase velha na região viva');
+  assert.equal(c.timers.length, 0, 'o total que CAI deixou frase a caminho');
 });
 
 test('leitor de tela (R24-5-01): a mesma frase duas vezes (1 mensagem, lê, chega outra) é dita de novo — limpa e reescreve', async () => {
@@ -1093,11 +1095,21 @@ test('leitor de tela (R24-5-01): a mesma frase duas vezes (1 mensagem, lê, cheg
   await chega(1);
   assert.equal(reg(), 'presenca.pill.msg{"n":1}');
   c.P.Presenca.vivas.clear(); c.P.presencaRenderPilula();     // leu
+  // Leu: a região já saiu da frase velha (R25-5-04), então a próxima igual cai numa região VAZIA — e é dita na hora.
+  assert.equal(reg(), '', 'leu e a frase velha ficou na região viva');
   c.relogio.agora += 5000;
   await chega(2);                                             // outra: o MESMO texto
-  assert.equal(reg(), '', 'a frase igual à que a região já dizia foi reescrita sem limpar (o leitor de tela pode não repetir)');
-  await c.rodarTimers();
-  assert.equal(reg(), 'presenca.pill.msg{"n":1}', 'a frase igual não voltou depois de limpar');
+  assert.equal(reg(), 'presenca.pill.msg{"n":1}', 'a frase igual não foi dita de novo numa região vazia');
+});
+
+test('leitor de tela (R25-5-03): com a conversa de A aberta, a mensagem de OUTRA pessoa é dita pelo #conversaAnuncio (só a contagem)', async () => {
+  const c = novoCliente();
+  c.P.presencaAplicarLista({ online: [], conversas: [conversa(CAF, 'cafanha', 5, 0), conversa('777', 'outra', 5, 0)] }, 1, 30);
+  c.P.presencaRenderPilula();
+  c.P.Presenca.aberta = CAF; c.$('conversaModal').classList.remove('hidden'); c.$('conversaTitle').textContent = 'cafanha';
+  await c.P.presencaQuadro(fluxoDe(c), inbox(await bytesDeMensagem({ id: uuid(870), de: '777', para: EU, texto: 'oi da outra', ctx: APP, ts: 1790200000000 })));
+  assert.match(c.$('conversaAnuncio').textContent, /presenca\.pill\.msg/, 'a mensagem de outra pessoa não foi dita com a conversa aberta');
+  assert.doesNotMatch(c.$('conversaAnuncio').textContent, /oi da outra/, 'a região leu o TEXTO da outra pessoa (só a contagem)');
 });
 
 test('leitor de tela (R24-5-01): CONTROLES — com a conversa ABERTA fala o #conversaAnuncio, não a região da pílula; e o "Sair"/desligar limpa tudo', async () => {
@@ -1189,4 +1201,27 @@ test('o "Tentar de novo" em série para onde a sessão acaba (R24-5-02)', async 
   w.responder(0); await serie;
   assert.equal(w.chegadas.length, 1, 'a série seguiu mandando depois de a sessão acabar');
   assert.equal(c.P.Presenca.emSerie.size, 0);
+});
+
+test('R25-5-01/02: a série para se o perfil some no meio (a 2ª não sai com `de: null`) e o botão não é desenhado enquanto ela corre', async () => {
+  const w = wazeQueSegura();
+  const c = novoCliente({ api: w.api });
+  c.P.presencaMontar();
+  c.P.Presenca.aberta = '200'; c.escopo.openModal('conversaModal');
+  for (const t of ['a', 'b']) { c.P.presencaEnviar(t, null); await tiqueDe(); }
+  w.falhar = false;
+  const serie = c.P.presencaTentarDeNovo(); await tiqueDe();
+  assert.equal(w.chegadas.length, 1, 'PRÉ-CONDIÇÃO: a 1ª da série saiu');
+  assert.doesNotMatch(c.$('conversaMsgs').innerHTML, /conversa-reenviar/, 'o botão ficou desenhado durante a série (o toque nele não faz nada)');
+  // A renovação pela extensão: token novo, perfil ainda não chegou, a época NÃO muda.
+  const perfil = c.escopo.AppState.profile; c.escopo.AppState.profile = null;
+  w.responder(0); await serie;
+  assert.equal(w.chegadas.length, 1, 'a 2ª saiu sem o id do perfil (`de: null`) pela sessão que renovou');
+  assert.equal(c.P.Presenca.emSerie.size, 0);
+  assert.match(c.$('conversaMsgs').innerHTML, /conversa-reenviar/, 'o botão não voltou depois da série');
+  // CONTROLE: com o perfil de pé a mesma série manda a 2ª.
+  c.escopo.AppState.profile = perfil;
+  const s2 = c.P.presencaTentarDeNovo(); await tiqueDe();
+  assert.equal(w.chegadas.at(-1).texto, 'b', 'o controle (com perfil) não mandou a 2ª');
+  w.responder(1); await s2;
 });

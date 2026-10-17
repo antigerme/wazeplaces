@@ -90,7 +90,9 @@ if (!/^https:\/\//.test(base)) { console.error('URL do app ausente ou não-https
 // (`waze_region`, `waze_country`); o `json-extra` continua podendo trocar os
 // dois, e o servidor valida a região (o `world` antigo, de relatório velho, ele recusa com 400).
 const ls = d.localStorage || {};
-const regiaoDoRelatorio = typeof ls.waze_region === 'string' && /^[a-z]+$/.test(ls.waze_region) ? ls.waze_region : 'row';
+// `world` é de relatório ANTIGO (o app o trocava por `na`); o servidor agora o recusa com 400, então a ferramenta faz a troca aqui.
+const regiaoBruta = typeof ls.waze_region === 'string' && /^[a-z]+$/.test(ls.waze_region) ? ls.waze_region : 'row';
+const regiaoDoRelatorio = regiaoBruta === 'world' ? 'na' : regiaoBruta;
 const paisDoRelatorio = parseInt(ls.waze_country, 10);
 const corpo = { sessionToken: token, region: regiaoDoRelatorio,
   ...(Number.isInteger(paisDoRelatorio) && paisDoRelatorio > 0 ? { countryId: paisDoRelatorio } : {}),
