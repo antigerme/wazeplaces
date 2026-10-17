@@ -8,7 +8,7 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
-## v2026.10.16-02
+## v2026.10.17-01
 
 Vigésima quarta rodada da auditoria (lote 28). Nada muda de aparência no uso normal; cada conserto tem teste que reprova quando ele é desfeito.
 
