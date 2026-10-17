@@ -17713,6 +17713,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     // tempo, num runner lento a busca podia chegar ANTES do perfil, o `uRA0` virava o card da tela e escapava (o CI do #278
     // reprovou aqui uma vez; 0 em 12 com a CPU saturada, aqui). A busca agora espera o perfil responder.
     let perfilRespondeu; const perfilPronto = new Promise((ok) => { perfilRespondeu = ok; });
+    let perfisRespondidos = 0;           // uma resposta de `perfil` POR ABA: com 2 ou 3 abas a busca espera todas (R26-1-03)
     const pedidos = Array.from({ length: 10 }, (_, i) => ({ ...CARDS.FLAG, venueID: 'vRA' + i, updateRequestID: 'uRA' + i,
       creatorId: i % 3 === 0 ? 9000 : 9100 + i, createdBy: i % 3 === 0 ? 'repetente' : 'autor' + i, imageUrls: [] }));
     await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
@@ -17739,7 +17740,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
       else if (nome === 'lista-paises') resp = { success: true, countries: [] };
       else if (nome === 'lista-estados') resp = { success: true, states: [] };
       await r.fulfill({ status, contentType: 'application/json', body: JSON.stringify(resp) }).catch(() => {});
-      if (nome === 'perfil') perfilRespondeu();
+      if (nome === 'perfil' && ++perfisRespondidos >= qtdAbas) perfilRespondeu();
     });
     await ctx.addInitScript(([sem]) => {
       try {

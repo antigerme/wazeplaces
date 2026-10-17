@@ -77,7 +77,7 @@ const USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, l
 // chamada pra outra é mais estranha para quem olha do que qualquer uma delas.
 const SEC_CH_UA = '"Not:A-Brand";v="99", "Google Chrome";v="145", "Chromium";v="145"';
 
-export const SESSION_TTL = 1814400; // 21 dias (cookies do Waze duram ~28d)
+export const SESSION_TTL = 1814400; // 21 dias sem uso (o valor do cookie do Waze morre em ~24–26 h sem renovação)
 // De quanto em quanto tempo o prazo é reescrito no store. Não é o prazo: é a
 // granularidade da renovação. Um dia limita a ~1 escrita por sessão por dia
 // (o KV do Cloudflare aceita 1 escrita/s por chave, e o app faz 3 chamadas só

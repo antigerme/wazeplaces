@@ -9769,7 +9769,7 @@ function diagSentinelas(comp) {
                 .filter((c) => c.fim === 'caiu' && c.inicioConhecido !== false && c.durouH != null && c.durouH < 72);
             if (curtos.length >= 2) {
                 diga('sessaoCaiCedo',
-                    `a sessão caiu ${curtos.length}× em menos de 72 h — o prazo do Waze é de ~28 dias`,
+                    `a sessão caiu ${curtos.length}× em menos de 72 h — sem renovação o valor do cookie do Waze vale ~24–26 h`,
                     { duracoesH: curtos.map((c) => c.durouH), motivos: [...new Set(curtos.map((c) => c.motivo))] });
             }
         } catch (e) { /* idem */ }

@@ -670,3 +670,34 @@ test('manterLigar: sessão que já foi apagada (o «Sair» chegou antes do perfi
     assert.equal(c.store.mem.has('ka_' + await c.hashDe(viva)), true);
   } finally { c.amb.restaurar(); }
 });
+
+// ── R26-1-02: o `varrerMantidos` USA a fatia da vez (antes nenhum teste reprovava se ele voltasse a sortear) ──────────
+test('varredura: sem `embaralhar` injetado, o `varrerMantidos` só olha as entradas da fatia da vez — e K execuções cobrem todas', async () => {
+  const hex = (i) => [...new Uint8Array(32)].map((_, j) => ((i * 2654435761 + j * 40503) >>> 0).toString(16).padStart(2, '0').slice(-2)).join('');
+  const chaves = Array.from({ length: 60 }, (_, i) => KA_PREFIXO + hex(i));
+  const T0 = 1_800_000_000;
+  const k = Math.ceil(chaves.length / MANTER_ALVO_DA_FATIA);
+  const vistas = new Set();
+  for (let e = 0; e < k; e++) {
+    const t = T0 + e * MANTER_CRON_MIN * 60;
+    const esperadas = new Set(fatiaDaVez(chaves, t));
+    const vistasAgora = [];
+    await varrerMantidos({
+      listar: async () => chaves, store: { delete: async () => {} }, pausa: semPausa, agora: () => t,
+      sessions: { manterExaminar: async (c) => { vistasAgora.push(c); return { estado: 'emDia' }; }, renovarPrazo: async () => {} },
+      chamarWaze: async () => { throw new Error('não devia ir ao Waze'); },
+    });
+    assert.ok(vistasAgora.length > 0 && vistasAgora.every((c) => esperadas.has(c)), `execução ${e}: leu entrada fora da fatia da vez`);
+    vistasAgora.forEach((c) => vistas.add(c));
+  }
+  assert.equal(vistas.size, chaves.length, `em ${k} execuções só ${vistas.size} de ${chaves.length} entradas foram vistas`);
+});
+
+test('fatia da vez: as fatias têm tamanho IGUAL (±1) — o que a fatia por hash não garantia (R26-1-01)', () => {
+  const hex = (i) => [...new Uint8Array(32)].map((_, j) => ((i * 2654435761 + j * 40503) >>> 0).toString(16).padStart(2, '0').slice(-2)).join('');
+  const chaves = Array.from({ length: 125 }, (_, i) => KA_PREFIXO + hex(i));
+  const k = Math.ceil(chaves.length / MANTER_ALVO_DA_FATIA);
+  const tamanhos = Array.from({ length: k }, (_, e) => fatiaDaVez(chaves, 1_800_000_000 + e * MANTER_CRON_MIN * 60).length);
+  assert.ok(Math.max(...tamanhos) - Math.min(...tamanhos) <= 1, `fatias desiguais: ${tamanhos.join(',')}`);
+  assert.ok(Math.max(...tamanhos) <= 10, `uma fatia passa do alvo (${Math.max(...tamanhos)})`);
+});

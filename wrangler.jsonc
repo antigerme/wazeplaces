@@ -30,11 +30,12 @@
   ],
   // «Manter conectado»: a cada 30 minutos o Worker renova o cookie do Waze das
   // sessões que ligaram isso (server/manter-conectado.mjs). Cada execução olha a
-  // FATIA da vez das entradas (hash da chave e hora: toda entrada é visitada a cada
-  // ~13 execuções com 125 pessoas), lê no máximo 15 e renova no máximo 6 devidas
-  // (carimbo com mais de 10 h): 48 × 6 = 288 renovações por dia, ~125 pessoas a cada
-  // ~13 h (MEDIDO por simulação: 0 % passam de 24 h até 125; acima disso a conta
-  // não fecha no plano grátis). A cota de ESCRITA do KV (1.000/dia, dividida com o
+  // FATIA da vez das entradas (posição na lista ordenada e hora: toda entrada é
+  // visitada a cada ~10 execuções com 100 pessoas), lê no máximo 15 e renova no
+  // máximo 6 devidas (carimbo com mais de 10 h): 48 × 6 = 288 renovações por dia.
+  // MEDIDO por simulação (8 dias, pessoas ausentes): ~100 pessoas com folga (0–1
+  // morte em 600), 125 no limite (0 a 1,2 %); acima disso a conta não fecha no
+  // plano grátis. A cota de ESCRITA do KV (1.000/dia, dividida com o
   // uso normal do app e com a regravação diária da entrada) aperta antes do cron.
   // Pra mais gente: Workers Paid e subir MANTER_LOTE no módulo (conferindo as 50
   // subrequisições por execução e a CPU), ou encurtar o cron aqui. O cron só
