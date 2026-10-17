@@ -64,13 +64,13 @@
 //                8 dias, carimbos iniciais espalhados, teto de 20 s, Waze a 0,4–1,2 s por ida):
 //                com a população PARADA, 100 sessões → 0 mortes em 2.500 sessões (maior idade 20 h);
 //                110 → 0 (21 h); 125 → 0 (23 h); 140 → 0 (24 h); 160 → 4 %; 200 → 57–83 %. Com
-//                ROTATIVIDADE a margem some (R27-1-03): cada pessoa que entra ou sai desloca as posições
+//                ROTATIVIDADE a margem some (R27-1-03): cada sessão que entra ou sai desloca as posições
 //                e re-fase as fatias, e as sessões já mortas ocupam vaga do lote; com 100 vivas e ~5
 //                trocas por dia, ~1 % das sessões passam de 24 h, e com 125 e uma troca a cada ~5
 //                execuções, ~10 mortes em 4 dias (workerd, R26-2). Por isso a promessa é «~80 com
 //                folga, ~100 se a lista for estável»; acima disso o desenho tem que mudar (examinar
 //                TODAS e renovar as de carimbo mais antigo primeiro; pede o carimbo de cada uma sem
-//                uma leitura por pessoa, p. ex. como `metadata` do `put`). O gargalo MEDIDO é a própria
+//                uma leitura por sessão, p. ex. como `metadata` do `put`). O gargalo MEDIDO é a própria
 //                varredura (lote de 6 dentro do teto de 20 s: ~5 renovações por execução); a cota de
 //                ESCRITA do KV (1.000/dia, dividida com o app) é o limite seguinte, não medido aqui.
 //                O prazo de 10 h (e não 5) é escolha de capacidade: o Waze só invalida o valor
@@ -123,7 +123,7 @@ export function pausaPadrao() {
 // pela hash da chave: fatias de tamanho binomial (média 10, desvio ~3, as de 15–20 medidas), e o excedente que o lote de 6
 // ou o teto de 20 s empurrava pra visita seguinte (6,5 h depois) passava de 24 h — 3–8 % de mortes a partir de 100 sessões
 // numa simulação com carimbos iniciais espalhados (R26-1-01). Pela posição o resultado medido é 0 % até ~110 e < 1 % com
-// 125. O preço: quando uma pessoa entra ou sai, as posições depois dela deslocam (um intervalo a mais ou a menos numa ou
+// 125. O preço: quando uma sessão entra ou sai, as posições depois dela deslocam (um intervalo a mais ou a menos numa ou
 // noutra entrada); com ~1–2 entradas por dia isso custa menos que a variância da hash. Dentro da fatia ainda se embaralha
 // (a que passa de `examinar` não corta sempre as mesmas).
 export const MANTER_ALVO_DA_FATIA = 10;       // entradas por execução, em média (o teto é `examinar` = 15)

@@ -8,6 +8,10 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.10.17-11
+- **Pareamento:** colar o código também apaga o erro da tentativa anterior (digitar já apagava; o colar cancela a inserção e não dispara o evento).
+- **Textos:** «sessão», não «pessoa», nos comentários da capacidade; o `wrangler.jsonc` aponta pra tabela única; o estado da auditoria foi posto em dia.
+
 ## v2026.10.17-10
 - **Fila (desfeito):** buscar no `online` quando a fila chega a 1–3 cards foi tentado e **desfeito**: o `online` chega antes do sinal, a busca falhava, marcava o «lie-fi» e travava ✕ ✓ do card de foto sem sinal (smoke do offline, seção 6e). Limite conhecido, baixo: quem fica sem sinal com 1 card só vê a reposição na decisão seguinte.
 

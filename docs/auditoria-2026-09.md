@@ -14,17 +14,18 @@ voltando à 01:20 — a sessão retomou sozinha, com os agentes continuados por 
 
 ---
 
-## 0. Estado agora (2026-10-17 ~14:00 UTC)
+## 0. Estado agora (2026-10-17 ~16:30 UTC)
 
-- **Lote 33 em produção** (PR #282, 8259fa1, v2026.10.17-06): 13 arquivos iguais e `prod-auditoria` 189 ✓ · 0 ✗ com as duas
-  contas (na 4ª rodada; as anteriores: corrida do Waze no `Issues/Read` e lista de presença ainda sem a outra conta). A rodada 29
-  (diff dos lotes 32–33, ponta a ponta, documentos) gerou o lote 34. As provas em produção do Cron seguem em 2026-10-18
+- **Lote 34 em produção** (PR #283, d96cdd9, v2026.10.17-10): 13 arquivos iguais e `prod-auditoria` 188 ✓ · 0 ✗ com as duas
+  contas (na 3ª rodada; as duas anteriores: a corrida do Waze no `Issues/Read` ao devolver pedido a «não lido»). Veio da
+  rodada 29 (diff dos lotes 32–33, ponta a ponta, Treino/recusa/presença, documentos); a rodada 30 (diff do lote 34) deu o lote 35.
+  Antes dele, o lote 33 (PR #282, 8259fa1, v2026.10.17-06) fechou com 189 ✓ · 0 ✗ na 4ª rodada. As provas em produção do Cron seguem em 2026-10-18
   00:55 UTC (+26 h) e 12:55 UTC (+38 h).
 
 - **Lote 30 em produção** (PR #279, b5076e0, v2026.10.17-03): 13 arquivos iguais aos mesclados e `prod-auditoria` 189 ✓ · 0 ✗
   com as duas contas. Desde o lote 26 entraram: o «Manter conectado» (o servidor renova o cookie do Waze, que morre em
   ~24–26 h sem renovação; padrão ligado; Cron `*/30`), as rodadas 24–26 e os lotes 27–30. A rodada 27 (convergência) está em
-  andamento; as provas em produção do Cron são em 2026-10-18 00:50 UTC (+26 h) e 12:50 UTC (+38 h). O que segue abaixo é o
+  andamento; as provas em produção do Cron são em 2026-10-18 00:50–00:55 UTC (+26 h) e 12:50–12:55 UTC (+38 h). O que segue abaixo é o
   estado de 2026-10-15 (lote 26), mantido como registro.
 
 - **Lote 26 em produção** (PR #273, 94266c1, v2026.10.15-02): os 13 arquivos que o app carrega iguais, byte a byte, aos

@@ -223,3 +223,12 @@ test('R29-4-01: o contêiner dos avisos deixa o toque passar e cada .toast o rec
   const css = readFileSync(new URL('../css/styles.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
   assert.match(css, /\n\.toast \{[^}]*pointer-events: auto;/, 'o .toast não recebe o toque de volta');
 });
+
+// R30-A1: colar o código cancela a inserção nativa (sem `input`); o erro da tentativa de antes some na própria gravação.
+test('R30-A1: aplicarTextoNoCampoDoCodigo esconde o erro do campo (o colar não dispara `input`)', () => {
+  const APP_SEM = APP.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  const i = APP_SEM.indexOf('function aplicarTextoNoCampoDoCodigo(');
+  const corpo = APP_SEM.slice(i, APP_SEM.indexOf('\n}\n', i));
+  assert.match(corpo, /campo\.value = formatarCodigoPareamento\(codigo\);\s*campo\.ownerDocument\?\.getElementById\?\.\('pairEnterError'\)\?\.classList\?\.add\('hidden'\);/,
+    'o colar não esconde o erro');
+});

@@ -198,6 +198,8 @@ function aplicarTextoNoCampoDoCodigo(campo, texto) {
     const codigo = extrairCodigoPareamento(texto);
     if (!codigo) return false;
     campo.value = formatarCodigoPareamento(codigo);
+    // O colar cancela a inserção nativa, então o `input` não sai: o erro da tentativa de antes some aqui (R30-A1).
+    campo.ownerDocument?.getElementById?.('pairEnterError')?.classList?.add('hidden');
     try { campo.setSelectionRange(campo.value.length, campo.value.length); } catch (err) { /* tipo sem seleção */ }
     return true;
 }
