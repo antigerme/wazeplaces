@@ -45,7 +45,7 @@ Vigésima quarta rodada da auditoria (lote 28). Nada muda de aparência no uso n
 
 **Ordenar por distância**
 - **"Perto de casa/trabalho/de mim" põe no 1º card o pedido mais perto da fila INTEIRA**, não da primeira página: a troca espera as páginas chegarem e só acontece com a tela livre.
-- **Abrindo o app com casa ou trabalho salvos, a fila espera o perfil** (até 4 s) antes de ordenar; o "Restam" mostra «…» enquanto isso.
+- **Abrindo o app com casa ou trabalho salvos, a fila espera o perfil** (até 4 s) antes de ordenar; o número de «Restam» segue o que a fila tem de verdade enquanto isso.
 
 **Sem rede e service worker**
 - **Uma resposta lenta do cache do aparelho não vira mais "sem rede"**: cada etapa do service worker tem teto próprio, e a falha 5xx da borda também espera a cópia guardada.
