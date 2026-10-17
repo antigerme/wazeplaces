@@ -529,6 +529,7 @@ const I18N_DICT = {
     'pair.enter.confirm': 'Entrar',
     'toast.pairSuccess': '📱 Pronto! Sessão conectada.',
     'toast.pairInvalid': 'Código inválido ou expirado. Gere um novo no aparelho logado.',
+    'toast.pairVazio': 'Digite o código que apareceu no outro aparelho.',
     'toast.pairCreateError': 'Não deu pra gerar o código. Tente de novo.',
     'toast.pairLinkCopied': 'Link copiado — mande pra você mesmo e abra no outro aparelho.',
     'toast.langChanged': 'Idioma alterado 🌎',
@@ -641,7 +642,7 @@ const I18N_DICT = {
     'prefs.undo.gate.countdownUm': '🔒 Disponível depois de tratar {threshold} pedidos (você tem {current} — falta {remaining}).',
     // relative time
     // api errors
-    'api.error.connection': 'Erro de conexão', 'api.error.noSession': 'Sessão expirada',
+    'api.error.connection': 'Erro de conexão', 'api.error.semSinal': 'Sem sinal', 'api.error.noSession': 'Sessão expirada',
     // ── Erros que vêm do SERVIDOR ──────────────────────────────────────
     // O core manda `errorKey` + `errorVars`; estas são as frases. Antes o
     // servidor mandava a frase pronta em português e o frontend a exibia com
@@ -1194,6 +1195,7 @@ const I18N_DICT = {
     'pair.enter.confirm': 'Sign in',
     'toast.pairSuccess': '📱 Done! Session connected.',
     'toast.pairInvalid': 'Invalid or expired code. Generate a new one on the signed-in device.',
+    'toast.pairVazio': 'Type the code shown on the other device.',
     'toast.pairCreateError': 'Could not generate the code. Try again.',
     'toast.pairLinkCopied': 'Link copied — send it to yourself and open on the other device.',
     'toast.langChanged': 'Language changed 🌎',
@@ -1290,7 +1292,7 @@ const I18N_DICT = {
     'prefs.undo.gate.noProfile': '🔒 Available after you log in and the app loads your profile.',
     'prefs.undo.gate.countdown': '🔒 Available after handling {threshold} requests (you have {current} — {remaining} to go).',
     'prefs.undo.gate.countdownUm': '🔒 Available after handling {threshold} requests (you have {current} — {remaining} to go).',
-    'api.error.connection': 'Connection error', 'api.error.noSession': 'Session expired',
+    'api.error.connection': 'Connection error', 'api.error.semSinal': 'No signal', 'api.error.noSession': 'Session expired',
     // ── Erros que vêm do SERVIDOR ──────────────────────────────────────
     // O core manda `errorKey` + `errorVars`; estas são as frases. Antes o
     // servidor mandava a frase pronta em português e o frontend a exibia com
@@ -1844,6 +1846,7 @@ const I18N_DICT = {
     'pair.enter.confirm': 'Entrar',
     'toast.pairSuccess': '📱 ¡Listo! Sesión conectada.',
     'toast.pairInvalid': 'Código inválido o vencido. Genera uno nuevo en el dispositivo con sesión.',
+    'toast.pairVazio': 'Escribe el código que apareció en el otro dispositivo.',
     'toast.pairCreateError': 'No se pudo generar el código. Inténtalo de nuevo.',
     'toast.pairLinkCopied': 'Enlace copiado — envíatelo y ábrelo en el otro dispositivo.',
     'toast.langChanged': 'Idioma cambiado 🌎',
@@ -1940,7 +1943,7 @@ const I18N_DICT = {
     'prefs.undo.gate.noProfile': '🔒 Disponible después de iniciar sesión y que la app cargue tu perfil.',
     'prefs.undo.gate.countdown': '🔒 Disponible tras tratar {threshold} solicitudes (tienes {current} — faltan {remaining}).',
     'prefs.undo.gate.countdownUm': '🔒 Disponible tras tratar {threshold} solicitudes (tienes {current} — falta {remaining}).',
-    'api.error.connection': 'Error de conexión', 'api.error.noSession': 'Sesión expirada',
+    'api.error.connection': 'Error de conexión', 'api.error.semSinal': 'Sin señal', 'api.error.noSession': 'Sesión expirada',
     // ── Erros que vêm do SERVIDOR ──────────────────────────────────────
     // O core manda `errorKey` + `errorVars`; estas são as frases. Antes o
     // servidor mandava a frase pronta em português e o frontend a exibia com
@@ -2493,6 +2496,7 @@ const I18N_DICT = {
     'pair.enter.confirm': 'Se connecter',
     'toast.pairSuccess': '📱 C’est fait ! Session connectée.',
     'toast.pairInvalid': 'Code invalide ou expiré. Générez-en un nouveau sur l’appareil connecté.',
+    'toast.pairVazio': 'Saisissez le code affiché sur l’autre appareil.',
     'toast.pairCreateError': 'Impossible de générer le code. Réessayez.',
     'toast.pairLinkCopied': 'Lien copié — envoyez-le-vous et ouvrez-le sur l’autre appareil.',
     'toast.langChanged': 'Langue changée 🌎',
@@ -2589,7 +2593,7 @@ const I18N_DICT = {
     'prefs.undo.gate.noProfile': '🔒 Disponible après connexion, quand l’app aura chargé votre profil.',
     'prefs.undo.gate.countdown': '🔒 Disponible après avoir traité {threshold} demandes (vous en avez {current} — encore {remaining}).',
     'prefs.undo.gate.countdownUm': '🔒 Disponible après avoir traité {threshold} demandes (vous en avez {current} — encore {remaining}).',
-    'api.error.connection': 'Erreur de connexion', 'api.error.noSession': 'Session expirée',
+    'api.error.connection': 'Erreur de connexion', 'api.error.semSinal': 'Pas de réseau', 'api.error.noSession': 'Session expirée',
     // ── Erros que vêm do SERVIDOR ──────────────────────────────────────
     // O core manda `errorKey` + `errorVars`; estas são as frases. Antes o
     // servidor mandava a frase pronta em português e o frontend a exibia com

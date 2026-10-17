@@ -1293,7 +1293,12 @@ function mostrarNegadoDaExtensao() {
 // recusa do portão — são do ciclo anterior. O `saiuNestaPagina` nunca voltava a
 // falso: quem saía e entrava de novo na mesma página, se a sessão caísse depois,
 // não era mais relogado pela extensão ao voltar à aba (auditoria de 2026-09-26).
+// O aviso «Sua sessão no app não vale mais» (9 s) é dito no momento da queda; quem entra de novo em poucos
+// segundos não pode ver o «Sessão conectada» ao lado dele (R28-8-05).
+let avisoDaQueda = null;
 function aoEntrarNestaPagina() {
+    if (avisoDaQueda && avisoDaQueda.naTela()) avisoDaQueda.remover();
+    avisoDaQueda = null;
     saiuNestaPagina = false;
     sessaoCaiuNestaPagina = false;
     extNegadoNestaPagina = false;
@@ -2590,6 +2595,13 @@ async function resgatarPareamento(code, { silencioso = false, peloTeclado = fals
     // fechado: mandava o código usado de novo, e o "código inválido" ia parar no
     // diálogo escondido (a trava acima não o pega: o 1º já tinha terminado).
     if (!silencioso && document.getElementById('pairEnterModal')?.classList.contains('hidden')) return false;
+    // Campo vazio (ou só espaço e traço) não vai ao servidor: seria uma requisição do free tier pra dizer «inválido»
+    // de um código que a pessoa não digitou (R28-8-03).
+    if (!silencioso && !String(code || '').replace(/[^0-9A-Za-z]/g, '')) {
+        const vazio = document.getElementById('pairEnterError');
+        if (vazio) { vazio.textContent = t('toast.pairVazio'); vazio.classList.remove('hidden'); }
+        return false;
+    }
     resgateEmVoo = true;
     let entrou = false;
     let terminou = null;
@@ -13054,7 +13066,7 @@ function derrubarSessao(errorKey, { depois } = {}) {
         // dito (ou o "Acesso restrito" vem já): o toque não avisa mais nada (ver
         // `avisarTravaAoTocar`).
         quedaAnunciada = true;
-        if (!negado) showToast(t(MOTIVO_DA_QUEDA[errorKey] || 'toast.sessionExpired'), 'error', 9000);
+        if (!negado) avisoDaQueda = showToast(t(MOTIVO_DA_QUEDA[errorKey] || 'toast.sessionExpired'), 'error', 9000);
         setTimeout(() => {
             if (epoca !== epocaDaSessao) return;
             fecharCamadasAbertas(() => {
