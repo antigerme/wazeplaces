@@ -15603,6 +15603,14 @@ function renderCurrentCard() {
             ev.stopPropagation(); ev.preventDefault();
             MapaLightbox.open(place);
         });
+        // O mapa anuncia `role="button"` e está no Tab: Enter e Espaço abrem como o toque (R31-2-1, WCAG 2.1.1).
+        // Só com o foco no próprio box — as setas do carrossel (botões) têm as teclas delas.
+        mapaBoxF.addEventListener('keydown', (ev) => {
+            if (ev.target !== mapaBoxF || (ev.key !== 'Enter' && ev.key !== ' ')) return;
+            if (atalhoDoNavegador(ev)) return;
+            ev.stopPropagation(); ev.preventDefault();
+            MapaLightbox.open(place);
+        });
     }
 
 
