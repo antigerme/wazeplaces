@@ -24570,13 +24570,6 @@ window.addEventListener('online', async () => {
     // têm que fazer a mesma coisa.
     if (AppState.authenticated && AppState.loadError && !AppState.fetching) {
         retomarBusca();
-    } else if (AppState.authenticated && AppState.hasMore && AppState.queue.length > 0) {
-        // A fila que chegou a 1–3 cards SEM sinal não repôs (a reposição sai da
-        // decisão, e a decisão sem sinal não buscava): o último card caía no
-        // esqueleto até a busca da decisão seguinte. O `maybePrefetch` tem o
-        // próprio portão (limite, `hasMore`, nada no ar, fora do treino), então
-        // com a fila cheia não sai pedido (R29-2-02).
-        maybePrefetch();
     }
 });
 

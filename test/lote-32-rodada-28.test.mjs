@@ -200,14 +200,13 @@ test('R29-1-03: digitar no campo do código esconde o erro («Digite o código�
     'o campo do código não esconde o erro ao digitar');
 });
 
-// R29-2-02: a rede que volta com a fila em 1–3 cards e `hasMore` repõe pela busca (o `maybePrefetch` tem o portão).
-test('R29-2-02: o `online` repõe a fila curta com `hasMore` (senão o último card cai no esqueleto)', () => {
+// R29-2-02 (fila curta que não repõe ao voltar a rede): TENTADO e DESFEITO. O `online` chega antes do sinal; a busca ali
+// falhava, marcava o lie-fi e travava ✕ ✓ do card de foto (smoke do offline 6e). Fica como limite conhecido (baixo).
+test('R29-2-02: o `online` NÃO busca sozinho com a fila curta (a busca no `online` trava o card de foto sem sinal)', () => {
   const APP_SEM = APP.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
   const i = APP_SEM.indexOf("window.addEventListener('online', async () => {");
-  assert.ok(i > 0, 'o ouvinte do online não foi achado');
   const corpo = APP_SEM.slice(i, APP_SEM.indexOf('\n});', i));
-  assert.match(corpo, /else if \(AppState\.authenticated && AppState\.hasMore && AppState\.queue\.length > 0\) \{\s*maybePrefetch\(\);\s*\}/,
-    'o online não repõe a fila curta');
+  assert.ok(!/maybePrefetch\(/.test(corpo), 'o online voltou a buscar sozinho');
 });
 
 // R29-4-01: o aviso do efeito do treino (5 s, rodapé) deixa o toque passar para ✕ ↑ ✓.
