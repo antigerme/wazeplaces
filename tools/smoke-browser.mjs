@@ -10302,6 +10302,11 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   const page = await ctx.newPage();
   const erros = [];
   page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 160)));
+  // O que a PÁGINA fez fora do roteiro (o CI do WebKit reprovou aqui duas vezes sem reproduzir local): queda do processo e navegações do
+  // quadro principal depois da carga. Entra na mensagem de erro, pra a próxima falha dizer a causa em vez de um timeout.
+  const eventosDaPagina = [];
+  page.on('crash', () => eventosDaPagina.push('CRASH'));
+  page.on('framenavigated', (f) => { if (f === page.mainFrame()) eventosDaPagina.push('nav:' + f.url().slice(0, 50)); });
   await page.addInitScript(() => {
     const d = new Date(), p = (n) => String(n).padStart(2, '0');
     const k = (x) => `${x.getFullYear()}-${p(x.getMonth() + 1)}-${p(x.getDate())}`;
@@ -10330,7 +10335,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
         logado: AppState.authenticated, perfil: !!AppState.profile, filtrosAbertos: !document.getElementById('filtersModal').classList.contains('hidden'),
         aba: ['filtersTabFilters', 'filtersTabPrefs', 'filtersTabHistory'].find((i) => document.getElementById(i).getAttribute('aria-selected') === 'true') || null,
         gravado: !!localStorage.getItem('waze_places_history'), url: location.href.slice(0, 60), idioma: getLang() })).catch((x) => ({ erroAoLer: String(x).slice(0, 80) }));
-      throw new Error(`${e.message} — estado: ${JSON.stringify(estado)}; erros: ${JSON.stringify(erros.slice(0, 2))}`);
+      throw new Error(`${e.message} — estado: ${JSON.stringify(estado)}; erros: ${JSON.stringify(erros.slice(0, 2))}; eventos: ${JSON.stringify(eventosDaPagina)}`);
     }
     let snap;
     try { snap = await page.locator('#filtersPanelHistory').ariaSnapshot({ timeout: 30000 }); }
@@ -10342,7 +10347,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
           oculto: (document.getElementById('filtersPanelHistory') || {}).hidden, aba: ['filtersTabFilters', 'filtersTabPrefs', 'filtersTabHistory'].find((i) => document.getElementById(i).getAttribute('aria-selected') === 'true') || null,
           modalAberto: !document.getElementById('filtersModal').classList.contains('hidden'), logado: AppState.authenticated, idioma: getLang() })),
         new Promise((ok) => setTimeout(() => ok('a página não respondeu em 5 s (travada)'), 5000))]).catch((x) => `evaluate falhou: ${String(x).slice(0, 100)}`);
-      throw new Error(`ariaSnapshot do Histórico (${onde}/${lang}) estourou: ${String(e.message).split('\n')[0]} — página: ${JSON.stringify(vivo)}; erros: ${JSON.stringify(erros.slice(0, 2))}`);
+      throw new Error(`ariaSnapshot do Histórico (${onde}/${lang}) estourou: ${String(e.message).split('\n')[0]} — página: ${JSON.stringify(vivo)}; erros: ${JSON.stringify(erros.slice(0, 2))}; eventos: ${JSON.stringify(eventosDaPagina)}`);
     }
     const id = `${onde}/${lang}`;
     for (const frase of FRASES[lang]) checa(snap.includes(frase), `${id}: a árvore de acessibilidade não diz "${frase}"`, snap.split('\n').filter((l) => /\d/.test(l)).join(' | ').slice(0, 260));
@@ -10368,6 +10373,10 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     });
     checa(geo.n === 4 && geo.igual, `${id}: a frase \`sr-only\` mexeu na geometria das linhas (o visual não é o mesmo)`, JSON.stringify(geo));
     await page.evaluate(() => closeModal('filtersModal'));
+    // Gotcha #65 (a): o `closeModal` AGENDA um `history.back()`, e o `openModal` do idioma seguinte EMPILHARIA no mesmo quadro — o voltar
+    // pendente come a entrada nova e, no WebKit, tira a página do app (sem `AppState`, "The operation is insecure"). Foi o que reprovou o CI
+    // do WebKit duas vezes neste bloco, sem nunca reproduzir local (a máquina rápida deixa o voltar acabar antes). Espera o FIM do voltar.
+    await esperarOuExplodir(page, () => !CamadaVoltar.consumindo && document.getElementById('filtersModal').classList.contains('hidden'), `o voltar do fechamento dos Filtros (${lang})`);
   }
   checa(erros.length === 0, `${onde}: erro de JS`, erros[0]);
   await ctx.close();
