@@ -2073,7 +2073,7 @@ const I18N_DICT = {
     'auth.needsComputer': 'Première fois ? La session démarre sur un ordinateur : connectez-vous là-bas, touchez Aide › Connecter un autre appareil, puis pointez cette caméra vers le QR code.',
     'auth.needsComputer.codigo': 'Première fois ? Connectez-vous sur un ordinateur, touchez Aide › Connecter un autre appareil › « Pas de caméra ? Afficher un code » et saisissez le code ici.',
     'treino.banner': 'Mode entraînement — rien n’est envoyé à Waze',
-    'treino.semLote': 'Le marquage groupé est désactivé en entraînement — rien ici n’est envoyé à Waze.',
+    'treino.semLote': 'Le marquage en lot est désactivé en entraînement — rien ici n’est envoyé à Waze.',
     'treino.sair': 'Quitter',
     'treino.abrir': 'S’entraîner sans rien envoyer (mode entraînement)',
     'treino.experimentar': 'Je veux m’entraîner d’abord',

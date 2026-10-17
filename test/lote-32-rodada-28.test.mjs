@@ -209,3 +209,18 @@ test('R29-2-02: o `online` repõe a fila curta com `hasMore` (senão o último c
   assert.match(corpo, /else if \(AppState\.authenticated && AppState\.hasMore && AppState\.queue\.length > 0\) \{\s*maybePrefetch\(\);\s*\}/,
     'o online não repõe a fila curta');
 });
+
+// R29-4-01: o aviso do efeito do treino (5 s, rodapé) deixa o toque passar para ✕ ↑ ✓.
+test('R29-4-01: o aviso do treino não engole o toque (passaToque) e o toast o aplica', () => {
+  const APP_SEM = APP.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  assert.match(APP_SEM, /this\.aviso = showToast\(t\(efeitoChave\), [^\n]*5000, null, \{ passaToque: true \}\);/,
+    'o aviso do treino não passa o toque');
+  assert.match(APP_SEM, /if \(passaToque\) toast\.style\.pointerEvents = 'none';/, 'o toast não aplica o passaToque');
+});
+
+test('R29-4-01: o contêiner dos avisos deixa o toque passar e cada .toast o recebe de volta', () => {
+  const html = readFileSync(new URL('../index.src.html', import.meta.url), 'utf8');
+  assert.match(html, /id="toastContainer"[^>]*pointer-events-none/, 'o contêiner dos avisos intercepta o toque');
+  const css = readFileSync(new URL('../css/styles.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.match(css, /\n\.toast \{[^}]*pointer-events: auto;/, 'o .toast não recebe o toque de volta');
+});

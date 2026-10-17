@@ -27781,7 +27781,7 @@ const Treino = {
         // "pular não envia nada" seria falso justamente pra quem o ligou. Menos
         // no pedido que já a tem (ver `pularGuardaria`).
         const efeitoChave = 'treino.efeito.' + (tipo === 'skip' && this.pularGuardaria(AppState.queue[0]) ? 'skipGuarda' : tipo);
-        if (!ultimo) this.aviso = showToast(t(efeitoChave), tipo === 'reject' ? 'error' : 'info', 5000);
+        if (!ultimo) this.aviso = showToast(t(efeitoChave), tipo === 'reject' ? 'error' : 'info', 5000, null, { passaToque: true });
         this.stats[tipo === 'reject' ? 'rejected' : tipo === 'read' ? 'read' : 'skipped']++;
         this.restam = Math.max(0, this.restam - (tipo === 'skip' ? 0 : 1));
         updateStats();
@@ -31787,7 +31787,7 @@ function toggleTheme() {
 // `sensivel`: o texto é credencial e fica FORA do diário (ver abaixo).
 // `icone`: o ícone de OUTRO conceito no mesmo tipo de aviso (o lugar, a cor e a
 // duração seguem o `type`) — ver `informacao` abaixo.
-function showToast(message, type = 'info', durationMs = 4000, onClick = null, { copiavel = false, sensivel = false, icone = null } = {}) {
+function showToast(message, type = 'info', durationMs = 4000, onClick = null, { copiavel = false, sensivel = false, icone = null, passaToque = false } = {}) {
     // Conquista é BANNER (topo), não snackbar (rodapé) — distinção do M3, e aqui
     // com motivo medido: no rodapé ela tapava os três botões do card por 8s em 2
     // de 3 aparelhos (gotcha #26). Snackbar confirma o que você acabou de fazer;
@@ -31842,6 +31842,8 @@ function showToast(message, type = 'info', durationMs = 4000, onClick = null, { 
     toast.className = `toast ${colors[type] || colors.info} text-white font-medium text-sm`;
     toast.innerHTML = `${(icons[icone] || icons[type] || icons.info)}<span class="flex-1">${escapeHtml(message)}</span>`;
     toast.title = t('toast.dismissHint');
+    // O toque ATRAVESSA o aviso (R29-4-01): o do treino fica 5 s sobre ✕ ↑ ✓ e engolia o primeiro toque.
+    if (passaToque) toast.style.pointerEvents = 'none';
 
     let removed = false;
     const dismiss = () => {

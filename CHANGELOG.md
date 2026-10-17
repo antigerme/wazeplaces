@@ -8,6 +8,10 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.10.17-09
+- **Treino:** o aviso do efeito (✕ ↑ ✓), que ficava 5 s no rodapé, deixa o toque passar: ele cobria os três botões e engolia o primeiro toque depois do gesto.
+- **Francês:** «marquage en lot» também no aviso do treino (era «groupé»; o mesmo conceito tinha dois nomes).
+
 ## v2026.10.17-08
 - **Fila:** a rede que volta com 1–3 cards e mais pedidos no Waze repõe a fila na hora (antes só a decisão seguinte repunha, e o último card caía no esqueleto). Um pedido só, e só nesse caso.
 

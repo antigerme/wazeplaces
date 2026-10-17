@@ -1105,6 +1105,8 @@ body > main {
   align-items: center;
   gap: 0.75rem;
   cursor: pointer;
+  /* O contêiner deixa o toque passar (o aviso do treino atravessa, R29-4-01); cada aviso o recebe de volta. */
+  pointer-events: auto;
   animation: slideUp 0.25s ease;
 }
 
