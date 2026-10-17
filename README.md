@@ -238,7 +238,7 @@ Variáveis de ambiente (todas opcionais):
 | `ENCRYPTION_KEY` | auto-gera | Chave base64 com no mínimo 32 bytes (`openssl rand -base64 32`); com menos, ou malformada, a VM não sobe e diz por quê. Sem ela, gera uma em `SESSION_KEY_FILE` |
 | `SESSION_DIR` | `/tmp/waze_places_sessions` | Onde ficam os blobs de sessão |
 | `SESSION_KEY_FILE` | `/tmp/waze_places.key` | Arquivo da chave auto-gerada |
-| `MANTER_DESLIGADO` | — | Qualquer valor desliga o temporizador do «Manter conectado» (a renovação do cookie do Waze das sessões que ligaram isso) |
+| `MANTER_DESLIGADO` | — | `1` desliga o temporizador do «Manter conectado» (a renovação do cookie do Waze das sessões que ligaram isso) |
 | `MANTER_PRIMEIRA_MS` / `MANTER_INTERVALO_MS` / `MANTER_PAUSA_MS` | 60 s / 30 min / 1,5–4 s | Quando começa, de quanto em quanto tempo varre e a pausa entre sessões (só pra teste) |
 
 Para simular o ambiente Cloudflare localmente (Worker + KV): `npx wrangler dev` (precisa do `wrangler`).
@@ -450,8 +450,8 @@ A checagem de `errorList[0].code` acontece **antes** da regra `5xx → transient
 
 - **Cookies trafegam apenas no login.** Viram um `sessionToken` opaco; os cookies ficam criptografados (**AES-256-GCM**) no store (KV/filesystem).
 - **Chave de criptografia:** Secret `ENCRYPTION_KEY` no Cloudflare; env var ou arquivo `0600` na VM. Nunca commitada.
-- **Manter conectado (Preferências, ligado de fábrica):** o Waze invalida o cookie da sessão ~24 h depois se ninguém o renova, e o app só o renova quando alguém o abre. Com o interruptor ligado, o servidor renova a sessão sozinho de poucas em poucas horas, e quem abre pouco não precisa refazer o pareamento. O preço é dito na tela: sem ele o servidor não consegue abrir nada sem o seu aparelho; com ele, guarda uma chave que permite renovar a sua sessão. Desligar (ou tocar em “Sair”) apaga essa chave.
-- **TTL de sessão:** 21 dias **sem uso** (`SESSION_TTL` em `server/core.mjs`) — janela deslizante nos dois adaptadores: o KV renova o prazo no máximo uma vez por dia de uso; a VM, por mtime + touch. Cookies do Waze duram ~28 dias. Quando expiram de verdade, o backend devolve 401: o app confere (um 401 pode ser alarme falso), tenta renovar pela extensão e, sem ela, volta pra tela de login — a ação que levou o 401 espera na fila de saída.
+- **Manter conectado (Preferências, ligado de fábrica):** o Waze invalida o cookie da sessão ~24 h depois se ninguém o renova, e o app só o renova quando alguém o abre. Com o interruptor ligado, o servidor renova a sessão sozinho, a cada ~10 horas, e quem abre pouco não precisa refazer o pareamento. O preço é dito na tela: sem ele o servidor não consegue abrir nada sem o seu aparelho; com ele, guarda uma chave que permite renovar a sua sessão. Desligar (ou tocar em “Sair”) apaga essa chave.
+- **TTL de sessão:** 21 dias **sem uso** (`SESSION_TTL` em `server/core.mjs`) — janela deslizante nos dois adaptadores: o KV renova o prazo no máximo uma vez por dia de uso; a VM, por mtime + touch. O valor do cookie do Waze morre em ~24–26 h sem renovação (por isso existe o «Manter conectado»). Quando expiram de verdade, o backend devolve 401: o app confere (um 401 pode ser alarme falso), tenta renovar pela extensão e, sem ela, volta pra tela de login — a ação que levou o 401 espera na fila de saída.
 - **Erros 500 não vazam detalhe interno** — o `dispatch` devolve mensagem genérica.
 - **CSP** em TRÊS cópias que precisam bater: o `<meta>` do `index.src.html`, o `_headers` (Cloudflare) e o `server/node.mjs` (VM). Sem `unsafe-eval` e sem `unsafe-inline` em `script-src` — o único script inline (o do tema) entra por hash, e `test/layout.test.mjs` o recalcula.
 

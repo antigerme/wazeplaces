@@ -8,6 +8,18 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.10.17-03
+
+Rodada 26 da auditoria (convergência). Um auditor refez a medição da capacidade do «Manter conectado» com condições mais duras (carimbos iniciais espalhados, o teto de 20 s por execução, o Waze mais lento) e **não reproduziu o «0 % até 125 pessoas» da versão anterior**: a fatia escolhida pela chave da entrada dava 3–8 % de sessões acima de 24 h a partir de 100 pessoas (e 4 a 19 % no pior Waze). O número estava errado e o conserto estava incompleto.
+
+### Corrigido
+- **A varredura do «Manter conectado» agora escolhe a fatia da vez pela POSIÇÃO na lista ordenada**, não pela chave: as fatias passam a ter tamanho igual (antes eram desiguais, e o excedente esperava a visita seguinte, 6 horas depois). Medido por simulação do Cron por 8 dias com pessoas ausentes: **~100 pessoas com folga** (0–1 morte em 600 sessões, a mais velha com 20 h), 110 sem nenhuma, 125 no limite (0 a 1,2 %, a mais velha com 23,9 h); acima disso a conta não fecha no plano grátis do Cloudflare. As frases do CLAUDE.md, do `wrangler.jsonc` e do módulo dizem agora o que foi medido, e quem conta é todo mundo que ligou a opção, inclusive quem usa o app todo dia.
+- **Há um teste que reprova se a varredura deixar de usar a fatia** (antes só a função isolada era testada, e trocar a chamada não reprovava nada).
+- **O 403 do Waze numa sessão com menos de 20 h não apaga mais a entrada** (nem gasta a ida de confirmação): um 403 de alguns segundos tiraria do «Manter conectado» quem está viva, em silêncio. Medido num Worker de verdade (workerd): 10 entradas apagadas com as 10 sessões válidas. A capacidade com muita entrada e saída é menor que a parada (a redação diz).
+- **A Ajuda diz o prazo verdadeiro com o «Manter conectado» ligado** (R26-4-02): a chave vale 14 dias desde a última abertura e a sessão que ela renova fica guardada mais 21 dias depois da última renovação (até ~35 dias no servidor), nos 4 idiomas.
+- **O teste da recusa automática** com duas ou três abas espera o perfil de CADA aba.
+- **Textos**: «os cookies do Waze duram ~28 dias» saiu do CLAUDE.md, do README, do código e do aviso do diagnóstico (o medido é: o VALOR do cookie morre em ~24–26 h sem renovação); o README diz que `MANTER_DESLIGADO=1` (e só `1`) desliga a varredura na VM; o CLAUDE.md diz que a região `world` é recusada com 400 e que o `wrangler.jsonc` tem o Cron.
+
 ## v2026.10.17-02
 
 Rodada 25 da auditoria (a de fechamento: oito auditores, a versão que está no ar, com o «Manter conectado» e o lote 28). Nada muda de aparência no uso normal; cada conserto tem teste que reprova quando ele é desfeito.

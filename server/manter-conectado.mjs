@@ -34,6 +34,8 @@
 //     `callWaze` COM contexto: o cookie novo da resposta é gravado pelo
 //     `refreshCookies` (que respeita a trava de 1 h; como a devida passa de 10 h,
 //     ela grava). Nenhuma gravação nossa além dessa.
+//   · 401/403 do Waze numa sessão com menos de 20 h (`MANTER_MORTA_APOS`): não é «o cookie
+//     morreu de velho»; fica pra próxima execução, sem apagar (R26-2-02).
 //   · 401/403 do Waze: CONFIRMA uma vez (outra pausa e outro `Session`); só a
 //     2ª negativa apaga a entrada e deixa a sessão vencer (gotcha #42: 401
 //     isolado pode ser alarme falso). Rede/5xx: tenta na próxima execução, sem apagar. Sessão ausente: apaga a
@@ -57,17 +59,20 @@
 //                da entrada de quem abre o app (`manterLigar`).
 //   por dia:       cron de 30 min = 48 execuções × 6 = 288 renovações no teto.
 //                Cada sessão mantida é VISITADA a cada K execuções (a fatia da vez, K =
-//                ceil(n / 10): 13 com 125 pessoas = 6,5 h) e renovada na visita em que
-//                está devida (10 h): intervalo medido de 12,5 h com 125 pessoas, ~2
-//                gravações por dia,
-//                então 288 renovações/dia cobrem ~125 pessoas — e o teto REAL é a
+//                ceil(n / 10): 10 com 100 pessoas = 5 h) e renovada na visita em que
+//                está devida (10 h): ~2 gravações por dia. MEDIDO (simulação do cron por
+//                8 dias, pessoas ausentes, carimbos iniciais espalhados, teto de 20 s):
+//                100 pessoas → 0–1 morte em 600 sessões, maior idade 20 h; 110 → 0 em 660
+//                (22 h); 125 → 0 a 1,2 % (23,9 h com o Waze a 1,2 s por ida) — ou seja,
+//                ~100 pessoas COM FOLGA e 125 no limite; 140+ degrada (8–27 em 600) e 200
+//                perde ~70 %. Os 288 renovações/dia não são o gargalo até lá; o teto REAL é a
 //                cota de ESCRITA do KV (1.000/dia, compartilhada com o app): ~430
 //                pessoas sozinhas, bem menos com o uso normal somado. O prazo de
 //                10 h (e não 5) é escolha de capacidade: o Waze só invalida o valor
 //                depois de ~24 h (MEDIDO: 24 a 26 h), então sobram ~13 h de folga
 //                pra um Waze fora do ar ou uma execução perdida. Pra mais
 //                gente: subir `lote` (e conferir as 50 subrequisições) ou
-//                encurtar o cron — e, passando de ~120 mantidas, pagar o plano.
+//                encurtar o cron — e, passando de ~100 mantidas, pagar o plano.
 //   CPU: cada sessão faz 2 HKDF e 3 AES (abrir a entrada, abrir a sessão,
 //                regravar). O plano grátis dá ~10 ms de CPU por execução: se o
 //                log do Worker mostrar «exceeded CPU», baixe `lote` (a conta
@@ -91,6 +96,7 @@ export const MANTER_TETO_MS = 20_000;        // relógio de uma execução
 export const MANTER_ESPERA_WAZE_MS = 5_000;  // teto de UMA ida ao Waze (o `callWaze` padrão é 30 s)
 export const PAUSA_MIN_MS = 1_500;
 export const PAUSA_MAX_MS = 4_000;
+export const MANTER_MORTA_APOS = 20 * 3600;  // 403/401 só vale como «morta» com o carimbo da sessão tão velho (o valor morre em 24–26 h)
 export const MANTER_CRON_MIN = 30;           // de quanto em quanto tempo os adaptadores varrem
 
 // A mesma faixa do `tools/waze-jitter.mjs` (fonte do dono), reescrita aqui porque
@@ -100,33 +106,25 @@ export function pausaPadrao() {
   return new Promise((ok) => setTimeout(ok, ms));
 }
 
-// A FATIA DA VEZ (R25-6-01). O sorteio puro de `examinar` entradas por execução deixava sessões
-// devidas sem ser vistas: com mais de ~15 entradas `ka_`, a chance de uma entrada ficar 28
-// execuções (a janela entre «devida» em 10 h e «morta» em ~24 h) sem sorteio cresce com o TOTAL
-// de entradas — MEDIDO por simulação do cron de 30 min por 8 dias: 100 pessoas ausentes → 9 %
-// com intervalo > 24 h; 125 → 23 %; 200 → 77 %. Agora cada execução olha a fatia `hash % K` da
-// lista, com `K = ceil(n / ALVO_DA_FATIA)` e a fatia escolhida pela HORA (`execução % K`): toda
-// entrada é visitada a cada K execuções (K = 13 → 6,5 h com 125 pessoas), sem estado e sem
-// escrita extra. O hash vem da própria chave (`ka_<sha256>`), então a fatia de uma entrada não
-// muda quando outra entra ou sai; dentro da fatia ainda se embaralha (a fatia que passa de
-// `examinar` não corta sempre as mesmas).
+// A FATIA DA VEZ (R25-6-01, refeita na R26-1). O sorteio puro de `examinar` entradas por execução deixava sessões
+// devidas sem ser vistas: MEDIDO por simulação do cron de 30 min por 8 dias, com 100 pessoas ausentes 11 % passavam de
+// 24 h e com 125, 23 %. Agora cada execução olha UMA fatia da lista ORDENADA: `K = ceil(n / ALVO_DA_FATIA)` e a fatia da
+// vez é `hora % K`; a entrada de posição `i` está na fatia `i % K`. Toda entrada é visitada a cada K execuções (K = 13 com
+// 125 pessoas = 6,5 h), sem estado e sem escrita extra, e as fatias têm tamanho IGUAL (±1). A primeira versão escolhia
+// pela hash da chave: fatias de tamanho binomial (média 10, desvio ~3, as de 15–20 medidas), e o excedente que o lote de 6
+// ou o teto de 20 s empurrava pra visita seguinte (6,5 h depois) passava de 24 h — 3–8 % de mortes a partir de 100 pessoas
+// numa simulação com carimbos iniciais espalhados (R26-1-01). Pela posição o resultado medido é 0 % até ~110 e < 1 % com
+// 125. O preço: quando uma pessoa entra ou sai, as posições depois dela deslocam (um intervalo a mais ou a menos numa ou
+// noutra entrada); com ~1–2 entradas por dia isso custa menos que a variância da hash. Dentro da fatia ainda se embaralha
+// (a que passa de `examinar` não corta sempre as mesmas).
 export const MANTER_ALVO_DA_FATIA = 10;       // entradas por execução, em média (o teto é `examinar` = 15)
-
-function hashDaChave(chave) {
-  const hex = chave.slice(KA_PREFIXO.length, KA_PREFIXO.length + 8);
-  const n = parseInt(hex, 16);
-  if (Number.isFinite(n)) return n;
-  let h = 2166136261;                       // FNV-1a, para a chave que não é hexadecimal
-  for (let i = 0; i < chave.length; i++) { h ^= chave.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
-  return h >>> 0;
-}
 
 export function fatiaDaVez(chaves, agoraSeg, { alvo = MANTER_ALVO_DA_FATIA, cronMin = MANTER_CRON_MIN } = {}) {
   const k = Math.max(1, Math.ceil(chaves.length / Math.max(1, alvo)));
   if (k === 1) return [...chaves];
   const execucao = Math.floor(agoraSeg / (cronMin * 60));
   const fatia = execucao % k;
-  return chaves.filter((c) => hashDaChave(c) % k === fatia);
+  return [...chaves].sort().filter((_, i) => i % k === fatia);
 }
 
 function embaralharPadrao(lista) {
@@ -165,6 +163,7 @@ export async function varrerMantidos({
   lote = MANTER_LOTE,
   examinar = MANTER_EXAMINAR,
   devidoApos = MANTER_DEVIDO_APOS,
+  mortaApos = MANTER_MORTA_APOS,
   tetoMs = MANTER_TETO_MS,
   pausa = pausaPadrao,
   embaralhar = null,
@@ -205,6 +204,12 @@ export async function varrerMantidos({
       try { return await chamarWaze({ token: ex.token, region: ex.region, cookies: ex.cookies, sessions }); } catch { return { resultado: 'falhou' }; }
     };
     let r = await ir();
+    // R26-2-02: o Waze só invalida o valor depois de ~24 h, e renovamos com 10 h. Um 401/403 numa sessão
+    // JOVEM (carimbo < 20 h) não é «o cookie morreu de velho»: é o Waze (ou a borda) errando por alguns
+    // segundos, e apagar a entrada tiraria do «Manter conectado» quem está viva, em silêncio. Fica pra
+    // próxima execução, sem apagar e sem a ida de confirmação; se a sessão morreu de verdade (o «Sair» do
+    // WME), a entrada sai quando o carimbo passar de 20 h.
+    if (r.resultado === 'morta' && Number.isFinite(ex.idade) && ex.idade < mortaApos) { resumo.adiadas++; continue; }
     // Um 401/403 ISOLADO não prova sessão morta (gotcha #42: WAF, blip do Waze):
     // confirma UMA vez, depois de outra pausa com jitter, e só apaga a entrada se
     // a segunda também for 401/403. Sem tempo pra confirmar, fica pra próxima
