@@ -16,7 +16,7 @@ import {
 } from '../server/core.mjs';
 import { cenario, HORA, PERFIL, cookiesCom } from './_manter.mjs';
 import {
-  varrerMantidos, KA_PREFIXO, KA_TTL, KA_REGRAVA_APOS, MANTER_DEVIDO_APOS, MANTER_LOTE, MANTER_EXAMINAR,
+  varrerMantidos, fatiaDaVez, MANTER_ALVO_DA_FATIA, MANTER_CRON_MIN, KA_PREFIXO, KA_TTL, KA_REGRAVA_APOS, MANTER_DEVIDO_APOS, MANTER_LOTE, MANTER_EXAMINAR,
 } from '../server/manter-conectado.mjs';
 
 const semPausa = async () => {};
@@ -417,8 +417,8 @@ test('varredura: o orçamento de operações de KV cabe nas 50 do plano grátis 
       store: c.store, sessions: makeSessions({ store: c.store, keyBytes: c.keyBytes }), pausa: semPausa,
       chamarWaze: async () => { throw new Error('não devia ir ao Waze'); }, devidoApos: 10 ** 9,
     });
-    assert.equal(r.vistas, MANTER_EXAMINAR, 'leu entradas demais numa execução');
-    assert.equal(c.store.ops.get, MANTER_EXAMINAR);
+    assert.ok(r.vistas > 0 && r.vistas <= MANTER_EXAMINAR, `leu ${r.vistas} entradas numa execução (teto ${MANTER_EXAMINAR})`);
+    assert.equal(c.store.ops.get, r.vistas);
   } finally { c.amb.restaurar(); }
 });
 
@@ -596,4 +596,60 @@ test('constantes: a conta de capacidade do módulo (14 dias, 1 dia, 10 h, lote 6
   assert.equal(KA_TTL, 14 * 86400);
   assert.equal(KA_REGRAVA_APOS, 86400);
   assert.equal(SESSION_TTL, 21 * 86400, 'o TTL da sessão mudou: reveja o quanto uma sessão mantida vive depois de abandonada');
+});
+
+// ── R25-6-01: a fatia da vez cobre TODAS as entradas, sem estado ──────────────────────────────────────────
+test('fatia da vez: em K execuções seguidas toda entrada é visitada exatamente uma vez (125 pessoas, sem sorteio)', () => {
+  const hex = (i) => [...new Uint8Array(32)].map((_, j) => ((i * 2654435761 + j * 40503) >>> 0).toString(16).padStart(2, '0').slice(-2)).join('');
+  const chaves = Array.from({ length: 125 }, (_, i) => KA_PREFIXO + hex(i));
+  const k = Math.ceil(chaves.length / MANTER_ALVO_DA_FATIA);
+  const T = 1_800_000_000;                       // um instante qualquer, em segundos
+  const vistas = new Map();
+  for (let e = 0; e < k; e++) for (const c of fatiaDaVez(chaves, T + e * MANTER_CRON_MIN * 60)) vistas.set(c, (vistas.get(c) || 0) + 1);
+  assert.equal(vistas.size, chaves.length, `só ${vistas.size} de ${chaves.length} entradas foram visitadas em ${k} execuções`);
+  assert.ok([...vistas.values()].every((n) => n === 1), 'uma entrada caiu em duas fatias da mesma volta');
+  // CONTROLE: o sorteio de antes (15 por execução, sem memória) NÃO cobre — é o defeito que a medição achou.
+  const sorteio = new Set();
+  for (let e = 0; e < k; e++) { const a = [...chaves].sort(() => Math.random() - 0.5).slice(0, MANTER_EXAMINAR); a.forEach((c) => sorteio.add(c)); }
+  assert.ok(sorteio.size < chaves.length, 'o controle (sorteio) cobriu tudo: a medida não enxerga o defeito');
+});
+
+test('fatia da vez: poucas entradas (até o alvo) são todas olhadas a cada execução', () => {
+  const chaves = Array.from({ length: MANTER_ALVO_DA_FATIA }, (_, i) => KA_PREFIXO + String(i).padStart(64, 'a'));
+  assert.equal(fatiaDaVez(chaves, 1_800_000_000).length, chaves.length);
+  assert.deepEqual(fatiaDaVez([], 1_800_000_000), []);
+});
+
+// ── R25-6-03: o 403 da BORDA (HTML) não é «sessão morta» ───────────────────────────────────────────────────
+test('varredura: 403 de HTML da borda (WAF/desafio) NÃO apaga a entrada; só o 403 do Waze (JSON com errorList) apaga', async () => {
+  const c = await cenario();
+  try {
+    const tokens = [];
+    for (let i = 0; i < 3; i++) { const t = await c.novo(`B${i}`); await c.sessions.manterLigar(t, 'row'); tokens.push(t); }
+    c.amb.avancar(MANTER_DEVIDO_APOS + HORA);
+    c.amb.modo = () => '403borda';
+    const r = await varrerMantidosDoStore({ store: c.store, keyBytes: c.keyBytes, pausa: semPausa });
+    assert.equal(r.mortas, 0, `a borda bloqueou e ${r.mortas} entradas foram apagadas`);
+    assert.equal([...c.store.mem.keys()].filter((k) => k.startsWith('ka_')).length, 3, 'as entradas ka_ sumiram');
+    // CONTROLE: o 403 do Waze (JSON) segue apagando.
+    c.amb.modo = () => '403';
+    const r2 = await varrerMantidosDoStore({ store: c.store, keyBytes: c.keyBytes, pausa: semPausa });
+    assert.equal(r2.mortas, 3, 'o 403 do Waze deixou de apagar (o controle não enxerga)');
+  } finally { c.amb.restaurar(); }
+});
+
+// ── R25-6-02: KV com defeito ao ligar responde «não sei» (null), nunca «desligado» ───────────────────────────
+test('perfil: o KV que falha ao ligar devolve manterConectado null — o cliente só segue booleano', async () => {
+  const c = await cenario();
+  try {
+    const token = await c.novo('KV');
+    const put0 = c.store.put;
+    c.store.put = async (k, v) => { if (String(k).startsWith('ka_')) throw new Error('KV de mau humor'); return put0(k, v); };
+    const r = await dispatch('perfil', { sessionToken: token, region: 'row', manter: true }, c.ctx());
+    assert.equal(r.status, 200);
+    assert.equal(r.body.manterConectado, null, `respondeu ${JSON.stringify(r.body.manterConectado)}`);
+    c.store.put = put0;
+    const bom = await dispatch('perfil', { sessionToken: token, region: 'row', manter: true }, c.ctx());
+    assert.equal(bom.body.manterConectado, true, 'CONTROLE: com o KV bom liga');
+  } finally { c.amb.restaurar(); }
 });

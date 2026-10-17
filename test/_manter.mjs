@@ -35,6 +35,7 @@ export function ambiente() {
     if (modo === 'rede') throw new Error('rede caiu');
     if (modo === '403') return new Response(JSON.stringify({ errorList: [{ code: 101, details: 'not allowed by guest user' }] }), { status: 403 });
     if (modo === '500') return new Response('<html>500</html>', { status: 500 });
+    if (modo === '403borda') return new Response('<html><title>Attention Required! | Cloudflare</title></html>', { status: 403 });
     const headers = { 'content-type': 'application/json' };
     if (modo === 'ok') headers['set-cookie'] = `_web_session=ROT${id}; path=/; Max-Age=2000000`;
     return new Response(JSON.stringify(PERFIL), { status: 200, headers });
