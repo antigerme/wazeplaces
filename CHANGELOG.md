@@ -8,6 +8,9 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.10.17-08
+- **Fila:** a rede que volta com 1–3 cards e mais pedidos no Waze repõe a fila na hora (antes só a decisão seguinte repunha, e o último card caía no esqueleto). Um pedido só, e só nesse caso.
+
 ## v2026.10.17-07
 Terceiro retoque da rodada 29: três arestas pequenas do que entrou nos lotes 32–33 e os textos que ainda falavam de «pessoas».
 

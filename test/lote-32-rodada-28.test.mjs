@@ -199,3 +199,13 @@ test('R29-1-03: digitar no campo do código esconde o erro («Digite o código�
   assert.match(APP_SEM, /const campoDoCodigo = \$\('pairCodeInput'\);\s*campoDoCodigo\?\.addEventListener\('input', \(\) => \$\('pairEnterError'\)\?\.classList\.add\('hidden'\)\);/,
     'o campo do código não esconde o erro ao digitar');
 });
+
+// R29-2-02: a rede que volta com a fila em 1–3 cards e `hasMore` repõe pela busca (o `maybePrefetch` tem o portão).
+test('R29-2-02: o `online` repõe a fila curta com `hasMore` (senão o último card cai no esqueleto)', () => {
+  const APP_SEM = APP.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  const i = APP_SEM.indexOf("window.addEventListener('online', async () => {");
+  assert.ok(i > 0, 'o ouvinte do online não foi achado');
+  const corpo = APP_SEM.slice(i, APP_SEM.indexOf('\n});', i));
+  assert.match(corpo, /else if \(AppState\.authenticated && AppState\.hasMore && AppState\.queue\.length > 0\) \{\s*maybePrefetch\(\);\s*\}/,
+    'o online não repõe a fila curta');
+});
