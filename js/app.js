@@ -77,8 +77,10 @@ if (typeof setI18nVars === 'function') {
 // plural ("dias", "minutos"): o mesmo teste cobra que os dois passem de 1.
 const SESSAO_DIAS_EXIBIDO = 21;
 const PAREAR_MIN_EXIBIDO = 5;
+// Espelha o `KA_TTL` do servidor (`server/manter-conectado.mjs`): quanto a chave do «Manter conectado» vale sem o app ser aberto.
+const MANTER_DIAS_EXIBIDO = 14;
 if (typeof setI18nVars === 'function') {
-    setI18nVars({ sessaoDias: () => SESSAO_DIAS_EXIBIDO, parearMin: () => PAREAR_MIN_EXIBIDO });
+    setI18nVars({ sessaoDias: () => SESSAO_DIAS_EXIBIDO, parearMin: () => PAREAR_MIN_EXIBIDO, manterDias: () => MANTER_DIAS_EXIBIDO });
 }
 // O outro prazo do servidor que a Ajuda cita: a lista de fotos da lixeira sai
 // do servidor 1 minuto depois da ÚLTIMA gravação dela (`RELEITURA_TTL_STORE`,
@@ -2073,6 +2075,11 @@ function switchFilterTab(tabId) {
         if (selected && mudou) {
             const caixa = $(panel).parentElement;
             if (caixa) caixa.scrollTop = 0;
+            // Nas janelas do degrau (zoom 300–500%, Fold com texto grande) o corpo não rola mais — quem rola é o CARTÃO
+            // (`#filtersModal > div > .overflow-y-auto { overflow: visible }`), e a aba nova abria rolada, com as abas
+            // fora da tela (R25-7-01, regressão do lote 28). Zera os dois.
+            const cartao = caixa && caixa.parentElement;
+            if (cartao) cartao.scrollTop = 0;
         }
     });
     // Abrir a aba Histórico apaga o selo (decisão do owner). Fica AQUI e não no
@@ -30444,6 +30451,8 @@ async function aoMudarManterConectado(ligar) {
         : typeof AppState.manterDoServidor === 'boolean' ? AppState.manterDoServidor : antes;
     if (real !== null) AppState.manterDoServidor = real;
     dfato('manter.falhou', { queria: ligar, volta, categoria: (r && r.errorCategory) || 'semResposta' });
+    // 401 do gesto não é «falha do interruptor»: confere a sessão como as outras rotas (R25-7-08).
+    if (r && r.errorCategory === 'unauthorized') { try { handleUnauthorized(); } catch (e) { /* a conferência é melhor-esforço */ } }
     if (volta === ligar) return;   // o servidor já está como a pessoa pediu: nada a desfazer
     AppState.preferences.manterConectado = volta;
     savePreferences();
