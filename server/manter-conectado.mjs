@@ -34,6 +34,8 @@
 //     `callWaze` COM contexto: o cookie novo da resposta é gravado pelo
 //     `refreshCookies` (que respeita a trava de 1 h; como a devida passa de 10 h,
 //     ela grava). Nenhuma gravação nossa além dessa.
+//   · 401/403 do Waze numa sessão com menos de 20 h (`MANTER_MORTA_APOS`): não é «o cookie
+//     morreu de velho»; fica pra próxima execução, sem apagar (R26-2-02).
 //   · 401/403 do Waze: CONFIRMA uma vez (outra pausa e outro `Session`); só a
 //     2ª negativa apaga a entrada e deixa a sessão vencer (gotcha #42: 401
 //     isolado pode ser alarme falso). Rede/5xx: tenta na próxima execução, sem apagar. Sessão ausente: apaga a
@@ -94,6 +96,7 @@ export const MANTER_TETO_MS = 20_000;        // relógio de uma execução
 export const MANTER_ESPERA_WAZE_MS = 5_000;  // teto de UMA ida ao Waze (o `callWaze` padrão é 30 s)
 export const PAUSA_MIN_MS = 1_500;
 export const PAUSA_MAX_MS = 4_000;
+export const MANTER_MORTA_APOS = 20 * 3600;  // 403/401 só vale como «morta» com o carimbo da sessão tão velho (o valor morre em 24–26 h)
 export const MANTER_CRON_MIN = 30;           // de quanto em quanto tempo os adaptadores varrem
 
 // A mesma faixa do `tools/waze-jitter.mjs` (fonte do dono), reescrita aqui porque
@@ -160,6 +163,7 @@ export async function varrerMantidos({
   lote = MANTER_LOTE,
   examinar = MANTER_EXAMINAR,
   devidoApos = MANTER_DEVIDO_APOS,
+  mortaApos = MANTER_MORTA_APOS,
   tetoMs = MANTER_TETO_MS,
   pausa = pausaPadrao,
   embaralhar = null,
@@ -200,6 +204,12 @@ export async function varrerMantidos({
       try { return await chamarWaze({ token: ex.token, region: ex.region, cookies: ex.cookies, sessions }); } catch { return { resultado: 'falhou' }; }
     };
     let r = await ir();
+    // R26-2-02: o Waze só invalida o valor depois de ~24 h, e renovamos com 10 h. Um 401/403 numa sessão
+    // JOVEM (carimbo < 20 h) não é «o cookie morreu de velho»: é o Waze (ou a borda) errando por alguns
+    // segundos, e apagar a entrada tiraria do «Manter conectado» quem está viva, em silêncio. Fica pra
+    // próxima execução, sem apagar e sem a ida de confirmação; se a sessão morreu de verdade (o «Sair» do
+    // WME), a entrada sai quando o carimbo passar de 20 h.
+    if (r.resultado === 'morta' && Number.isFinite(ex.idade) && ex.idade < mortaApos) { resumo.adiadas++; continue; }
     // Um 401/403 ISOLADO não prova sessão morta (gotcha #42: WAF, blip do Waze):
     // confirma UMA vez, depois de outra pausa com jitter, e só apaga a entrada se
     // a segunda também for 401/403. Sem tempo pra confirmar, fica pra próxima

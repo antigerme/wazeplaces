@@ -16,7 +16,7 @@ import {
 } from '../server/core.mjs';
 import { cenario, HORA, PERFIL, cookiesCom } from './_manter.mjs';
 import {
-  varrerMantidos, fatiaDaVez, MANTER_ALVO_DA_FATIA, MANTER_CRON_MIN, KA_PREFIXO, KA_TTL, KA_REGRAVA_APOS, MANTER_DEVIDO_APOS, MANTER_LOTE, MANTER_EXAMINAR,
+  varrerMantidos, fatiaDaVez, MANTER_ALVO_DA_FATIA, MANTER_CRON_MIN, KA_PREFIXO, KA_TTL, KA_REGRAVA_APOS, MANTER_DEVIDO_APOS, MANTER_MORTA_APOS, MANTER_LOTE, MANTER_EXAMINAR,
 } from '../server/manter-conectado.mjs';
 
 const semPausa = async () => {};
@@ -274,7 +274,7 @@ test('varredura: 403 do Waze apaga a entrada (a sessão vence sozinha); 500 e er
     const morta = await c.novo('MORTA'), instavel = await c.novo('INSTAVEL'), sem_rede = await c.novo('SEMREDE');
     for (const t of [morta, instavel, sem_rede]) await c.sessions.manterLigar(t, 'row');
     c.amb.modo = (sessao) => ({ MORTA: '403', INSTAVEL: '500', SEMREDE: 'rede' }[sessao] || 'ok');
-    c.amb.avancar(MANTER_DEVIDO_APOS + HORA);
+    c.amb.avancar(MANTER_MORTA_APOS + HORA);
     const r = await varrerMantidosDoStore({ store: c.store, keyBytes: c.keyBytes, pausa: semPausa, embaralhar: ordemFixa });
     assert.deepEqual([r.vistas, r.renovadas, r.mortas, r.adiadas, r.confirmadas], [3, 0, 1, 2, 1]);
     assert.equal(await c.sessions.manterEstado(morta), false, '403 não apagou a entrada');
@@ -304,7 +304,7 @@ test('varredura: um 401/403 ISOLADO não apaga a entrada — confirma uma vez, c
       const t = await c.novo('LOGIN'); await c.sessions.manterLigar(t, 'row');
       let idas = 0;
       c.amb.modo = () => (++idas === 1 ? primeira : segunda);
-      c.amb.avancar(MANTER_DEVIDO_APOS + HORA);
+      c.amb.avancar(MANTER_MORTA_APOS + HORA);
       let pausas = 0;
       const r = await varrerMantidosDoStore({ store: c.store, keyBytes: c.keyBytes, pausa: async () => { pausas++; }, embaralhar: ordemFixa });
       assert.equal(idas, 2, `${nome}: o 403 não foi confirmado com uma segunda ida (${idas})`);
@@ -320,7 +320,7 @@ test('varredura: um 401/403 ISOLADO não apaga a entrada — confirma uma vez, c
   try {
     const t = await c.novo('LOGIN'); await c.sessions.manterLigar(t, 'row');
     c.amb.modo = () => '403';
-    c.amb.avancar(MANTER_DEVIDO_APOS + HORA);
+    c.amb.avancar(MANTER_MORTA_APOS + HORA);
     const r = await varrerMantidosDoStore({ store: c.store, keyBytes: c.keyBytes, pausa: semPausa, relogio: (() => { let n = 0; return () => (n++ === 0 ? 0 : 19000); })() });
     assert.equal(r.mortas, 0);
     assert.equal(await c.sessions.manterEstado(t), true, 'sem tempo pra confirmar, a entrada foi apagada');
@@ -626,7 +626,7 @@ test('varredura: 403 de HTML da borda (WAF/desafio) NÃO apaga a entrada; só o 
   try {
     const tokens = [];
     for (let i = 0; i < 3; i++) { const t = await c.novo(`B${i}`); await c.sessions.manterLigar(t, 'row'); tokens.push(t); }
-    c.amb.avancar(MANTER_DEVIDO_APOS + HORA);
+    c.amb.avancar(MANTER_MORTA_APOS + HORA);
     c.amb.modo = () => '403borda';
     const r = await varrerMantidosDoStore({ store: c.store, keyBytes: c.keyBytes, pausa: semPausa });
     assert.equal(r.mortas, 0, `a borda bloqueou e ${r.mortas} entradas foram apagadas`);
@@ -635,6 +635,30 @@ test('varredura: 403 de HTML da borda (WAF/desafio) NÃO apaga a entrada; só o 
     c.amb.modo = () => '403';
     const r2 = await varrerMantidosDoStore({ store: c.store, keyBytes: c.keyBytes, pausa: semPausa });
     assert.equal(r2.mortas, 3, 'o 403 do Waze deixou de apagar (o controle não enxerga)');
+  } finally { c.amb.restaurar(); }
+});
+
+// ── R26-2-02: 401/403 numa sessão JOVEM não é «o cookie morreu de velho» ─────────────────────────────────────
+test('varredura: 403 do Waze numa sessão com menos de 20 h NÃO apaga a entrada nem gasta a ida de confirmação; com 20 h ou mais, apaga', async () => {
+  const c = await cenario();
+  try {
+    const t = await c.novo('JOVEM'); await c.sessions.manterLigar(t, 'row');
+    c.amb.modo = () => '403';
+    c.amb.avancar(MANTER_DEVIDO_APOS + HORA);                       // 11 h: devida, mas jovem
+    let pausas = 0;
+    const r = await varrerMantidosDoStore({ store: c.store, keyBytes: c.keyBytes, pausa: async () => { pausas++; }, embaralhar: ordemFixa });
+    assert.deepEqual([r.mortas, r.adiadas, r.confirmadas], [0, 1, 0], JSON.stringify(r));
+    assert.equal(c.amb.chamadas.length, 1, 'gastou a ida de confirmação numa sessão jovem');
+    assert.equal(await c.sessions.manterEstado(t), true, 'o 403 de uma sessão jovem apagou a entrada');
+    // CONTROLE: o Waze volta ao normal e a mesma entrada segue sendo renovada.
+    c.amb.modo = () => 'ok';
+    const r2 = await varrerMantidosDoStore({ store: c.store, keyBytes: c.keyBytes, pausa: semPausa, embaralhar: ordemFixa });
+    assert.equal(r2.renovadas, 1, 'a entrada poupada não voltou a ser renovada');
+    // E a de 20 h ou mais, que o Waze nega duas vezes, sai (o valor do cookie já passou do que ele aceita).
+    c.amb.modo = () => '403';
+    c.amb.avancar(MANTER_MORTA_APOS + HORA);
+    const r3 = await varrerMantidosDoStore({ store: c.store, keyBytes: c.keyBytes, pausa: semPausa, embaralhar: ordemFixa });
+    assert.equal(r3.mortas, 1, 'o 403 de uma sessão velha deixou de apagar');
   } finally { c.amb.restaurar(); }
 });
 

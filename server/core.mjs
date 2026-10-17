@@ -1147,7 +1147,7 @@ export function makeSessions({ store, keyBytes }) {
       const cookies = await decryptCookies(rawSessao.slice(sep + 1), await derivarChave(keyBytes, dados.token));
       if (!cookies) return { estado: 'estragada' };
       lembrarCarimbo(hash, carimbo);
-      return { estado: 'devida', token: dados.token, region: Object.hasOwn(WAZE_REGIONS, dados.region) ? dados.region : 'row', cookies };
+      return { estado: 'devida', idade: agora - carimbo, token: dados.token, region: Object.hasOwn(WAZE_REGIONS, dados.region) ? dados.region : 'row', cookies };
     },
 
     // Reescreve a sessão com os cookies que o Waze rotacionou.
