@@ -69,7 +69,7 @@ async function coletarCookies(urlDaAba) {
 // A API aceita os dois, mas só no Netscape ela consegue ACOMPANHAR a rotação do
 // cookie de sessão: o Waze devolve um `_web_session` novo a cada resposta e o
 // servidor regrava a sessão com o valor novo. No formato header ele não tem
-// como fazer isso, e a sessão azeda sozinha em alguns dias mesmo com o login do
+// como fazer isso, e a sessão azeda sozinha em cerca de um dia mesmo com o login do
 // WME válido. (Descoberta do @daflash na v0.0.3 — mantida.)
 function formatarNetscape(cookies) {
   const linhas = ['# Netscape HTTP Cookie File'];

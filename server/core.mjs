@@ -587,7 +587,7 @@ async function guardarCookiesRotacionados(ctx, setCookie) {
 }
 
 // Quando a sessão do WAZE vence, em segundos-epoch — ou null se não deu pra
-// saber. É o prazo que de fato desloga o editor, e não se confunde com o
+// saber. É o prazo do COOKIE (`Expires`), que a linha «sua sessão vence em N dias» mostra; o valor do cookie morre antes (~24 h sem renovação, ver «Manter conectado»). Não se confunde com o
 // `SESSION_TTL` do app: aquele é DESLIZANTE (`loadSession` renova a cada uso),
 // este é FIXO.
 //

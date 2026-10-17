@@ -59,10 +59,10 @@
 //                da entrada de quem abre o app (`manterLigar`).
 //   por dia:       cron de 30 min = 48 execuções × 6 = 288 renovações no teto.
 //                Cada sessão mantida é VISITADA a cada K execuções (a fatia da vez, K =
-//                ceil(n / 10): 10 com 100 pessoas = 5 h) e renovada na visita em que
+//                ceil(n / 10): 10 com 100 sessões = 5 h) e renovada na visita em que
 //                está devida (10 h): ~2 gravações por dia. MEDIDO (simulação do cron por
 //                8 dias, carimbos iniciais espalhados, teto de 20 s, Waze a 0,4–1,2 s por ida):
-//                com a população PARADA, 100 pessoas → 0 mortes em 2.500 sessões (maior idade 20 h);
+//                com a população PARADA, 100 sessões → 0 mortes em 2.500 sessões (maior idade 20 h);
 //                110 → 0 (21 h); 125 → 0 (23 h); 140 → 0 (24 h); 160 → 4 %; 200 → 57–83 %. Com
 //                ROTATIVIDADE a margem some (R27-1-03): cada pessoa que entra ou sai desloca as posições
 //                e re-fase as fatias, e as sessões já mortas ocupam vaga do lote; com 100 vivas e ~5
@@ -116,12 +116,12 @@ export function pausaPadrao() {
 }
 
 // A FATIA DA VEZ (R25-6-01, refeita na R26-1). O sorteio puro de `examinar` entradas por execução deixava sessões
-// devidas sem ser vistas: MEDIDO por simulação do cron de 30 min por 8 dias, com 100 pessoas ausentes 11 % passavam de
+// devidas sem ser vistas: MEDIDO por simulação do cron de 30 min por 8 dias, com 100 sessões ausentes 11 % passavam de
 // 24 h e com 125, 23 %. Agora cada execução olha UMA fatia da lista ORDENADA: `K = ceil(n / ALVO_DA_FATIA)` e a fatia da
 // vez é `execução % K` (o número da execução de 30 min); a entrada de posição `i` está na fatia `i % K`. Toda entrada é visitada a cada K execuções (K = 13 com
-// 125 pessoas = 6,5 h), sem estado e sem escrita extra, e as fatias têm tamanho IGUAL (±1). A primeira versão escolhia
+// 125 sessões = 6,5 h), sem estado e sem escrita extra, e as fatias têm tamanho IGUAL (±1). A primeira versão escolhia
 // pela hash da chave: fatias de tamanho binomial (média 10, desvio ~3, as de 15–20 medidas), e o excedente que o lote de 6
-// ou o teto de 20 s empurrava pra visita seguinte (6,5 h depois) passava de 24 h — 3–8 % de mortes a partir de 100 pessoas
+// ou o teto de 20 s empurrava pra visita seguinte (6,5 h depois) passava de 24 h — 3–8 % de mortes a partir de 100 sessões
 // numa simulação com carimbos iniciais espalhados (R26-1-01). Pela posição o resultado medido é 0 % até ~110 e < 1 % com
 // 125. O preço: quando uma pessoa entra ou sai, as posições depois dela deslocam (um intervalo a mais ou a menos numa ou
 // noutra entrada); com ~1–2 entradas por dia isso custa menos que a variância da hash. Dentro da fatia ainda se embaralha

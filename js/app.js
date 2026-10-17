@@ -2695,6 +2695,9 @@ function setupModalListeners() {
         openModal('pairEnterModal');
     });
     $('pairEnterCancel')?.addEventListener('click', () => closeModal('pairEnterModal'));
+    // O erro («Digite o código…», «Código inválido…») é da tentativa de antes: digitar de novo o apaga (R29-1-03).
+    const campoDoCodigo = $('pairCodeInput');
+    campoDoCodigo?.addEventListener('input', () => $('pairEnterError')?.classList.add('hidden'));
     $('pairEnterConfirm')?.addEventListener('click', (ev) => resgatarPareamento($('pairCodeInput').value,
         { peloTeclado: veioDoTeclado(ev) }));
     $('pairCodeInput')?.addEventListener('keydown', (e) => {
@@ -14817,6 +14820,10 @@ function fetchNextPage() {
                     if (!jaReiniciou && busca.paginas > 1
                         && (pedidosEmAndamento.size > 0 || [...pousosDaPagina.values()].some((t) => t >= comecoDaLeitura))) {
                         jaReiniciou = true;
+                        // A releitura vale a leitura de antes: o `hasMore` falso da última página não pode ficar
+                        // durante ela (uma falha de rede na releitura largava a fila com «Tudo limpo!» e o resto
+                        // pendente, e a troca de ordem nessa janela não esperava as páginas; R29-1-02).
+                        AppState.hasMore = true;
                         comecoDaLeitura = Date.now();
                         semNadaSeguidas = 0;
                         pagina = 0;

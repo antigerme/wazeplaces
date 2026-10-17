@@ -31,9 +31,9 @@
   // «Manter conectado»: a cada 30 minutos o Worker renova o cookie do Waze das
   // sessões que ligaram isso (server/manter-conectado.mjs). Cada execução olha a
   // FATIA da vez das entradas (posição na lista ordenada e hora: toda entrada é
-  // visitada a cada ~10 execuções com 100 pessoas), lê no máximo 15 e renova no
+  // visitada a cada ~10 execuções com 100 sessões), lê no máximo 15 e renova no
   // máximo 6 devidas (carimbo com mais de 10 h): 48 × 6 = 288 renovações por dia.
-  // MEDIDO por simulação (8 dias): com a lista de pessoas PARADA, ~100 com folga
+  // MEDIDO por simulação (8 dias): com a lista de sessões PARADA, ~100 com folga
   // (0 mortes em 2.500) e 125 no limite; com entradas e saídas a toda hora a
   // margem some (~80 com folga). Acima disso o desenho tem que mudar (renovar as
   // de carimbo mais antigo primeiro). O gargalo medido é a própria varredura

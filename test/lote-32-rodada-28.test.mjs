@@ -10,7 +10,7 @@ const T0 = new Date(2026, 9, 15, 12, 0, 0).getTime();
 const EU = '12444348';
 
 // R28-5-01: a lista que saiu ANTES do `abrir` e chega com ele ainda no ar não quita o "lida" devido.
-async function cenarioListaVelha(ordem) {
+async function cenarioListaVelha(ordem, pedirLista = 'atualizar') {
   const srv = { msgs: [], lidaAte: 0 };
   const calls = [];
   const pend = { lista: null, abrir: null };
@@ -49,7 +49,10 @@ async function cenarioListaVelha(ordem) {
   c.P.presencaAtualizar(); await settle(); pend.lista(); await settle();
   chega('m1'); chega('m2'); chega('m3');
   c.relogio.agora += 100; P.atualizadaEm = 0; P.tentadaEm = 0;
-  c.P.presencaAtualizar(); await settle(); const soltarLista = pend.lista;
+  // A lista velha sai por um caminho ou pelo outro: o `presencaSincronizar` (volta do fundo, «Aplicar», perfil) paga as
+  // dívidas logo depois dela (R29-1-01).
+  if (pedirLista === 'sincronizar') c.P.presencaSincronizar(); else c.P.presencaAtualizar();
+  await settle(); const soltarLista = pend.lista;
   c.relogio.agora += 100;
   c.P.presencaAbrirConversa('200'); await settle(); const soltarAbrir = pend.abrir;
   chega('m4'); await settle();
@@ -64,6 +67,13 @@ async function cenarioListaVelha(ordem) {
 
 test('R28-5-01: a lista velha que chega com o `abrir` ainda no ar NÃO quita o "lida" — a mensagem vista fica lida no Waze', async () => {
   const r = await cenarioListaVelha('lista-primeiro');
+  assert.deepEqual(r.naoLidasNoServidor, [], `ficou não lida no Waze: ${JSON.stringify(r)}`);
+  assert.equal(r.pilula, 0, `a pílula ficou em ${r.pilula}`);
+  assert.ok(r.calls.includes('lida'), `nenhum "lida" cobriu a mensagem vista: ${JSON.stringify(r.calls)}`);
+});
+
+test('R29-1-01: o mesmo, com a lista velha pedida pelo `presencaSincronizar` (que paga as dívidas logo depois dela)', async () => {
+  const r = await cenarioListaVelha('lista-primeiro', 'sincronizar');
   assert.deepEqual(r.naoLidasNoServidor, [], `ficou não lida no Waze: ${JSON.stringify(r)}`);
   assert.equal(r.pilula, 0, `a pílula ficou em ${r.pilula}`);
   assert.ok(r.calls.includes('lida'), `nenhum "lida" cobriu a mensagem vista: ${JSON.stringify(r.calls)}`);
@@ -181,4 +191,11 @@ test('R28-1-01: 32 KB de «a-a-a-…» no campo do código voltam em milissegund
 test('R28-1-01 (controle): o código no começo de um texto longo ainda é achado', () => {
   const ext = extrator();
   assert.equal(ext('Código: K7M-4QX ' + 'x '.repeat(3000)), 'K7M4QX');
+});
+
+// R29-1-03: o erro do campo do código é da tentativa de antes — digitar de novo o apaga.
+test('R29-1-03: digitar no campo do código esconde o erro («Digite o código…» não pode ficar com o campo preenchido)', () => {
+  const APP_SEM = APP.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  assert.match(APP_SEM, /const campoDoCodigo = \$\('pairCodeInput'\);\s*campoDoCodigo\?\.addEventListener\('input', \(\) => \$\('pairEnterError'\)\?\.classList\.add\('hidden'\)\);/,
+    'o campo do código não esconde o erro ao digitar');
 });
