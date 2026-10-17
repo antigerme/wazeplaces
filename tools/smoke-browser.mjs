@@ -17508,7 +17508,8 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
       `fila-gravou/${nome}: o pouso lido como "outra aba" pulou o Histórico (esperado +2 lidos e +1 rejeitado)`, JSON.stringify({ base: r.base, depois: r.depois }));
     checa(r.sem.rejeitados === r.placar3.j && r.sem.naFila === true,
       `fila-gravou/${nome}: o ✕ sem sinal, sem fila onde guardar, tem de reverter o placar e devolver o pedido ao card — não "guardá-lo" calado`, JSON.stringify({ sem: r.sem, placar3: r.placar3 }));
-    checa(/erro|não foi possível|rejeitar/i.test(r.sem.aviso), `fila-gravou/${nome}: a decisão que não saiu nem ficou guardada tem de AVISAR`, JSON.stringify(r.sem.aviso));
+    // Sem rede de verdade (`onLine` falso) a falha diz «Sem sinal», o termo do app (R28-8-04); «Erro de conexão» é com a rede de pé.
+    checa(/erro|não foi possível|rejeitar|sem sinal/i.test(r.sem.aviso), `fila-gravou/${nome}: a decisão que não saiu nem ficou guardada tem de AVISAR`, JSON.stringify(r.sem.aviso));
   }
   checa(normal.sem.rejeitados === normal.placar3.j + 1 && normal.guardados === 1,
     'fila-gravou/CONTROLE: o ✕ sem sinal do aparelho normal tem de FICAR na fila de saída (um item) com o placar mantido', JSON.stringify({ sem: normal.sem, guardados: normal.guardados, placar3: normal.placar3 }));
