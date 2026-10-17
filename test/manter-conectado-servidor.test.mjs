@@ -725,3 +725,13 @@ test('fatia da vez: as fatias têm tamanho IGUAL (±1) — o que a fatia por has
   assert.ok(Math.max(...tamanhos) - Math.min(...tamanhos) <= 1, `fatias desiguais: ${tamanhos.join(',')}`);
   assert.ok(Math.max(...tamanhos) <= 10, `uma fatia passa do alvo (${Math.max(...tamanhos)})`);
 });
+
+// ── R27-1-02: o cron do wrangler.jsonc é o intervalo que a fatia da vez supõe ─────────────────────────────
+test('o cron do wrangler.jsonc é `*/MANTER_CRON_MIN` — a fatia da vez usa o número da execução de MANTER_CRON_MIN minutos', async () => {
+  const { readFileSync } = await import('node:fs');
+  const w = readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8')
+    .split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  const m = w.match(/"crons"\s*:\s*\[\s*"([^"]+)"\s*\]/);
+  assert.ok(m, 'CONTROLE: o wrangler.jsonc não declara um cron');
+  assert.equal(m[1], `*/${MANTER_CRON_MIN} * * * *`, 'o cron do Worker não é o intervalo que a fatia supõe (MANTER_CRON_MIN)');
+});

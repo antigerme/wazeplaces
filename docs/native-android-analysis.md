@@ -31,7 +31,7 @@ Browsers proíbem JavaScript rodando em `places.wazebrasil.com` de fazer request
 
 ### Razão #2: Segurança dos cookies
 
-Cookies de sessão Waze (`_csrf_token`, `_web_session`) são credenciais de longo prazo (~28 dias). Se ficassem em `localStorage` do browser, qualquer XSS exfiltraria. Por isso encriptamos no backend (AES-256-CBC) e o client só guarda um `sessionToken` opaco — sem valor sozinho.
+Cookies de sessão Waze (`_csrf_token`, `_web_session`) são credenciais de longo prazo (~28 dias [histórico: o valor do cookie morre em ~24–26 h sem renovação]). Se ficassem em `localStorage` do browser, qualquer XSS exfiltraria. Por isso encriptamos no backend (AES-256-CBC) e o client só guarda um `sessionToken` opaco — sem valor sozinho.
 
 **Em app nativo:**
 

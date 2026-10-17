@@ -410,7 +410,8 @@ location / {
 São os TRÊS servidores do WME. A América do Norte é o servidor **sem prefixo**:
 `na-Descartes` não existe (medido em 2026-09-25: 404 em tudo). Havia uma 4ª
 opção, `world`, que era esse mesmo servidor com outro nome; quem a tinha
-escolhido passa pra `na` sozinho.
+escolhido cai em `row` (o `world` hoje é recusado com 400 no servidor), e o perfil o
+leva ao servidor onde edita.
 
 Configure pelo modal de filtros (header). No primeiro login o app já vai pro
 país onde você edita (o `editableCountryIDs` do seu perfil no WME), inclusive
@@ -450,7 +451,7 @@ A checagem de `errorList[0].code` acontece **antes** da regra `5xx → transient
 
 - **Cookies trafegam apenas no login.** Viram um `sessionToken` opaco; os cookies ficam criptografados (**AES-256-GCM**) no store (KV/filesystem).
 - **Chave de criptografia:** Secret `ENCRYPTION_KEY` no Cloudflare; env var ou arquivo `0600` na VM. Nunca commitada.
-- **Manter conectado (Preferências, ligado de fábrica):** o Waze invalida o cookie da sessão ~24 h depois se ninguém o renova, e o app só o renova quando alguém o abre. Com o interruptor ligado, o servidor renova a sessão sozinho, a cada ~10 horas, e quem abre pouco não precisa refazer o pareamento. O preço é dito na tela: sem ele o servidor não consegue abrir nada sem o seu aparelho; com ele, guarda uma chave que permite renovar a sua sessão. Desligar (ou tocar em “Sair”) apaga essa chave.
+- **Manter conectado (Preferências, ligado de fábrica):** o Waze invalida o cookie da sessão ~24 h depois se ninguém o renova, e o app só o renova quando alguém o abre. Com o interruptor ligado, o servidor renova a sessão sozinho, uma ou duas vezes por dia (quando ela passa de ~10 horas sem renovação), e quem abre pouco não precisa refazer o pareamento. O preço é dito na tela: sem ele o servidor não consegue abrir nada sem o seu aparelho; com ele, guarda uma chave que permite renovar a sua sessão. Desligar (ou tocar em “Sair”) apaga essa chave.
 - **TTL de sessão:** 21 dias **sem uso** (`SESSION_TTL` em `server/core.mjs`) — janela deslizante nos dois adaptadores: o KV renova o prazo no máximo uma vez por dia de uso; a VM, por mtime + touch. O valor do cookie do Waze morre em ~24–26 h sem renovação (por isso existe o «Manter conectado»). Quando expiram de verdade, o backend devolve 401: o app confere (um 401 pode ser alarme falso), tenta renovar pela extensão e, sem ela, volta pra tela de login — a ação que levou o 401 espera na fila de saída.
 - **Erros 500 não vazam detalhe interno** — o `dispatch` devolve mensagem genérica.
 - **CSP** em TRÊS cópias que precisam bater: o `<meta>` do `index.src.html`, o `_headers` (Cloudflare) e o `server/node.mjs` (VM). Sem `unsafe-eval` e sem `unsafe-inline` em `script-src` — o único script inline (o do tema) entra por hash, e `test/layout.test.mjs` o recalcula.

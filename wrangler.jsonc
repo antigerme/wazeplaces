@@ -33,13 +33,15 @@
   // FATIA da vez das entradas (posição na lista ordenada e hora: toda entrada é
   // visitada a cada ~10 execuções com 100 pessoas), lê no máximo 15 e renova no
   // máximo 6 devidas (carimbo com mais de 10 h): 48 × 6 = 288 renovações por dia.
-  // MEDIDO por simulação (8 dias, pessoas ausentes): ~100 pessoas com folga (0–1
-  // morte em 600), 125 no limite (0 a 1,2 %; com entradas e saídas a toda hora a
-  // margem cai); acima disso a conta não fecha no
-  // plano grátis. A cota de ESCRITA do KV (1.000/dia, dividida com o
-  // uso normal do app e com a regravação diária da entrada) aperta antes do cron.
-  // Pra mais gente: Workers Paid e subir MANTER_LOTE no módulo (conferindo as 50
-  // subrequisições por execução e a CPU), ou encurtar o cron aqui. O cron só
+  // MEDIDO por simulação (8 dias): com a lista de pessoas PARADA, ~100 com folga
+  // (0 mortes em 2.500) e 125 no limite; com entradas e saídas a toda hora a
+  // margem some (~80 com folga). Acima disso o desenho tem que mudar (renovar as
+  // de carimbo mais antigo primeiro). O gargalo medido é a própria varredura
+  // (lote de 6 no teto de 20 s); a cota de ESCRITA do KV (1.000/dia, dividida com o
+  // uso normal do app e com a regravação diária da entrada) é o limite seguinte.
+  // O cron TEM que ser `*/30` = MANTER_CRON_MIN no módulo (um teste amarra os
+  // dois; encurtar pede mudar os dois). Pra mais gente: Workers Paid, o desenho
+  // por urgência, e conferir as 50 subrequisições por execução e a CPU. O cron só
   // roda no deploy do Worker em produção, não no `wrangler dev` (use
   // `wrangler dev --test-scheduled` e chame /__scheduled).
   "triggers": { "crons": ["*/30 * * * *"] },
