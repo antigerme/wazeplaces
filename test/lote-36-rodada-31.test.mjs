@@ -44,3 +44,19 @@ test('R31-1: excluir-foto com action desconhecida responde 400 e não escreve no
     assert.equal(escritas, 1, `action ${JSON.stringify(action)} devia escrever uma vez`);
   }
 });
+
+// R31-2: o `.card-map` anuncia role="button" e está no Tab — Enter e Espaço abrem a ampliação como o toque.
+import { readFileSync } from 'node:fs';
+const APP = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+const CSS = readFileSync(new URL('../css/styles.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+test('R31-2-1: o box do mini-mapa abre pelo teclado (Enter e Espaço), sem roubar Ctrl/Meta/Alt', () => {
+  const sem = APP.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  assert.match(sem, /mapaBoxF\.addEventListener\('keydown', \(ev\) => \{\s*if \(ev\.target !== mapaBoxF \|\| \(ev\.key !== 'Enter' && ev\.key !== ' '\)\) return;\s*if \(atalhoDoNavegador\(ev\)\) return;\s*ev\.stopPropagation\(\); ev\.preventDefault\(\);\s*MapaLightbox\.open\(place\);/,
+    'o mapa do card não abre por Enter/Espaço');
+});
+
+// R31-2-2: os selos acionáveis (17 px) ganham área de toque invisível; 4 px (25 px de altura) — mais que isso cobre o chip vizinho quando quebram de linha.
+test('R31-2-2: .selo-acionavel tem área de toque de 4 px (não 14) sem mudar o desenho', () => {
+  assert.match(CSS, /\.selo-acionavel::after \{ content: ''; position: absolute; inset: -4px -2px; \}/, 'a área de toque do selo mudou');
+  assert.match(CSS, /\.selo-acionavel \{ position: relative; \}/);
+});

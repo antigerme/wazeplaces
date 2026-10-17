@@ -8,6 +8,10 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.10.17-13
+- **Teclado:** o mini-mapa do card (que se anuncia «botão» e está no Tab) agora abre com Enter e Espaço, como o toque; Ctrl/⌘/Alt continuam do navegador. A foto do card ainda não abre pelo teclado (decisão do dono: muda a Ajuda ou o foco visível).
+- **Toque:** os selos «Ver +N» e «✕ N» (17 px de altura) ganham área de toque invisível de 25 px, sem mudar o desenho. Foram medidas duas extensões: a de 14 px cobria o chip vizinho quando os selos quebram de linha no Fold, então ficou 4 px.
+
 ## v2026.10.17-12
 - **Servidor:** `excluir-foto` com `action` desconhecida (`'Preparar'`, `true`, `'prepare'`…) respondia como EXCLUSÃO e apagava a foto; agora é 400 `srv.err.badAction` (o app só manda `'preparar'` ou nada).
 - **Textos:** «sessão» no lugar de «pessoa/gente» nos últimos comentários da capacidade; o «+» do contador de pendentes (pt) sem a palavra «sinal»; números e comentários de doc conferidos (smoke de layout 5×4×7, 9 pulos do Chromium, `/#pair=`, `css/app.css`).

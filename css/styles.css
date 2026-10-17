@@ -2253,6 +2253,13 @@ button:active {
 
 .selo-acionavel:active { transform: scale(0.96); }
 
+/* O selo mede 17 px de altura (10 px de texto): o dedo erra. A área de toque cresce SEM mudar o desenho — 4 px pra
+   cima e pra baixo (25 px, o mínimo de 24 do WCAG 2.5.8) e 2 px dos lados. NÃO mais que isso: quando os selos
+   quebram de linha (Fold), os chips ficam a 21 px um do outro, e 14 px de extensão cobria o centro do chip vizinho
+   (MEDIDO na rodada 31: o toque no "Ver +N" abria a folha do "✕ N"). 4 px fica longe dos centros (R31-2-2). */
+.selo-acionavel { position: relative; }
+.selo-acionavel::after { content: ''; position: absolute; inset: -4px -2px; }
+
 /* ── Mini-mapa de evidência ────────────────────────────────────────────────
    Vive dentro do slot da foto, como mais um slide do carrossel: custo de
    altura ZERO num card que acabou de ser espremido até caber.
