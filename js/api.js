@@ -442,7 +442,8 @@ const API = {
             // um pedido por minuto se soltavam (auditoria de 2026-09-30,
             // R5-5-3). E sem `httpCode`, que é o status do WAZE pra fila de
             // saída (um 502 da borda não é o Waze recusando AQUELE pedido).
-            const falha = { success: false, error: t('api.error.connection'), errorCategory: 'transient',
+            // Sem rede de verdade (`onLine === false`) o nome é o do resto do app, «sinal» (R28-8-04); `true` não prova rede.
+            const falha = { success: false, error: t(typeof navigator !== 'undefined' && navigator.onLine === false ? 'api.error.semSinal' : 'api.error.connection'), errorCategory: 'transient',
                             ...(chegou ? {} : { _motivo: String((error && error.name) || error).slice(0, 60) }) };
             // Só registra aqui o que NÃO passou pelo `finally` do try — ou seja,
             // falha antes da resposta existir (rede, DNS, timeout). Corpo não

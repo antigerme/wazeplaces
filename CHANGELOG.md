@@ -8,6 +8,19 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.10.17-06
+
+Rodada 28, o ponta a ponta (R28-8): três defeitos pequenos que mudam o que a pessoa vê. Cada um tem teste que reprova quando o conserto é desfeito.
+
+### Corrigido
+- **«Entrar» com o campo do código vazio não vai mais ao servidor** (R28-8-03): ia uma requisição do free tier só pra dizer «Código inválido ou expirado» de um código que ninguém digitou. Agora a mensagem é local: «Digite o código que apareceu no outro aparelho.» (4 idiomas).
+- **Sem rede de verdade, a falha diz «Sem sinal»** (R28-8-04), o termo do resto do app, e não «Erro de conexão». Com `onLine` verdadeiro (que não prova rede) segue como antes.
+- **O aviso «Sua sessão no app não vale mais» some quando a pessoa entra de novo** (R28-8-05): quem derrubava a sessão e entrava por código em poucos segundos via o aviso de queda, o «Sessão conectada» e o «pedido enviado» ao mesmo tempo.
+
+### Com o dono (visual, pede mockup)
+- A Ajuda não tem «Fechar» depois de lida até o fim: o ✕ está no cabeçalho rolante, a milhares de pixels acima (R28-7-01).
+- No Fold (280 px), as categorias cruas quebram no meio do identificador (`RESIDENCE_HOM/E`, R28-8-01); e o toast «Link copiado» cobre o «Fechar» do pareamento (R28-8-02, família C14).
+
 ## v2026.10.17-05
 
 Rodada 28 da auditoria (a completa, oito áreas, sobre a v2026.10.17-04 que está no ar). Os consertos dos lotes 29 a 31 conferiram em todas as áreas; sobraram defeitos pequenos e dois textos. Cada conserto tem teste que reprova quando desfeito.

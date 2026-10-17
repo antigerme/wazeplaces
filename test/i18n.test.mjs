@@ -826,7 +826,7 @@ test('i18n: o "Disponível offline", o card de foto sem sinal e a tela sem conex
   // sem sinal (`showNoPlaces`, e o aviso do ↻ sem rede) e a mensagem da conversa
   // que não saiu por falta de rede (`presenca.recibo.naoEnviada`, lote 11): a MESMA falta.
   const DO_MESMO_QUADRO = ['card.semFoto.titulo', 'card.semFoto.desc', 'states.error.titleOffline', 'states.error.bodyOffline',
-    'presenca.recibo.naoEnviada'];
+    'presenca.recibo.naoEnviada', 'api.error.semSinal'];
   // O termo de cada língua é o que as linhas do offline já usavam (R66-5).
   const TERMO_DA_LINGUA = { pt: 'sinal', en: 'signal', es: 'señal', fr: 'réseau' };
   const termoDe = {};

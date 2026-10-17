@@ -566,7 +566,7 @@ function montarExtensao(inicio = {}) {
   const app = montar(['entrarPelaExtensao', 'negadoDaExtensao', 'tirarNegadoDaExtensao', 'mostrarNegadoDaExtensao',
     'aoEntrarNestaPagina', 'fecharModaisDaEntrada', 'focoNaTelaDeEntrada', 'textoDigitadoNaEntrada'], deps,
   ['entrarPelaExtensao', 'mostrarNegadoDaExtensao', 'estado'],
-  constante('MODAIS_DA_ENTRADA') + '\nfunction estado() { return { extNegadoNestaPagina, extNegado, saiuNestaPagina, focoDoTeclado }; }');
+  constante('MODAIS_DA_ENTRADA') + '\nlet avisoDaQueda = null;   // o aviso de queda (R28-8-05): o `aoEntrarNestaPagina` o tira da tela\nfunction estado() { return { extNegadoNestaPagina, extNegado, saiuNestaPagina, focoDoTeclado }; }');
   return { app, responder, negados };
 }
 
@@ -621,7 +621,7 @@ test('app: quem mostra a recusa — a abertura, a volta à aba (uma vez por pág
     'a volta à aba não mostra a recusa');
   const queda = fatiar('derrubarSessao');
   assert.match(queda, /const negado = tirarNegadoDaExtensao\(\);/, 'a queda ignora a recusa que a extensão repassou');
-  assert.match(queda, /if \(!negado\) showToast\(/, 'a queda avisa "sessão venceu" quando o motivo é o portão');
+  assert.match(queda, /if \(!negado\) avisoDaQueda = showToast\(/, 'a queda avisa "sessão venceu" quando o motivo é o portão (e guarda o punho do aviso, R28-8-05)');
 });
 
 test('login que DEU CERTO zera as marcas da página: depois de "Sair" e entrar de novo, a volta à aba volta a relogar', async () => {
