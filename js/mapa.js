@@ -222,6 +222,9 @@ function mapaMontar(pontos, larguraPx, alturaPx, região) {
       if (ty < 0 || ty >= nMax) continue;
       const txw = ((tx % nMax) + nMax) % nMax;
       tiles.push({
+        // O prefixo é o NOME DO APP da região: `na-tiles` existe (MEDIDO, anônimo, 2026-10-17: 200 image/png), e
+        // `usa-tiles` NÃO (404). Parece que `na` deveria ser `usa` (o `env` do Referer é `usa`), mas o servidor de
+        // tiles usa `row`, `na` e `il` (R28 A-1, refutado).
         url: `https://www.waze.com/${região || 'row'}-tiles/live/base/${z}/${txw}/${ty}/tile.png`,
         left: tx * MAPA_TILE - orig.x,
         top: ty * MAPA_TILE - orig.y,

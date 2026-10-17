@@ -8,6 +8,22 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.10.17-05
+
+Rodada 28 da auditoria (a completa, oito áreas, sobre a v2026.10.17-04 que está no ar). Os consertos dos lotes 29 a 31 conferiram em todas as áreas; sobraram defeitos pequenos e dois textos. Cada conserto tem teste que reprova quando desfeito.
+
+### Corrigido
+- **A leitura de várias páginas da fila relê uma vez do topo se uma decisão pousou no meio dela** (R28-2-01). O Waze calcula cada página sobre a lista do momento: uma decisão depois da página 1 e antes da 2 fazia os do topo da 2 subirem pra 1 (já lida) e nunca entrarem na fila, e a busca acabava em «Tudo limpo!» com pedido pendente. Alcance estreito (fila de mais de 500 e a ordem por distância trocada no meio da triagem), mas calado. Custo zero quando nada pousou; uma releitura quando algo pousou.
+- **Conversa: a lista velha não quita mais o «lida» com o `abrir` ainda no ar** (R28-5-01): a mensagem vista no meio ficava não lida no Waze e quem mandou nunca via «Lida». **«Ver mensagens anteriores» não volta** depois de a conversa inteira já ter sido carregada (R28-5-02). **O anúncio da mensagem de outra pessoa, com a conversa aberta, respeita o teto de 4 s** (R28-5-03).
+- **Colar texto enorme sem espaço no campo do código não trava mais a aba** (R28-1-01): o extrator tinha uma expressão quadrática (32 KB de «a-a-a…» levavam ~3 s); o texto é cortado em 4.000 caracteres.
+- **A linha do «Manter conectado» nas Preferências diz «uma ou duas vezes por dia»** nos 4 idiomas (R28-1-02, R28-6-02), como o README e a Ajuda.
+- **O Cron do Worker avisa no log** quando falta a `ENCRYPTION_KEY` ou ela é inválida (R28-6-05): antes saía calado, e na prova de produção seria indistinguível de «o Cron não disparou». Só texto fixo, nada da chave.
+- **Testes**: o R6-1-10 da extensão não depende mais de um relógio de 30 ms (instável sob carga, R28-6-01); a faixa do jitter do servidor é amarrada à do `tools/waze-jitter.mjs` (R28-6-04); o `diag-resumo` não imprime `undefined` em captura montada à mão.
+
+### Medido e refutado (nada a mudar)
+- **`na-tiles` existe** (200 `image/png`; `usa-tiles` é 404): o mapa dos EUA e do Canadá está certo (R28 A-1). A medição está no `docs/waze-api.md` pra ninguém «consertar».
+- **O 403 JSON do Waze não traz `Set-Cookie`** (hipótese R28-1): não há como ele trocar o cookie de uma sessão viva por um de visitante.
+
 ## v2026.10.17-04
 
 Rodada 27 da auditoria (convergência, sobre a v2026.10.17-03 que está no ar). Os consertos do lote 30 conferiram (cada um com sabotagem que reprova); sobraram prazos escritos de forma diferente em telas diferentes e promessas de capacidade um pouco otimistas.

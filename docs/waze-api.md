@@ -382,6 +382,10 @@ staff, e os crachás são reconhecimento de comunidade, não permissão.
   serve pinos, não lista. Não nos serve `[HAR]`.
 - **Tiles**: o WME usa `row-tiles/editor/roads/`; nosso mini-mapa usa
   `live/base` de propósito (gotcha #51) `[HAR]`.
+  **O prefixo do servidor de tiles é o nome do app da região — `row`, `na`, `il` — e NÃO o `usa` do `env`**
+  `[vivo]`: tile anônimo no mesmo ponto da Carolina do Sul, 2026-10-17: `na-tiles/live/base/17/36000/52000/tile.png`
+  → 200 `image/png`; `usa-tiles/…` → 404 `text/html`; `il-tiles` → 200; `row-tiles` (Rio) → 200. Já foi levantado como
+  hipótese («`na-tiles` não existe, deveria ser `usa-tiles`», R28 A-1) e refutado medindo: não «conserte».
 - **Telemetria**: o WME reporta em `/Descartes/otlp-traces` (OpenTelemetry) e
   `/web-events`. 37 requisições de telemetria numa sessão curta — contexto útil
   pra lembrar que o nosso free tier não tem essa folga `[HAR]`.

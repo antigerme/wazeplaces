@@ -998,7 +998,7 @@ test('R6-1-10: o app que pergunta ANTES de a ponte ler o chrome.storage também 
   await bg.pedir({ action: 'abrirPlaces' });
   const aba = abaDoApp();
   // O chrome.storage demora (30 ms) e o app pergunta já: a pergunta chega antes.
-  const ponte = rodarPonte(aba, { pendente: bg.guardado.token_pendente, atrasoDaLeitura: 30 });
+  const ponte = rodarPonte(aba, { pendente: bg.guardado.token_pendente, atrasoDaLeitura: 400 });
   const app = rodarApp(aba);
   assert.equal(await app.abrir(), 'extensão');
   assert.equal(aba.perguntouAntesDaLeitura, true, 'CONTROLE: a pergunta não chegou antes da leitura — o teste não mede a ordem');
