@@ -122,7 +122,7 @@ jobs:
           fi
 
       - name: Smoke de browser (o que guard de texto não pega)
-        # Renderiza o card em 3 aparelhos × 3 idiomas × 3 tipos e MEDE. Os guards
+        # Renderiza o card em 5 aparelhos × 4 idiomas × 7 tipos e MEDE. Os guards
         # de test/layout.test.mjs conferem o código e já falharam duas vezes em
         # silêncio; este pega rolagem dupla, alvo de toque encolhido, estouro
         # horizontal e português vazando fora do pt.

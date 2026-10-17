@@ -5,7 +5,7 @@
 // caracteres. Cada tela virava um manual do aparelho que não está na sua frente.
 // Ninguém precisa ser ensinado a apontar a câmera pra um QR.
 //
-// O link `?pair=CÓDIGO` já existia e já entra direto — isto aqui é só a camada
+// O link `/#pair=CÓDIGO` já existia e já entra direto — isto aqui é só a camada
 // de apresentação dele.
 //
 // Escopo deliberadamente estreito, porque o conteúdo é sempre a MESMA forma de

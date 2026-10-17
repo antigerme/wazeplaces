@@ -397,7 +397,7 @@ test('varredura: sem `list` no store não faz nada (e não lança); com `listar`
   } finally { c.amb.restaurar(); }
 });
 
-test('varredura: o orçamento de operações de KV cabe nas 50 do plano grátis — mesmo com muita gente mantida', async () => {
+test('varredura: o orçamento de operações de KV cabe nas 50 do plano grátis — mesmo com muitas sessões mantidas', async () => {
   const c = await cenario();
   try {
     for (let i = 0; i < 40; i++) { const t = await c.novo(`S${i}`); await c.sessions.manterLigar(t, 'row'); }
@@ -599,7 +599,7 @@ test('constantes: a conta de capacidade do módulo (14 dias, 1 dia, 10 h, lote 6
 });
 
 // ── R25-6-01: a fatia da vez cobre TODAS as entradas, sem estado ──────────────────────────────────────────
-test('fatia da vez: em K execuções seguidas toda entrada é visitada exatamente uma vez (125 pessoas, sem sorteio)', () => {
+test('fatia da vez: em K execuções seguidas toda entrada é visitada exatamente uma vez (125 sessões, sem sorteio)', () => {
   const hex = (i) => [...new Uint8Array(32)].map((_, j) => ((i * 2654435761 + j * 40503) >>> 0).toString(16).padStart(2, '0').slice(-2)).join('');
   const chaves = Array.from({ length: 125 }, (_, i) => KA_PREFIXO + hex(i));
   const k = Math.ceil(chaves.length / MANTER_ALVO_DA_FATIA);

@@ -1,4 +1,4 @@
-// i18n leve (sem lib) — dicionário pt/en/es + t(key, vars) + applyI18n().
+// i18n leve (sem lib) — dicionário pt/en/es/fr + t(key, vars) + applyI18n().
 // [data-i18n]→textContent, [data-i18n-html]→innerHTML (SÓ valores do próprio
 // dicionário, nunca dado da rede), [data-i18n-ph]→placeholder,
 // [data-i18n-aria]→aria-label, [data-i18n-title]→title, [data-i18n-alt]→alt.
@@ -156,7 +156,7 @@ const I18N_DICT = {
     'stats.pending.ofRegion': 'de {total} na região',
     'stats.pending.ofRegion.title': '{blocked} pedidos da região não aparecem na fila porque você não tem permissão de edição neles. Trate-os pelo WME.',
     'stats.pending.ofRegion.titleUm': '{blocked} pedido da região não aparece na fila porque você não tem permissão de edição nele. Trate-o pelo WME.',
-    'stats.pending.title': 'Restam na fila (carregados localmente). Sinal + significa que há mais páginas a buscar',
+    'stats.pending.title': 'Restam na fila (carregados localmente). O + significa que há mais páginas a buscar',
     'sessao.vence.hoje': '⏳ Sua sessão vence hoje · renove num computador',
     'sessao.vence.amanha': '⏳ Sua sessão vence amanhã · renove num computador',
     'sessao.vence.diasPlural': '⏳ Sua sessão vence em {n} dias · renove num computador',

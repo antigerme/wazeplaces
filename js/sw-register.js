@@ -18,7 +18,7 @@
             if (window.showToast) {
                 // Pelo dicionário: `toast.newVersion` já existia nas três línguas
                 // e ninguém usava — este literal falava português com todo mundo.
-                // Este <script> é inline, então a auditoria de i18n não o varre;
+                // Este <script> é externo e fica fora do dicionário, então a auditoria de i18n não o varre;
                 // por isso passou batido. O fallback cobre o caso de o i18n.js
                 // não ter carregado (o toast é melhor que silêncio).
                 window.showToast(
