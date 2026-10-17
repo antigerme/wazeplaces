@@ -1109,6 +1109,10 @@ export function makeSessions({ store, keyBytes }) {
       }
       const blob = await encryptCookies(JSON.stringify({ token, region: regiao }), await derivarChave(keyBytes, MANTER_SALT));
       await store.put(chave, agora + '|' + blob, KA_TTL);
+      // O `perfil` em voo quando a pessoa tocou em «Sair» chega DEPOIS do apagamento e recriaria a entrada de uma sessão que já
+      // não existe (token cifrado só com o Secret, até a próxima varredura). Confere de novo e desfaz (R25-1-06): +1 leitura,
+      // só quando há escrita (no máximo uma por dia por pessoa).
+      if ((await store.get(hash)) == null) { try { await store.delete(chave); } catch { /* a varredura apaga */ } return false; }
       return true;
     },
     // Lê antes de apagar (a cota de apagamento do KV é a curta). Devolve `false`.
@@ -3376,13 +3380,15 @@ async function handlePerfil(data, { sessions }) {
   // Waze e do portão: sessão recusada já foi apagada (e a entrada junto). Nunca
   // derruba o perfil: o app abre mesmo com o KV de mau humor. A resposta traz o
   // estado REAL depois da mudança.
-  let manterConectado = false;
+  // `null` = «não sei» (o KV falhou ou o store não tem o recurso): o cliente só segue um BOOLEANO, e um
+  // `false` mentido desligava o interruptor do aparelho de vez com o KV de mau humor (R25-6-02).
+  let manterConectado = null;
   if (typeof sessions.manterEstado === 'function') {
     try {
       if (data.manter === true) manterConectado = await sessions.manterLigar(data.sessionToken, region);
       else if (data.manter === false) manterConectado = await sessions.manterDesligar(data.sessionToken);
       else manterConectado = await sessions.manterEstado(data.sessionToken);
-    } catch { manterConectado = false; }
+    } catch { manterConectado = null; }
   }
 
   return {
@@ -4122,7 +4128,14 @@ async function renovarNoWaze({ token, region, cookies, sessions }) {
     { data: { sessionToken: token }, sessions, cookies }, { tetoMs: MANTER_ESPERA_WAZE_MS });
   if (r.httpCode === 200) return { resultado: 'ok', rotacionou: aplicarCookiesRotacionados(cookies, r.setCookie) != null };
   const cat = categorizeWazeError(r.httpCode, r.response, r.error);
-  return { resultado: cat.category === 'unauthorized' ? 'morta' : 'falhou' };
+  // 401/403 só vale como «sessão morta» quando o CORPO é do Waze (JSON com `errorList`). O 403 de uma barreira da borda
+  // (HTML «Attention Required!», WAF) dura minutos e é de todo mundo: tratá-lo como sessão morta apagava até 6 entradas
+  // por execução (R25-6-03). Qualquer outro corpo vira «falhou» e a entrada fica pra próxima execução.
+  return { resultado: cat.category === 'unauthorized' && corpoEhDoWaze(r.response) ? 'morta' : 'falhou' };
+}
+
+function corpoEhDoWaze(texto) {
+  try { const o = JSON.parse(String(texto || '')); return !!o && typeof o === 'object' && Array.isArray(o.errorList); } catch { return false; }
 }
 
 // `sessions`: a VM passa a instância do processo (a memória dos carimbos é dela);

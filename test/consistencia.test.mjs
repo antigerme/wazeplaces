@@ -632,19 +632,22 @@ test('prazos citados na tela (dias da sessão, minutos do código) == os do serv
   };
   const core = read('server/core.mjs');
   const dias = valorDe(APP, 'SESSAO_DIAS_EXIBIDO'), min = valorDe(APP, 'PAREAR_MIN_EXIBIDO');
+  const manterDias = valorDe(APP, 'MANTER_DIAS_EXIBIDO');
+  assert.equal(manterDias * 86400, valorDe(read('server/manter-conectado.mjs'), 'KA_TTL'), `a tela diz ${manterDias} dias e a chave do «Manter conectado» vale outro prazo`);
   assert.equal(dias * 86400, valorDe(core, 'SESSION_TTL'), `a tela diz ${dias} dias e o servidor guarda a sessão por outro prazo`);
   assert.equal(min * 60, valorDe(core, 'PAIR_TTL'), `a tela diz ${min} minutos e o código de pareamento vale outro prazo`);
   // As frases estão no plural ("dias", "minutos"), e o projeto não tem ICU: com
   // 1, sairia "1 dias". Se um prazo virar 1, é hora de chave singular.
   assert.ok(dias > 1 && min > 1, 'um dos prazos virou 1 — as frases são plurais');
   // Registrados como FUNÇÃO (reavaliada a cada t()), a partir das constantes.
-  assert.match(APP, /setI18nVars\(\{\s*sessaoDias: \(\) => SESSAO_DIAS_EXIBIDO, parearMin: \(\) => PAREAR_MIN_EXIBIDO \}\)/,
-    'os prazos não estão registrados em setI18nVars — o {sessaoDias}/{parearMin} vazaria cru pra tela');
+  assert.match(APP, /setI18nVars\(\{\s*sessaoDias: \(\) => SESSAO_DIAS_EXIBIDO, parearMin: \(\) => PAREAR_MIN_EXIBIDO, manterDias: \(\) => MANTER_DIAS_EXIBIDO \}\)/,
+    'os prazos não estão registrados em setI18nVars — o {sessaoDias}/{parearMin}/{manterDias} vazaria cru pra tela');
   // Nenhuma frase escreve o número à mão, e as que citam os prazos usam as variáveis.
   const valores = (chave) => [...I18N.matchAll(new RegExp(`'${chave.replace(/\./g, '\\.')}':\\s*'((?:[^'\\\\\\n]|\\\\.)*)'`, 'g'))].map((m) => m[1]);
   const USAM = {
     sessaoDias: ['auth.securityNote', 'help.security.body', 'help.privacy.retention', 'toast.logoutServerFailed', 'diag.leiame'],
     parearMin: ['help.privacy.zeroKnowledge', 'help.privacy.retention'],
+    manterDias: ['help.privacy.retention', 'toast.logoutServerFailed'],
   };
   for (const [v, chaves] of Object.entries(USAM)) {
     for (const chave of chaves) {
@@ -658,7 +661,7 @@ test('prazos citados na tela (dias da sessão, minutos do código) == os do serv
   const leia = APP.slice(APP.indexOf('_leia_isto:'), APP.indexOf('_versaoDoDiag:'));
   assert.ok(leia.length > 100, 'CONTROLE: o recorte do _leia_isto quebrou');
   assert.match(leia, /\+ SESSAO_DIAS_EXIBIDO \+/, 'o aviso do diagnostico.json não diz o prazo, ou o escreve à mão');
-  const aMao = [...I18N.matchAll(new RegExp(`\\b(${dias}\\s*(?:dias|days|días|jours)|${min}\\s*(?:minutos|minutes))\\b`, 'g'))].map((m) => m[1]);
+  const aMao = [...I18N.matchAll(new RegExp(`\\b(${dias}\\s*(?:dias|days|días|jours)|${min}\\s*(?:minutos|minutes)|${manterDias}\\s*(?:dias|days|días|jours))\\b`, 'g'))].map((m) => m[1]);
   assert.deepEqual(aMao, [], 'prazo do servidor escrito à mão no dicionário');
 });
 

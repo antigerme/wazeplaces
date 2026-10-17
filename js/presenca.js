@@ -2954,14 +2954,26 @@ function presencaTentarDeNovo() {
 async function presencaTentarEmSerie(id, h) {
     if (Presenca.emSerie.has(id)) return;
     const epoca = Presenca.epoca;
+    // A sessão do COMEÇO da série: a renovação pela extensão troca o token SEM subir a época (a presença espera o perfil), e a
+    // 2ª mensagem sairia pela sessão NOVA com `de: null`, que pode ser de outra conta (R25-5-01). Entre uma e outra, sem o id
+    // do perfil ou com outra sessão, a série PARA; as demais seguem «Não enviadas», com o botão.
+    const sessao = presencaSessaoAgora();
     Presenca.emSerie.add(id);
     try {
         for (const m of h.msgs.filter((x) => x.meu && x.estado === 'falhou')) {
             if (Presenca.epoca !== epoca || m.estado !== 'falhou' || !h.msgs.includes(m)) continue;
+            if (!presencaEu() || presencaSessaoAgora() !== sessao) break;
             await presencaMandar(id, m);
             if (Presenca.epoca !== epoca || m.estado === 'falhou') break;
         }
-    } finally { if (Presenca.epoca === epoca) Presenca.emSerie.delete(id); }
+    } finally {
+        if (Presenca.epoca === epoca) {
+            Presenca.emSerie.delete(id);
+            // O botão fica escondido enquanto a série corre (o toque cairia no `emSerie` calado, R25-5-02): ao acabar, a
+            // conversa se desenha de novo para ele voltar nas que seguem «Não enviadas».
+            if (Presenca.aberta === id) presencaRenderConversa();
+        }
+    }
 }
 
 // Prende o pedido ABERTO à barra. Não manda ainda: a tirinha existe justamente
@@ -3211,7 +3223,13 @@ function presencaAnunciarNaPilula(ligado, naoLidas) {
     if (base === null) return;
     if (naoLidas < base || naoLidas === 0) {
         // Leu, ou a lista trouxe menos: a frase a caminho já não vale.
-        if (naoLidas === 0) { Presenca.pilulaPendente = false; clearTimeout(Presenca.timers.pilula); Presenca.timers.pilula = null; }
+        if (naoLidas === 0) {
+            Presenca.pilulaPendente = false; clearTimeout(Presenca.timers.pilula); Presenca.timers.pilula = null;
+            // Leu: a região viva não segue dizendo «1 mensagem nova» (R25-5-04).
+            clearTimeout(Presenca.timers.pilulaDeNovo); Presenca.timers.pilulaDeNovo = null;
+            const velha = document.getElementById('presencaAnuncioPilula');
+            if (velha) velha.textContent = '';
+        }
         return;
     }
     if (naoLidas === base) return;
@@ -3229,8 +3247,14 @@ function presencaDizerNaPilula() {
     Presenca.pilulaPendente = false;
     const el = document.getElementById('presencaAnuncioPilula');
     const n = presencaNaoLidasTotal();
-    // Conversa aberta: o `#conversaAnuncio` fala; fora da vista da pessoa, nada a dizer.
-    if (!el || n === 0 || Presenca.aberta || !presencaLigada() || !AppState.authenticated) return;
+    // Conversa aberta: a região da pílula fica fora do modal e calaria, e a mensagem de OUTRA pessoa não era dita por região
+    // nenhuma (R25-5-03). Quem fala é o `#conversaAnuncio`, só com a contagem.
+    if (Presenca.aberta) {
+        const dentro = document.getElementById('conversaAnuncio');
+        if (dentro && n > 0 && presencaLigada() && AppState.authenticated) dentro.textContent = presencaRotuloNaoLidas(n);
+        return;
+    }
+    if (!el || n === 0 || !presencaLigada() || !AppState.authenticated) return;
     const frase = presencaRotuloNaoLidas(n);
     Presenca.pilulaDitaEm = Date.now();
     clearTimeout(Presenca.timers.pilulaDeNovo);
@@ -3499,7 +3523,9 @@ function presencaHtmlDasMsgs(id, h) {
             // A frase vem da mesma função que a diz ao leitor de tela
             // (`presencaAnunciarFalhaDoEnvio`, R11-5-03).
             const frase = presencaFraseDaFalha(m);
-            html += `<p class="conversa-falhou">${escapeHtml(frase)} <button type="button" class="conversa-reenviar">${escapeHtml(t('presenca.conversa.tentar'))}</button></p>`;
+            // Sem o botão enquanto a série corre: o toque nele não faria nada nem diria nada (R25-5-02).
+            const botao = Presenca.emSerie.has(id) ? '' : ` <button type="button" class="conversa-reenviar">${escapeHtml(t('presenca.conversa.tentar'))}</button>`;
+            html += `<p class="conversa-falhou">${escapeHtml(frase)}${botao}</p>`;
         } else if (i === ultimaLida) {
             html += `<p class="conversa-lida">${escapeHtml(t('presenca.recibo.lida'))}</p>`;
         }

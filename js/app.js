@@ -77,8 +77,10 @@ if (typeof setI18nVars === 'function') {
 // plural ("dias", "minutos"): o mesmo teste cobra que os dois passem de 1.
 const SESSAO_DIAS_EXIBIDO = 21;
 const PAREAR_MIN_EXIBIDO = 5;
+// Espelha o `KA_TTL` do servidor (`server/manter-conectado.mjs`): quanto a chave do «Manter conectado» vale sem o app ser aberto.
+const MANTER_DIAS_EXIBIDO = 14;
 if (typeof setI18nVars === 'function') {
-    setI18nVars({ sessaoDias: () => SESSAO_DIAS_EXIBIDO, parearMin: () => PAREAR_MIN_EXIBIDO });
+    setI18nVars({ sessaoDias: () => SESSAO_DIAS_EXIBIDO, parearMin: () => PAREAR_MIN_EXIBIDO, manterDias: () => MANTER_DIAS_EXIBIDO });
 }
 // O outro prazo do servidor que a Ajuda cita: a lista de fotos da lixeira sai
 // do servidor 1 minuto depois da ÚLTIMA gravação dela (`RELEITURA_TTL_STORE`,
@@ -2073,6 +2075,11 @@ function switchFilterTab(tabId) {
         if (selected && mudou) {
             const caixa = $(panel).parentElement;
             if (caixa) caixa.scrollTop = 0;
+            // Nas janelas do degrau (zoom 300–500%, Fold com texto grande) o corpo não rola mais — quem rola é o CARTÃO
+            // (`#filtersModal > div > .overflow-y-auto { overflow: visible }`), e a aba nova abria rolada, com as abas
+            // fora da tela (R25-7-01, regressão do lote 28). Zera os dois.
+            const cartao = caixa && caixa.parentElement;
+            if (cartao) cartao.scrollTop = 0;
         }
     });
     // Abrir a aba Histórico apaga o selo (decisão do owner). Fica AQUI e não no
@@ -23159,7 +23166,12 @@ function tirarDaFilaDeSaida(tipo, place) {
 function marcarNaSaida(item, campos) {
     const f = carregarFilaDeSaida();
     const k = chaveDoItemDaSaida(item);
-    const iguais = f.filter((x) => x && x.t === item.t && x.tipo === item.tipo && chaveDoItemDaSaida(x) === k);
+    // Quem chama sem o `t` (o 401 de um item que o `handleActionResult` já viu na fila) acha pelo PEDIDO: tipo + os dois ids.
+    // Com a impressão digital completa do lote 28 ele nunca casava e o `u401` não era gravado (R25-4-01).
+    const porPedido = item.t === undefined;
+    const iguais = f.filter((x) => x && x.tipo === item.tipo && (porPedido
+        ? (x.venueID === item.venueID && x.updateRequestID === item.updateRequestID)
+        : (x.t === item.t && chaveDoItemDaSaida(x) === k)));
     if (!iguais.length) return false;
     for (const it of iguais) Object.assign(it, campos);
     salvarFilaSemOs(f, [], [{ item: iguais[0], campos }]);
@@ -23664,7 +23676,9 @@ function chaveDoItemDaSaida(x) {
     if (!x || typeof x !== 'object') return '#' + String(x);
     const c = {};
     for (const k of Object.keys(x)) {
-        if (k !== 'tt' && k !== 'tf' && k !== 'u401' && k !== 'rv' && k !== 'rvEm') c[k] = x[k];
+        // `conta` entra depois, quando o perfil chega (`carimbarContaNaSaida`): com ela na impressão digital o item de ANTES e o de DEPOIS
+        // deixavam de ser o mesmo, a decisão no ar saía 2× e o `tt` do 5xx se perdia (R25-4-02).
+        if (k !== 'tt' && k !== 'tf' && k !== 'u401' && k !== 'rv' && k !== 'rvEm' && k !== 'conta') c[k] = x[k];
     }
     try { return JSON.stringify(c); } catch (e) { return '#' + Object.keys(c).join(','); }
 }
@@ -30444,6 +30458,8 @@ async function aoMudarManterConectado(ligar) {
         : typeof AppState.manterDoServidor === 'boolean' ? AppState.manterDoServidor : antes;
     if (real !== null) AppState.manterDoServidor = real;
     dfato('manter.falhou', { queria: ligar, volta, categoria: (r && r.errorCategory) || 'semResposta' });
+    // 401 do gesto não é «falha do interruptor»: confere a sessão como as outras rotas (R25-7-08).
+    if (r && r.errorCategory === 'unauthorized') { try { handleUnauthorized(); } catch (e) { /* a conferência é melhor-esforço */ } }
     if (volta === ligar) return;   // o servidor já está como a pessoa pediu: nada a desfazer
     AppState.preferences.manterConectado = volta;
     savePreferences();

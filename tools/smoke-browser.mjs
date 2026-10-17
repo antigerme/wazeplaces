@@ -17708,6 +17708,11 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, serviceWorkers: 'block', locale: 'pt-BR' });
     const contagem = new Map();
     const resolvidos = new Set();
+    // A ORDEM que o cenário descreve — «a busca acabou de chegar» com o perfil JÁ conhecido: a recusa só roda com a conta
+    // confirmada, e o card que já está na tela fica de fora de propósito. Com `perfil` e `buscar-places` respondendo ao mesmo
+    // tempo, num runner lento a busca podia chegar ANTES do perfil, o `uRA0` virava o card da tela e escapava (o CI do #278
+    // reprovou aqui uma vez; 0 em 12 com a CPU saturada, aqui). A busca agora espera o perfil responder.
+    let perfilRespondeu; const perfilPronto = new Promise((ok) => { perfilRespondeu = ok; });
     const pedidos = Array.from({ length: 10 }, (_, i) => ({ ...CARDS.FLAG, venueID: 'vRA' + i, updateRequestID: 'uRA' + i,
       creatorId: i % 3 === 0 ? 9000 : 9100 + i, createdBy: i % 3 === 0 ? 'repetente' : 'autor' + i, imageUrls: [] }));
     await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
@@ -17726,12 +17731,15 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
       } else if (nome === 'perfil') {
         resp = { success: true, profile: { id: 7, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false, editableCountryIDs: [30], areas: [], managedAreas: [] }, visivelNoWme: true, referencias: null };
       } else if (nome === 'buscar-places') {
+        await Promise.race([perfilPronto, dormir(5000)]);
+        await dormir(60);                    // o app aplica o perfil antes de a busca pousar
         const lista = pedidos.filter((p) => !resolvidos.has(p.updateRequestID));
         resp = { success: true, places: lista, hasMore: false, page: 1, total: lista.length, totalAll: lista.length, blocked: 0 };
       } else if (nome === 'presenca-app') resp = { success: true, online: [], conversas: [] };
       else if (nome === 'lista-paises') resp = { success: true, countries: [] };
       else if (nome === 'lista-estados') resp = { success: true, states: [] };
       await r.fulfill({ status, contentType: 'application/json', body: JSON.stringify(resp) }).catch(() => {});
+      if (nome === 'perfil') perfilRespondeu();
     });
     await ctx.addInitScript(([sem]) => {
       try {

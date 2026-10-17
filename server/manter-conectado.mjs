@@ -48,11 +48,18 @@
 //                + por sessão RENOVADA (até `lote` = 6): 1 leitura da entrada,
 //                  1 `fetch` ao Waze, 1 leitura + 1 gravação do `refreshCookies`
 //                + 1 `fetch` de confirmação por sessão que levou 401/403
-//                = 1 + 15 + 6×5 = 46 no pior caso — sob o teto de 50. Escrita:
-//                no máximo 6 por execução (a da sessão).
+//                = 1 + 15 + 6×5 = 46 no pior caso — sob o teto de 50 —, MAIS 1 apagamento
+//                por entrada morta/vencida vista na frente (medido: 9 mortas na frente
+//                de 6 devidas com 403 e depois 200 = 53–55 operações; a que passa de 50
+//                lança dentro de um `try` e vira «adiada», sem perda). Se as operações
+//                de KV de fato contam nas 50 é premissa NÃO verificada no Cloudflare.
+//                Escrita: no máximo 6 por execução (a da sessão) + a regravação diária
+//                da entrada de quem abre o app (`manterLigar`).
 //   por dia:       cron de 30 min = 48 execuções × 6 = 288 renovações no teto.
-//                Cada sessão mantida é renovada a cada ~10,5 h (10 h devida + até
-//                30 min de espera da próxima execução) = ~2,3 gravações por dia,
+//                Cada sessão mantida é VISITADA a cada K execuções (a fatia da vez, K =
+//                ceil(n / 10): 13 com 125 pessoas = 6,5 h) e renovada na visita em que
+//                está devida (10 h): intervalo medido de 12,5 h com 125 pessoas, ~2
+//                gravações por dia,
 //                então 288 renovações/dia cobrem ~125 pessoas — e o teto REAL é a
 //                cota de ESCRITA do KV (1.000/dia, compartilhada com o app): ~430
 //                pessoas sozinhas, bem menos com o uso normal somado. O prazo de
@@ -93,6 +100,35 @@ export function pausaPadrao() {
   return new Promise((ok) => setTimeout(ok, ms));
 }
 
+// A FATIA DA VEZ (R25-6-01). O sorteio puro de `examinar` entradas por execução deixava sessões
+// devidas sem ser vistas: com mais de ~15 entradas `ka_`, a chance de uma entrada ficar 28
+// execuções (a janela entre «devida» em 10 h e «morta» em ~24 h) sem sorteio cresce com o TOTAL
+// de entradas — MEDIDO por simulação do cron de 30 min por 8 dias: 100 pessoas ausentes → 9 %
+// com intervalo > 24 h; 125 → 23 %; 200 → 77 %. Agora cada execução olha a fatia `hash % K` da
+// lista, com `K = ceil(n / ALVO_DA_FATIA)` e a fatia escolhida pela HORA (`execução % K`): toda
+// entrada é visitada a cada K execuções (K = 13 → 6,5 h com 125 pessoas), sem estado e sem
+// escrita extra. O hash vem da própria chave (`ka_<sha256>`), então a fatia de uma entrada não
+// muda quando outra entra ou sai; dentro da fatia ainda se embaralha (a fatia que passa de
+// `examinar` não corta sempre as mesmas).
+export const MANTER_ALVO_DA_FATIA = 10;       // entradas por execução, em média (o teto é `examinar` = 15)
+
+function hashDaChave(chave) {
+  const hex = chave.slice(KA_PREFIXO.length, KA_PREFIXO.length + 8);
+  const n = parseInt(hex, 16);
+  if (Number.isFinite(n)) return n;
+  let h = 2166136261;                       // FNV-1a, para a chave que não é hexadecimal
+  for (let i = 0; i < chave.length; i++) { h ^= chave.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  return h >>> 0;
+}
+
+export function fatiaDaVez(chaves, agoraSeg, { alvo = MANTER_ALVO_DA_FATIA, cronMin = MANTER_CRON_MIN } = {}) {
+  const k = Math.max(1, Math.ceil(chaves.length / Math.max(1, alvo)));
+  if (k === 1) return [...chaves];
+  const execucao = Math.floor(agoraSeg / (cronMin * 60));
+  const fatia = execucao % k;
+  return chaves.filter((c) => hashDaChave(c) % k === fatia);
+}
+
 function embaralharPadrao(lista) {
   const a = [...lista];
   for (let i = a.length - 1; i > 0; i--) {
@@ -131,7 +167,7 @@ export async function varrerMantidos({
   devidoApos = MANTER_DEVIDO_APOS,
   tetoMs = MANTER_TETO_MS,
   pausa = pausaPadrao,
-  embaralhar = embaralharPadrao,
+  embaralhar = null,
 } = {}) {
   const resumo = { vistas: 0, renovadas: 0, mortas: 0, adiadas: 0, emDia: 0, semRotacao: 0, expiradas: 0, confirmadas: 0 };
   const lista = typeof listar === 'function' ? listar : (store && typeof store.list === 'function' ? (p) => store.list(p) : null);
@@ -140,7 +176,9 @@ export async function varrerMantidos({
   let chaves;
   try { chaves = await lista(KA_PREFIXO); } catch { return resumo; }
   if (!Array.isArray(chaves)) return resumo;
-  chaves = embaralhar(chaves.filter((c) => typeof c === 'string' && c.startsWith(KA_PREFIXO) && c.length > KA_PREFIXO.length));
+  chaves = chaves.filter((c) => typeof c === 'string' && c.startsWith(KA_PREFIXO) && c.length > KA_PREFIXO.length);
+  // Quem injeta `embaralhar` (os testes, que querem a ordem na mão) leva a lista inteira; o padrão olha a FATIA da vez.
+  chaves = embaralhar ? embaralhar(chaves) : embaralharPadrao(fatiaDaVez(chaves, agora()));
 
   const inicio = relogio();
   let renovando = 0;      // sessões que foram ao Waze nesta execução

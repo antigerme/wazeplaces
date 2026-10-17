@@ -833,6 +833,7 @@ function variaveisDaTela() {
     nivelMinimo: String(num('NIVEL_MINIMO_EXIBIDO')),
     sessaoDias: String(num('SESSAO_DIAS_EXIBIDO')),
     parearMin: String(num('PAREAR_MIN_EXIBIDO')),
+    manterDias: String(num('MANTER_DIAS_EXIBIDO')),
     listaFotosMin: String(num('LISTA_FOTOS_MIN_EXIBIDO')),
   };
 }

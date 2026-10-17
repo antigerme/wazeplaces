@@ -649,7 +649,9 @@ const API = {
         // Só vai quando a preferência está DEFINIDA (o `app.js` devolve
         // `undefined` antes de ler o aparelho) e como booleano ESTRITO.
         const manter = typeof manterConectadoParaOServidor === 'function' ? manterConectadoParaOServidor() : undefined;
-        if (typeof manter === 'boolean') corpo.manter = manter;
+        // Só o `perfil` da região da FILA liga/desliga: a sonda de outro servidor (o país do perfil, o "Minha área") não pode
+        // mover a região da entrada guardada no servidor, que custa uma escrita de KV por troca (R25-6-04).
+        if (typeof manter === 'boolean' && (!regiao || regiao === this.getRegion())) corpo.manter = manter;
         const r = await this._post('perfil', corpo);
         // O que ESTE pedido mandou, pra quem lê a resposta saber a que ela responde:
         // se a pessoa trocou o interruptor depois, a resposta é velha.
