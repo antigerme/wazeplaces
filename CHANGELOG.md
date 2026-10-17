@@ -8,6 +8,31 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.10.17-02
+
+Rodada 25 da auditoria (a de fechamento: oito auditores, a versão que está no ar, com o «Manter conectado» e o lote 28). Nada muda de aparência no uso normal; cada conserto tem teste que reprova quando ele é desfeito.
+
+### Corrigido
+
+**«Manter conectado»**
+- **A varredura agora cobre TODAS as pessoas que ligaram a opção.** Antes, cada rodada sorteava 15 entradas, e com mais de ~15 pessoas algumas sessões passavam de 24 h sem ser renovadas (medido por simulação do Cron de 30 min por 8 dias: com 100 pessoas, 9 % delas; com 125, 23 %). Agora cada rodada olha uma fatia fixa, escolhida pela chave e pela hora: com 125 pessoas, 0 % passam de 24 h (o maior intervalo medido foi 12,5 h). Acima de ~125 pessoas a conta não fecha no plano grátis do Cloudflare (a saída é o plano pago).
+- **Uma falha passageira do KV deixa de desligar o interruptor.** O servidor agora responde «não sei» em vez de «desligado», e o app só segue uma resposta de verdade.
+- **Um bloqueio da borda do Cloudflare (403 em HTML) não apaga mais a renovação de ninguém.** Só o 403 com a resposta do próprio Waze conta como «sessão morta».
+- **Só o perfil da região da fila liga ou desliga a opção** (a pergunta a outro servidor gastava uma escrita de KV sem motivo).
+- **Tocar em «Sair» com o perfil ainda a caminho não deixa mais a entrada do servidor para trás.**
+- **A Ajuda e o aviso do «Sair» que não chegou ao servidor agora dizem a verdade:** a chave do «Manter conectado» vale até 14 dias depois da última vez que você abriu o app, e para encerrar na hora é preciso sair também no WME.
+- **O interruptor confere a sessão quando o servidor responde 401**, como as outras rotas.
+
+**Telas**
+- **Os Filtros abrem a aba nova no topo também com zoom de 300–500 %** (a aba nova abria rolada, com as abas fora da tela).
+- **Presença:** o «Tentar de novo» em série para se o perfil some no meio, o botão não fica desenhado enquanto a série corre, a mensagem de outra pessoa com uma conversa aberta é dita ao leitor de tela, e a frase «N mensagens novas» sai da região depois que você lê.
+
+**Fila de saída**
+- O 401 de uma decisão que já estava na fila volta a ser anotado, e a decisão não sai duas vezes quando o perfil chega com ela no ar (regressões do lote 28).
+
+### Documentação
+- CLAUDE.md ganhou a seção do «Manter conectado» (o desenho, a exceção à regra do free tier e à garantia «Secret + banco = nada», a capacidade), o README conta as escritas novas no KV e as variáveis da VM, e o `wrangler.jsonc` diz os números certos.
+
 ## v2026.10.17-01
 
 Vigésima quarta rodada da auditoria (lote 28). Nada muda de aparência no uso normal; cada conserto tem teste que reprova quando ele é desfeito.
