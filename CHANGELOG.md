@@ -8,6 +8,11 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.10.17-12
+- **Servidor:** `excluir-foto` com `action` desconhecida (`'Preparar'`, `true`, `'prepare'`…) respondia como EXCLUSÃO e apagava a foto; agora é 400 `srv.err.badAction` (o app só manda `'preparar'` ou nada).
+- **Textos:** «sessão» no lugar de «pessoa/gente» nos últimos comentários da capacidade; o «+» do contador de pendentes (pt) sem a palavra «sinal»; números e comentários de doc conferidos (smoke de layout 5×4×7, 9 pulos do Chromium, `/#pair=`, `css/app.css`).
+- **CHANGELOG:** a seção «Versões publicadas sem entrada própria» lista os 15 seriais que faltavam.
+
 ## v2026.10.17-11
 - **Pareamento:** colar o código também apaga o erro da tentativa anterior (digitar já apagava; o colar cancela a inserção e não dispara o evento).
 - **Textos:** «sessão», não «pessoa», nos comentários da capacidade; o `wrangler.jsonc` aponta pra tabela única; o estado da auditoria foi posto em dia.
@@ -3655,3 +3660,25 @@ Se você reparou que "pelo app" e "pelo site" aparecem menos do que antes, **nã
 - Carrossel completo nas fotos, com a foto nova destacada.
 - Correção de "F5 não atualiza no celular": alinhamento das três camadas de cache (service worker, cache do navegador e servidor).
 - Categorização de corrida entre editores: quando outro editor trata o mesmo pedido antes, o app mostra "já tratado por outro editor 👍" em vez de erro.
+
+---
+
+## Versões publicadas sem entrada própria
+Quinze seriais chegaram à `main` sem título neste arquivo (achado da rodada 31); a lista sai do `git log -- js/version.js` e cada linha é o assunto do PR que a publicou. O detalhe de cada um está no PR e, para o offline (#232) e a pilha (#223), nas correções que vieram depois (v2026.09.22-02 e seguintes).
+
+- `v2026.09.06-03` — CLAUDE.md: a recusa automática entra na lista dos portões destrutivos (#197)
+- `v2026.09.09-01` — Entrada cai pra L2+AM e o gate do Desfazer pra base 60 (#198)
+- `v2026.09.09-03` — Diagnóstico: a camada COMPUTADA e as sentinelas (#200)
+- `v2026.09.10-01` — Faixa "já lido" no card, e a sentinela que acusava modal aberto (#201)
+- `v2026.09.10-06` — Diagnóstico: replay, consulta pelo token, zip, diário sem portão — e o registro de compatibilidade (#203)
+- `v2026.09.10-07` — A idade do pedido dizia "há 9m" para NOVE MESES (#204)
+- `v2026.09.11-01` — "Pular guarda o pedido": o ↑ pode marcar a estrela do editor no WME (#207)
+- `v2026.09.11-02` — O anel de autores rejeitados sobe de 4.000 para 6.000 (#208)
+- `v2026.09.19-02` — A pilha do próximo pedido + conserta a regressão da #215 (Desfazer quebrado em produção) (#223)
+- `v2026.09.21-02` — A tela de falha para de mentir: "RESTAM —", e a rede voltando não perde o que estava na fila (#229)
+- `v2026.09.21-03` — Resposta que CHEGA é prova de rede: o terceiro gatilho da fila de saída (#230)
+- `v2026.09.21-07` — O mapa só se desenha quando a caixa existe — nos DOIS cards da pilha (#231)
+- `v2026.09.21-08` — Disponível offline: o trabalho sobrevive à sombra de sinal (#232)
+- `v2026.09.22-01` — O mapa voltou, o offline enche — e a camada de teste que faltava (#233)
+- `v2026.10.15-04` — Volta ao código de 25/09 (fe61d54) para comparar com o de agora (v2026.10.15-04) (#275)
+

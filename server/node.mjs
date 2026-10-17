@@ -542,8 +542,10 @@ function notFound(res) {
 }
 
 // Cabeçalhos de TODA resposta de /api: `no-store` (ver o Worker) e os de
-// segurança — a VM respondia a API (e o 405/500 dos estáticos) SEM eles, e o app
-// deixava de ser o mesmo nos dois destinos (gotcha #14; auditoria de 2026-09-25).
+// segurança — a VM respondia a API (e o 405/500 dos estáticos) SEM eles (gotcha #14; auditoria de
+// 2026-09-25). Hoje a VM manda o conjunto; o Worker manda só `no-store` e `nosniff` (o `_headers` não
+// alcança a resposta que ele monta): status, corpo e rotas são os mesmos, os cabeçalhos de segurança
+// de um JSON não (R31-1, medido em 29 casos).
 const API_HEADERS = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...SECURITY_HEADERS };
 
 const server = createServer(async (req, res) => {

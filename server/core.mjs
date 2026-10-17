@@ -3115,6 +3115,9 @@ async function handleExcluirFoto(data, { sessions }) {
     const preparado = gesto ? await aquecerReleitura(data, sessions, cookieHeader, csrf, region, gesto) : false;
     return { status: 200, body: { success: true, preparado } };
   }
+  // Ação desconhecida NÃO apaga foto (R31-1: `'Preparar'`, `true`, `'prepare'` caíam na exclusão): só
+  // sem `action` ou `'excluir'` segue; o cliente manda uma das duas.
+  if (data.action != null && data.action !== 'excluir') apiError('Ação inválida', 400, 'srv.err.badAction');
 
   // 2) RELEITURA. É o passo que impede de apagar junto a foto de outro editor.
   //    Vem do cache quando o cliente já pediu `preparar` ao tocar na lixeira —

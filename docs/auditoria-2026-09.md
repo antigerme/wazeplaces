@@ -14,7 +14,10 @@ voltando à 01:20 — a sessão retomou sozinha, com os agentes continuados por 
 
 ---
 
-## 0. Estado agora (2026-10-17 ~16:30 UTC)
+## 0. Estado agora (2026-10-17 ~19:00 UTC)
+
+- **Lote 35 em produção** (PR #284, 2f4f21d, v2026.10.17-11): 13 arquivos iguais e `prod-auditoria` 188 ✓ · 0 ✗ na 1ª rodada
+  (colar o código de pareamento apaga o erro; textos de «sessão»). A rodada 31 (servidor, ponta a ponta, documentos) deu o lote 36.
 
 - **Lote 34 em produção** (PR #283, d96cdd9, v2026.10.17-10): 13 arquivos iguais e `prod-auditoria` 188 ✓ · 0 ✗ com as duas
   contas (na 3ª rodada; as duas anteriores: a corrida do Waze no `Issues/Read` ao devolver pedido a «não lido»). Veio da
@@ -76,8 +79,8 @@ voltando à 01:20 — a sessão retomou sozinha, com os agentes continuados por 
 
 | o quê | onde |
 |---|---|
-| Código mergeado | `main` (PRs #248 a #253) |
-| Rodada 4 (em andamento) | auditores sobre `/home/user/wp-r4` (= main c6d9f91); o lote 8 sai dos achados — ver §0 |
+| Código mergeado | `main` (ver §0: PRs até o #284) |
+| Rodadas | 4 a 31 feitas (estado em §0); as da fase final: 29 (lotes 32–33), 30 (lote 34) e 31 (main 2f4f21d, lote 36) |
 | Este arquivo | `docs/auditoria-2026-09.md` no mesmo branch |
 | Scripts de auditoria (produção, sabotagem, medições) | artefato privado https://claude.ai/artifact/5YRYw1MCA8zXAjbQEBd9Qf — ver §7 |
 | Cookies das duas contas de teste | mandados pelo owner NESTA sessão (`/root/.claude/uploads/<sessão>/`). Contêiner novo pode não tê-los: **peça de novo** (CLAUDE.md, seção 🔑) |

@@ -17,7 +17,7 @@ CLAUDE.md
 *.har
 .github
 CHANGELOG.md
-# Fontes do build de CSS (o css/tailwind.css gerado É publicado; a entrada não).
+# Fontes do build de CSS (o css/app.css gerado É publicado; a entrada não).
 tailwind.config.js
 css/tailwind.src.css
 

@@ -79,7 +79,7 @@
 //                GRAVAÇÃO, não a idade exata do valor do cookie: o `renovarPrazo` regrava o mesmo
 //                blob com `agora − 1 h` (R27-1-01), então uma sessão que um 401 visitou parece mais
 //                jovem do que é; o guard de 20 h é a favor da entrada (ela fica uma ou duas visitas a
-//                mais). Pra mais gente: Workers Paid e/ou o desenho por urgência. O cron TEM que ser
+//                mais). Pra mais sessões: Workers Paid e/ou o desenho por urgência. O cron TEM que ser
 //                `*/<MANTER_CRON_MIN>` (a fatia usa o número da execução); encurtá-lo pede mudar as
 //                duas coisas (`test/manter-conectado-servidor.test.mjs` amarra o wrangler.jsonc).
 //   CPU: cada sessão faz 2 HKDF e 3 AES (abrir a entrada, abrir a sessão,
