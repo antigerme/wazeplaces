@@ -15712,6 +15712,7 @@ function montarCard(place) {
     escreverValor(card.querySelector('.card-category'),
         place.categories && place.categories.length > 0 ? place.categories.join(', ') : '',
         'card.categories.empty');
+    if (place.categories && place.categories.length > 0) escreverCategorias(card.querySelector('.card-category'), place.categories.join(', '));
     // Endereço que virou título não se repete embaixo: seria a mesma informação
     // duas vezes, gastando uma linha que a caixa de mudanças usa melhor.
     card.querySelector('.card-address-row').classList.toggle('hidden', ident.tituloEhEndereco);
@@ -18363,6 +18364,7 @@ function abrirPedidoRecebido(dados, deQuem) {
     // Categoria sai CRUA de propósito: o Waze regionaliza por PAÍS, não por
     // idioma, então traduzir erraria em metade dos países (ver gotcha #39).
     linha('pedidoCatRow', 'pedidoCat', (dados.categories || []).join(', '));
+    if ((dados.categories || []).length > 0) escreverCategorias($('pedidoCat'), dados.categories.join(', '));
     // Sem nome o endereço já virou o TÍTULO — repeti-lo aqui seria dizer a
     // mesma coisa duas vezes, que é o que o card também evita.
     linha('pedidoEndRow', 'pedidoEnd', ident.tituloEhEndereco ? '' : (dados.address || ''));
@@ -18402,6 +18404,24 @@ function ausenciaDeNomeEsperada(place) {
 // Escreve valor OU placeholder, marcando qual dos dois é. O texto entre
 // parênteses já diz sozinho (e o leitor de tela lê); o esmaecido em itálico é
 // reforço visual. Cor sozinha não serviria — WCAG 1.4.1.
+// A categoria sai CRUA do Waze, em MAIÚSCULAS e sem espaço (`RESIDENCE_HOME`), e o
+// navegador parte a palavra onde der: no Galaxy Fold «RESIDENCE_HOM / E» (39 de 51
+// pedidos reais, 50 em francês). Decisão do dono (2026-10-20): o texto continua o
+// do WME, e só a QUEBRA ganha um lugar certo — depois de cada «_», com `<wbr>`
+// (elemento, não caractere: um espaço de largura zero iria junto na cópia e alguns
+// leitores de tela o anunciam). Montado por nós do DOM, nunca por `innerHTML`: é
+// texto do Waze. O `textContent` não muda. Fonte única do card e da folha do pedido.
+function escreverCategorias(el, texto) {
+    if (!el) return;
+    const partes = String(texto).split('_');
+    el.textContent = '';
+    partes.forEach((parte, i) => {
+        const ultima = i === partes.length - 1;
+        el.appendChild(document.createTextNode(ultima ? parte : parte + '_'));
+        if (!ultima) el.appendChild(document.createElement('wbr'));
+    });
+}
+
 function escreverValor(el, valor, chaveVazio) {
     if (!el) return;
     const v = valor === null || valor === undefined ? '' : String(valor).trim();
