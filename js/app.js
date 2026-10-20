@@ -16382,7 +16382,33 @@ function renderMapa(card, place, refazendo) {
     // ganhar interação — ele é uma figura, e precisa ser igual ao que vem.
     box.style.cursor = 'zoom-in';
     box.dataset.pronto = '1';
+    ajustarEscalaDoMapa(box);
     return true;
+}
+
+// A barra de escala («100 m») mora embaixo à esquerda do mini-mapa e a legenda no
+// topo; com o mapa BAIXO (pedido com muito campo, no Galaxy Fold a caixa tem
+// 100 px) a legenda quebra em mais de uma linha e cobre a escala (3 de 3
+// legendas, medido). Decisão do dono (2026-10-20): a escala some quando é
+// COBERTA — a legenda é o que explica o desenho, e a escala inteira continua no
+// mapa ampliado, um toque adiante. Decide pela SOBREPOSIÇÃO medida, não por uma
+// altura: a quebra da legenda depende da largura e do idioma. Mede a cada
+// desenho (o `ResizeObserver` do `vigiarCaixaDoMapa` refaz quando a caixa
+// muda), tira a marca antes de medir (escondida a escala não tem retângulo) e
+// só mede com a caixa na tela. Vale pro card de fundo também: é a promessa do
+// que vem, e passa pelo mesmo `renderMapa`.
+function ajustarEscalaDoMapa(box) {
+    const escala = box.querySelector('.card-map-scale');
+    if (!escala) return;
+    escala.classList.remove('escala-coberta');
+    if (!box.clientWidth) return;
+    const e = escala.getBoundingClientRect();
+    if (!e.width) return;
+    const coberta = Array.from(box.querySelectorAll('.card-map-legend > *')).some((leg) => {
+        const r = leg.getBoundingClientRect();
+        return r.left < e.right && r.right > e.left && r.top < e.bottom && r.bottom > e.top;
+    });
+    if (coberta) escala.classList.add('escala-coberta');
 }
 
 // ── Mapa AMPLIADO: arrastar, zoom, e tiles buscados conforme navega ──────

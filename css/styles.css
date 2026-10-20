@@ -2433,6 +2433,13 @@ button:active {
   bottom: 3.25rem;
 }
 
+/* Decisão do dono (2026-10-20): a escala some quando a legenda a COBRE (mapa baixo, no
+   Galaxy Fold); a escala inteira segue no mapa ampliado. Quem põe a classe é o
+   `ajustarEscalaDoMapa`, por sobreposição medida. */
+.card-map-scale.escala-coberta {
+  display: none;
+}
+
 .mapa-leg {
   display: inline-flex;
   align-items: center;
