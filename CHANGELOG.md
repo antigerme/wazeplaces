@@ -8,6 +8,12 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.10.20-01
+- **Servidor próprio (VM):** as sessões e a chave de criptografia deixam de ficar no `/tmp` (que muitas distros limpam no boot e que o systemd esvazia a cada reinício do serviço — e perder a chave desloga todo mundo). Agora ficam no diretório de estado do systemd (`StateDirectory=`) ou em `~/.waze-places`. O exemplo de serviço do README ganhou o endurecimento padrão do systemd e a chave num arquivo só do root. Quem já passa `SESSION_DIR` e `SESSION_KEY_FILE` não muda nada.
+- **Cloudflare:** a URL `*.workers.dev` e as de prévia ficam desligadas (`workers_dev: false`, `preview_urls: false`): o app só atende pelo domínio próprio, atrás do WAF.
+- **Documentos:** o histórico dos lotes de correção saiu do `CLAUDE.md` (606 → ~515 KB) para `docs/lotes.md`, e os PDFs de `docs/` foram refeitos a partir dos textos atuais.
+- **Confirmado em produção:** o «Manter conectado» nasce ligado e o «Sair» devolve ao ligado; a extensão 0.3.4 está publicada na Chrome Web Store.
+
 ## v2026.10.17-13
 - **Teclado:** o mini-mapa do card (que se anuncia «botão» e está no Tab) agora abre com Enter e Espaço, como o toque; Ctrl/⌘/Alt continuam do navegador. A foto do card ainda não abre pelo teclado (decisão do dono: muda a Ajuda ou o foco visível).
 - **Toque:** os selos «Ver +N» e «✕ N» (17 px de altura) ganham área de toque invisível de 25 px, sem mudar o desenho. Foram medidas duas extensões: a de 14 px cobria o chip vizinho quando os selos quebram de linha no Fold, então ficou 4 px.

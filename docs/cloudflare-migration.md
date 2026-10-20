@@ -181,7 +181,7 @@ O KV tem **TTL nativo** — a sessão some sozinha após 21 dias. Isso apaga
 ```js
 // server/node.mjs
 import { readFile, writeFile, unlink } from 'node:fs/promises';
-const dir = process.env.SESSION_DIR || '/tmp/waze_places_sessions';
+const dir = process.env.SESSION_DIR || join(process.env.STATE_DIRECTORY ?? join(homedir(), '.waze-places'), 'sessoes');
 export const fsStore = {
   get: (h) => readFile(`${dir}/sess_${h}`, 'utf8').catch(() => null),
   put: (h, blob) => writeFile(`${dir}/sess_${h}`, blob, { mode: 0o600 }),
@@ -268,20 +268,7 @@ export ENCRYPTION_KEY=$(openssl rand -base64 32)
 node /opt/wazeplaces/server/node.mjs
 ```
 
-**Serviço systemd** (`/etc/systemd/system/wazeplaces.service`):
-
-```ini
-[Service]
-User=nobody
-ExecStart=/usr/bin/node /opt/wazeplaces/server/node.mjs
-Environment=PORT=8080
-Environment=ENCRYPTION_KEY=<sua-chave-base64>
-Environment=SESSION_DIR=/var/lib/wazeplaces/sessions
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-```
+**Serviço systemd:** o exemplo completo e endurecido (usuário sem privilégios, `StateDirectory`, chave em `EnvironmentFile` só do root) está no README, seção «Opção B». As sessões e a chave NÃO ficam mais no `/tmp`: `STATE_DIRECTORY` (systemd) ou `~/.waze-places`.
 
 **HTTPS via Apache** (reverse proxy na frente do Node — opção preferida do owner).
 `/etc/httpd/conf.d/wazeplaces.conf`:

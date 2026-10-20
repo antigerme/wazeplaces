@@ -10,6 +10,11 @@
   "main": "worker/index.mjs",
   "compatibility_date": "2025-06-01",
   "observability": { "enabled": true },
+  // O app só atende pelo domínio próprio (routes, abaixo), que passa pelo WAF e
+  // pelo Bot Fight Mode da Cloudflare. A URL *.workers.dev e as de prévia seriam
+  // uma segunda porta, SEM essa proteção, pro mesmo Worker e pro mesmo KV.
+  "workers_dev": false,
+  "preview_urls": false,
   "assets": {
     "directory": ".",
     "binding": "ASSETS"

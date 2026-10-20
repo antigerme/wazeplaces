@@ -236,8 +236,8 @@ Variáveis de ambiente (todas opcionais):
 | `PORT` | `8080` | Porta de escuta |
 | `HOST` | `0.0.0.0` | Host bind (`127.0.0.1` restringe ao localhost) |
 | `ENCRYPTION_KEY` | auto-gera | Chave base64 com no mínimo 32 bytes (`openssl rand -base64 32`); com menos, ou malformada, a VM não sobe e diz por quê. Sem ela, gera uma em `SESSION_KEY_FILE` |
-| `SESSION_DIR` | `/tmp/waze_places_sessions` | Onde ficam os blobs de sessão |
-| `SESSION_KEY_FILE` | `/tmp/waze_places.key` | Arquivo da chave auto-gerada |
+| `SESSION_DIR` | `$STATE_DIRECTORY/sessoes` (systemd) ou `~/.waze-places/sessoes` | Onde ficam os blobs de sessão. Nunca o `/tmp`: ele é limpo no boot e perder a chave desloga todo mundo |
+| `SESSION_KEY_FILE` | `$STATE_DIRECTORY/chave` (systemd) ou `~/.waze-places/chave` | Arquivo da chave auto-gerada (modo `0600`) |
 | `MANTER_DESLIGADO` | — | `1` desliga o temporizador do «Manter conectado» (a renovação do cookie do Waze das sessões que ligaram isso) |
 | `MANTER_PRIMEIRA_MS` / `MANTER_INTERVALO_MS` / `MANTER_PAUSA_MS` | 60 s / 30 min / 1,5–4 s | Quando começa, de quanto em quanto tempo varre e a pausa entre sessões (só pra teste) |
 
@@ -316,24 +316,47 @@ proxy** na frente do processo Node — quem serve tudo (estáticos + `/api/*`) �
 sudo dnf module install -y nodejs:22/common
 sudo dnf install -y git
 sudo git clone https://github.com/antigerme/wazeplaces /opt/wazeplaces
-# O diretório das sessões é do USUÁRIO DO SERVIÇO (o `User=nobody` da unidade
-# abaixo). Criado só com `mkdir`, ele fica do root, o `nobody` não grava nele,
-# e todo login e todo pareamento respondem "Erro interno".
-sudo install -d -o nobody -g nobody -m 700 /var/lib/wazeplaces/sessions
+# Quem cria e cuida do diretório de estado é o próprio systemd (`StateDirectory=`
+# na unidade abaixo): ele nasce do usuário do serviço, com modo 0700, em
+# /var/lib/wazeplaces. Criado à mão com `mkdir`, ele ficaria do root e todo
+# login e todo pareamento responderiam "Erro interno".
+# A chave vai num arquivo só do root (o texto da unidade qualquer um lê com
+# `systemctl show`):
+sudo install -m 600 /dev/null /etc/wazeplaces.env
+echo "ENCRYPTION_KEY=$(openssl rand -base64 32)" | sudo tee /etc/wazeplaces.env >/dev/null
 ```
 
 Serviço systemd (`/etc/systemd/system/wazeplaces.service`):
 
 ```ini
+[Unit]
+Description=WazePlaces
+After=network-online.target
+
 [Service]
 User=nobody
 ExecStart=/usr/bin/node /opt/wazeplaces/server/node.mjs
 Environment=PORT=8080
 # O Apache é o único que fala com a internet; o Node escuta só aqui dentro.
 Environment=HOST=127.0.0.1
-Environment=ENCRYPTION_KEY=<gere com: openssl rand -base64 32>
-Environment=SESSION_DIR=/var/lib/wazeplaces/sessions
+EnvironmentFile=/etc/wazeplaces.env
+# Sessões e chave ficam em /var/lib/wazeplaces (a variável STATE_DIRECTORY).
+StateDirectory=wazeplaces
+StateDirectoryMode=0700
 Restart=on-failure
+# Endurecimento. NÃO ponha MemoryDenyWriteExecute: o V8 precisa de memória
+# gravável e executável, e o Node não sobe com ela.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
 
 [Install]
 WantedBy=multi-user.target
@@ -342,6 +365,8 @@ WantedBy=multi-user.target
 ```bash
 sudo systemctl enable --now wazeplaces
 ```
+
+> O endurecimento da unidade (`StateDirectory`, `ProtectSystem=strict` e o resto) é o padrão do systemd, mas **não foi rodado numa VM de verdade pelo projeto** (só o `node.mjs` com `STATE_DIRECTORY` foi testado). Suba, confira `journalctl -u wazeplaces` e o login antes de confiar.
 
 **2. Apache como reverse proxy** (`/etc/httpd/conf.d/wazeplaces.conf`):
 

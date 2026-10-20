@@ -1,7 +1,7 @@
 // Adaptador VM (RedHat/Node) — servidor HTTP puro, sem dependências npm.
 //
 // Serve os arquivos estáticos do frontend e roteia POST /api/* pro core,
-// usando o filesystem pra sessões (espelha o modelo /tmp do PHP antigo).
+// usando o filesystem pra sessões (num diretório de estado, não no /tmp).
 // Mesma server/core.mjs que roda no Cloudflare — zero divergência de lógica.
 //
 // Rodar:   node server/node.mjs   (Node 22 ou mais novo)
@@ -26,10 +26,10 @@ if (!Number.isFinite(versaoAtual) || versaoAtual < MIN_NODE) {
 
 import { createServer } from 'node:http';
 import { readFile, writeFile, unlink, stat, mkdir, utimes, readdir, rename } from 'node:fs/promises';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { randomBytes, createHash } from 'node:crypto';
-import { tmpdir } from 'node:os';
-import { join, normalize, extname } from 'node:path';
+import { homedir } from 'node:os';
+import { dirname, join, normalize, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dispatch, makeSessions, chaveDoSecret, varrerMantidosDoStore, SESSION_TTL, PAIR_TTL, RELEITURA_TTL_STORE } from './core.mjs';
 import { KA_TTL, MANTER_CRON_MIN, pausaPadrao } from './manter-conectado.mjs';
@@ -44,8 +44,18 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url)); // raiz do repo
 // o `parseInt(…) || 8080` o trocava por 8080, e duas VMs de teste brigavam por ela.
 const PORT = /^\d+$/.test(process.env.PORT || '') ? Number(process.env.PORT) : 8080;
 const HOST = process.env.HOST || '0.0.0.0';
-const SESSION_DIR = process.env.SESSION_DIR || join(tmpdir(), 'waze_places_sessions');
-const SESSION_KEY_FILE = process.env.SESSION_KEY_FILE || join(tmpdir(), 'waze_places.key');
+// Onde a VM guarda o que TEM que sobreviver a um reinício: as sessões e a chave
+// auto-gerada. Era o `tmpdir()` (/tmp): pasta de todo mundo, que muitas
+// distros limpam no boot e que o systemd com `PrivateTmp` esvazia a cada
+// reinício do serviço — e perder a chave desloga todo mundo, calado.
+// Agora: o `StateDirectory=` do systemd (a variável STATE_DIRECTORY, já do
+// usuário do serviço e com o modo certo) ou, fora do systemd, ~/.waze-places.
+// SESSION_DIR e SESSION_KEY_FILE continuam mandando em cada um.
+const BASE_ESTADO = process.env.STATE_DIRECTORY
+  ? process.env.STATE_DIRECTORY.split(':')[0]
+  : join(homedir(), '.waze-places');
+const SESSION_DIR = process.env.SESSION_DIR || join(BASE_ESTADO, 'sessoes');
+const SESSION_KEY_FILE = process.env.SESSION_KEY_FILE || join(BASE_ESTADO, 'chave');
 
 // ── Chave de criptografia ────────────────────────────────────────────────
 // Prioridade: env ENCRYPTION_KEY > arquivo > auto-gera (conveniência dev/VM).
@@ -58,6 +68,7 @@ function textoDaChave() {
   try {
     // 'wx' = criação exclusiva: se outro processo gravou a chave nesse meio-tempo,
     // lança EEXIST em vez de sobrescrever (evita race não-atômica no boot).
+    mkdirSync(dirname(SESSION_KEY_FILE), { recursive: true, mode: 0o700 });
     writeFileSync(SESSION_KEY_FILE, key.toString('base64'), { flag: 'wx', mode: 0o600 });
     return { b64: key.toString('base64'), origem: 'do arquivo ' + SESSION_KEY_FILE + ' (gerada agora)' };
   } catch (e) {
