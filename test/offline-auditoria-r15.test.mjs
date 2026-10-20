@@ -602,7 +602,7 @@ function mapaDesenhavel() {
     mapaEscala: M.mapaEscala, ESCALA_ALVO_CARD_PX: 80,
     Image: class extends ElFalso { constructor() { super('img'); } },
     API: { getRegion: () => 'row' }, t: (k) => k, i18nLocale: () => 'pt-BR',
-    vigiarCaixaDoMapa() {},
+    vigiarCaixaDoMapa() {}, ajustarEscalaDoMapa() {},
     // O `registrarFalhaDeTile` de verdade conta em `box.dataset.tilesFalharam`.
     registrarFalhaDeTile: (b, url) => { falhas.push(url); b.dataset.tilesFalharam = String((parseInt(b.dataset.tilesFalharam, 10) || 0) + 1); },
   };

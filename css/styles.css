@@ -134,6 +134,13 @@ body.dark {
   outline-color: #22d3ee;
 }
 
+/* A foto do card é um botão focável (decisão do dono, 2026-10-20). Ela enche a caixa
+   (`.card-photo` corta com overflow), então o anel de 2 px a 2 px de fora seria cortado:
+   fica por DENTRO da borda da foto. */
+.card-image:focus-visible {
+  outline-offset: -3px;
+}
+
 .place-card {
   transition: transform 0.3s ease, opacity 0.3s ease;
   touch-action: none;

@@ -47,7 +47,8 @@ test('sem «_» não há <wbr>; o que já estava no elemento é trocado, não so
 
 test('nenhum caractere invisível: a quebra é o elemento', () => {
   const corpo = fatiar('escreverCategorias');
-  assert.doesNotMatch(corpo, /\\u200b|​/i);
+  // O caractere é montado por código: um escape digitado vira o caractere de verdade ao gravar o arquivo.
+  assert.doesNotMatch(corpo, new RegExp('\\\\u200b|' + String.fromCharCode(0x200b), 'i'));
   assert.doesNotMatch(corpo, /innerHTML/);
 });
 

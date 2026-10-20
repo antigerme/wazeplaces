@@ -16840,6 +16840,8 @@ function renderCardImages(card, place) {
         // mostrar que o selo visível não pagava.
         const propostaComOLocal = place.purType === 'NEW_PLACE' || place.reqType === 'VENUE';
         img.alt = altDaFoto(place, currentImgIdx + 1, urls.length);
+        // O nome do botão: o que é a foto E o que o toque faz (o `alt` sozinho só dizia o que ela é).
+        img.setAttribute('aria-label', `${img.alt}. ${t('card.img.ampliar')}`);
         img.title = propostaComOLocal ? t('card.img.novoLocal.title') : '';
         img.classList.remove('hidden');
         noImg.classList.add('hidden');
@@ -16870,6 +16872,22 @@ function renderCardImages(card, place) {
     img.addEventListener('click', (e) => {
         e.stopPropagation();
         e.preventDefault();
+        openLightbox(urls, currentImgIdx, newImageIdx, place.name, eDenuncia, place);
+    });
+    // A foto abre pelo TECLADO como pelo toque (decisão do dono, 2026-10-20; WCAG
+    // 2.1.1): ela era a única ampliação fora do Tab — o mapa vizinho já é um botão
+    // focável (R31-2-1). Só a foto VISÍVEL entra no passeio do Tab (escondida pelo
+    // `.hidden`, no slide do mapa ou quebrada, ela sai sozinha), o card de fundo
+    // segue `inert`, e o foco volta a ela quando a ampliada fecha
+    // (`devolverFocoDaAmpliacao`). Enter e Espaço abrem; SEGURADO abre uma vez só
+    // (a repetição abriria a camada de novo por cima do que a primeira abriu).
+    img.tabIndex = 0;
+    img.setAttribute('role', 'button');
+    img.addEventListener('keydown', (ev) => {
+        if (ev.target !== img || (ev.key !== 'Enter' && ev.key !== ' ')) return;
+        if (atalhoDoNavegador(ev)) return;
+        ev.stopPropagation(); ev.preventDefault();
+        if (ev.repeat) return;
         openLightbox(urls, currentImgIdx, newImageIdx, place.name, eDenuncia, place);
     });
 
