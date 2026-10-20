@@ -1616,8 +1616,13 @@
     </div>
 
     <div id="helpModal" role="dialog" aria-modal="true" aria-labelledby="helpModalTitle" class="hidden fixed inset-0 modal-root pb-[calc(1rem+var(--kb-inset,0px))] bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
-        <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 max-h-[calc(85dvh-var(--kb-inset,0px))] overflow-y-auto overscroll-contain dark:bg-slate-800 dark:text-slate-200">
-            <div class="flex justify-between items-center mb-4">
+        <!-- Decisão do dono (2026-10-20): o título e o ✕ ficam PRESOS no topo. A Ajuda tem ~4.000 px, e quem a lê
+             até o fim ficava com o ✕ a milhares de pixels acima (só «Sair» à vista). `sticky` dentro do cartão que
+             rola: as margens negativas levam o cabeçalho até a borda do cartão (o padding de 1,5rem vira o dele) e
+             o `-top-6` desconta o padding do cartão, de onde o navegador mede o `sticky` (com `top-0` o texto passava
+             por cima do cabeçalho, nos 24 px da borda). O fundo é opaco nos dois temas. O `scroll-pt` mantém o foco do teclado fora de baixo do cabeçalho. -->
+        <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 scroll-pt-[5rem] max-h-[calc(85dvh-var(--kb-inset,0px))] overflow-y-auto overscroll-contain dark:bg-slate-800 dark:text-slate-200">
+            <div class="flex justify-between items-center mb-2 pb-2 sticky -top-6 z-10 -mx-6 -mt-6 px-6 pt-6 bg-white dark:bg-slate-800">
                 <h3 id="helpModalTitle" class="text-2xl font-bold text-slate-800 dark:text-slate-100" data-i18n="modal.help.title">Ajuda</h3>
                 <button id="closeHelp" type="button" aria-label="Fechar" data-i18n-aria="common.close" class="min-w-[44px] min-h-[44px] flex items-center justify-center -mr-2 text-slate-500 hover:text-slate-700 rounded-full dark:text-slate-400">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
