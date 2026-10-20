@@ -26,7 +26,17 @@ test('README, Opção B: o diretório das sessões é do usuário do serviço (s
   assert.ok(unidade, 'CONTROLE: a unidade systemd da Opção B sumiu do README');
   const usuario = (/^User=(\S+)$/m.exec(unidade) || [])[1];
   const dir = (/^Environment=SESSION_DIR=(\S+)$/m.exec(unidade) || [])[1];
-  assert.ok(usuario && dir, 'CONTROLE: a unidade não diz o User= e o SESSION_DIR=');
+  // Desde 2026-10-20 o exemplo usa `StateDirectory=`: o PRÓPRIO systemd cria o
+  // diretório de estado (sessões e chave) do usuário do serviço, com o modo certo,
+  // e o `node.mjs` lê o caminho em STATE_DIRECTORY. Vale se a unidade não mandar
+  // o SESSION_DIR pra outro lugar (aí voltaria a ser um diretório que ninguém criou).
+  const estado = (/^StateDirectory=(\S+)$/m.exec(unidade) || [])[1];
+  if (estado) {
+    assert.ok(usuario, 'CONTROLE: a unidade com StateDirectory= não diz o User=');
+    assert.equal(dir, undefined, 'a unidade tem StateDirectory= E um SESSION_DIR= que o ignora: o diretório de fora ninguém cria');
+    return;
+  }
+  assert.ok(usuario && dir, 'CONTROLE: a unidade não diz o User= e o SESSION_DIR= (nem o StateDirectory=)');
   const comandos = blocos(README, 'bash').join('\n').split('\n').filter((l) => !/^\s*#/.test(l));
   const donos = [];
   for (const l of comandos) {

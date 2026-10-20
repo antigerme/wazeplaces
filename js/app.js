@@ -343,8 +343,8 @@ function filtrosDeFabrica() {
 }
 
 // O padrão do "Manter conectado" (Preferências): LIGADO, opt-OUT — decisão do
-// dono, ainda a confirmar, e por isso numa constante só: virar o padrão é mudar
-// esta linha. É dela que saem a fábrica (`preferenciasDeFabrica`), a leitura do
+// dono, confirmada em produção em 2026-10-20, e numa constante só: mudar o padrão
+// é mudar esta linha. É dela que saem a fábrica (`preferenciasDeFabrica`), a leitura do
 // aparelho (`lerPreferenciasGuardadas`) e o que o `perfil` manda ao servidor
 // (`manterConectadoParaOServidor`); nada mais escreve `true`/`false` à mão.
 const MANTER_CONECTADO_PADRAO = true;
