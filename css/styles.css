@@ -2830,7 +2830,10 @@ button:active {
    direita (decisão do dono, 2026-10-20, a «C1» dos mockups). Antes, com o ícone de gente na
    tela, o nome do perfil ficava com 12 px («a.», «L…») e o avatar virava uma fatia de 12×32;
    agora o nome e o nível aparecem INTEIROS (59 px «antigerme», 97 px «world_12345678») e o
-   avatar tem 32×32. Custo: o cabeçalho vai de 69 a ~105 px, 36 px a menos de card no Fold.
+   avatar tem 32×32. Custo: o cabeçalho vai de 69 a ~89 px, 20 px a menos de card no Fold (o
+   respiro de cima e de baixo desce de 12 a 4 px: com ele o custo era 36 px e os cards de reporte
+   com comentário voltavam a rolar no Fold — o smoke de layout reprovou, e é o que mata o arraste
+   pra cima, gotcha #29).
    DESVIO DA RECOMENDAÇÃO ORIGINAL: ela valia só com o ícone de gente visível, e ele SOME
    quando não há ninguém no app nem mensagem — o cabeçalho subiria e desceria 36 px conforme
    gente chega e sai, mexendo o card por um motivo que não é do card (a régua da casa, que já
@@ -2841,6 +2844,8 @@ button:active {
   header:has(#userProfileBadge:not(.hidden)) > .container {
     flex-wrap: wrap;
     row-gap: 0;
+    padding-top: 0.25rem;
+    padding-bottom: 0.25rem;
   }
   header:has(#userProfileBadge:not(.hidden)) #brandBlock {
     display: none;
