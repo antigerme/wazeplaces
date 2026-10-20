@@ -2824,6 +2824,24 @@ button:active {
    Deslogado ele fica: é a tela em que a marca ainda se apresenta. */
 @media (max-width: 400px) {
   header:has(#userProfileBadge:not(.hidden)) #brandLogo { display: none; }
+  /* Sem o quadradinho e com o <h1> sr-only, o bloco da marca mede 0 px — mas
+     ainda ocupa um vão de 8 px do `gap-2` do cabeçalho (MEDIDO: 12 px pro perfil
+     inteiro no Galaxy Fold com o ícone de gente, o avatar espremido num oval de
+     12×32). `position: absolute` e não `display: none`: o <h1> precisa ficar na
+     árvore de acessibilidade (ver o comentário do js/app.js que o põe em sr-only).
+     O cabeçalho é `sticky`, então é ele o bloco de contenção, e uma caixa de 0 px
+     não cria rolagem nem mexe em nada. */
+  header:has(#userProfileBadge:not(.hidden)) #brandBlock { position: absolute; }
+}
+/* Telas até 340 px (o Galaxy Fold fechado, o iPhone SE de 2016): a margem lateral
+   do cabeçalho desce de 1rem pra 0,5rem. O botão do canto tem 44 px com o ícone de
+   24 px no meio, ou seja 10 px de folga por dentro: o traço do ícone continua a
+   18 px da borda (era 26) e os 16 px devolvidos vão pro perfil. MEDIDO sem custo de
+   altura (o cabeçalho segue com 69 px) e fora dessa faixa nada muda. A decisão de
+   2026-10-20 (perfil numa segunda fileira) custava 20 a 36 px de card e foi
+   desfeita: esta devolve largura sem tocar na altura. */
+@media (max-width: 340px) {
+  header:has(#userProfileBadge:not(.hidden)) > .container { padding-left: 0.5rem; padding-right: 0.5rem; }
 }
 
 /* Selo SOBRE o ícone (M3 "badged icon button"): o número não pode custar
