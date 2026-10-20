@@ -1571,6 +1571,9 @@ const LIMPEZA_AO_FECHAR = {
         const img = document.getElementById('pedidoFotoImg');
         if (img) { img.onerror = null; img.removeAttribute('src'); }
         document.getElementById('pedidoWme')?.removeAttribute('href');
+        // Escondida por qualquer caminho que não o ✕ do app (o voltar do aparelho, outro diálogo, o
+        // «Sair»): a conversa de onde ela veio não volta (`Presenca.voltarDaFolha`).
+        if (window.Presenca) window.Presenca.volta = null;
     },
     pairEnterModal() {
         const campo = document.getElementById('pairCodeInput');
@@ -1630,6 +1633,12 @@ function closeModal(id, { viaHistorico = false, peloTeclado = false, focoComDest
     dfato('tela.modal', { fecha: id, viaHistorico });
     const m = document.getElementById(id);
     if (!m || m.classList.contains('hidden')) return;
+    // A folha do pedido que se abriu DA conversa, fechada pelo ✕, pelo Esc ou pelo fundo, devolve a
+    // conversa (decisão do dono, 2026-10-20): é uma TROCA de camada (`openModal` direto, como todo
+    // diálogo que esconde outro), sem `history.back()` nem entrada nova — nada espera o voltar nosso
+    // (gotcha #65). O voltar do aparelho (`viaHistorico`) fecha a folha e fica: reempilhar num
+    // `popstate` marca as entradas como puláveis. O «Sair», a queda e o `desligar` soltam a volta antes.
+    if (id === 'pedidoModal' && !viaHistorico && window.Presenca?.voltarDaFolha?.()) return;
     m.classList.add('hidden');
     if (!viaHistorico) CamadaVoltar.consumir();
     // A limpeza sabe se o fechamento veio do TECLADO (o Esc, o Enter no botão
