@@ -18531,6 +18531,74 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   await B.ctx.close();
 }
 
+// ── O PERFIL NO CABEÇALHO DAS TELAS ESTREITAS (decisão de tela 2, 2026-10-20) ──
+//
+// No Galaxy Fold fechado (280 px) com o ícone de gente na tela, o perfil inteiro tinha 12 px: o avatar
+// virava um oval de 12×32 e o nome sumia; a 320 px o nome ficava com 12 px. A segunda fileira que se
+// tentou custava 20 a 36 px de card e fez os cards de reporte rolarem por dentro (desfeita). A saída
+// que fica NÃO custa altura: o bloco da marca (0 px, mas com um vão de 8 px) sai do fluxo e, até 340 px,
+// a margem lateral do cabeçalho desce a 0,5rem. Mede o avatar, o nome e a ALTURA do cabeçalho, com os
+// nomes de verdade (`antigerme`, `world_12345678`), com e sem o ícone de gente, e tem CONTROLE: com as
+// duas regras desligadas o avatar do Fold TEM que voltar a ser esmagado (senão a medida está cega).
+{
+  const SVG_PERFIL = "<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64'><rect width='64' height='64' fill='#0891b2'/></svg>";
+  const medirPerfil = async (w, { nome, pilula, estilo = '' }) => {
+    const ctx = await browser.newContext({ viewport: { width: w, height: 740 }, serviceWorkers: 'block', locale: 'pt-BR' });
+    await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route('https://sms-profile-image.waze.com/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_PERFIL }));
+    await ctx.addInitScript(() => { try { localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true })); } catch (e) { /* segue */ } });
+    const page = await ctx.newPage();
+    const erros = [];
+    page.on('pageerror', (e) => erros.push(String(e.message || e)));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    if (estilo) await page.addStyleTag({ content: estilo });
+    await page.evaluate(({ nome, pilula }) => {
+      AppState.authenticated = true;
+      AppState.profile = { id: 1, userName: nome, rank: 5, isAreaManager: true, isStaff: false, profileImageUrl: 'https://sms-profile-image.waze.com/12444348' };
+      document.getElementById('authScreen').classList.add('hidden');
+      document.getElementById('appScreen').classList.remove('hidden');
+      document.getElementById('filtersBtn').classList.remove('hidden');
+      document.getElementById('refreshBtn').classList.remove('hidden');
+      renderProfileHeader(AppState.profile);
+      showLoading(false);
+      const pill = document.getElementById('presencaPill');
+      pill.classList.toggle('hidden', !pilula);
+      if (pilula) { const c = document.getElementById('presencaCount'); c.textContent = '3'; c.classList.remove('hidden'); }
+    }, { nome, pilula });
+    await esperarNaPagina(page, () => { const a = document.getElementById('userAvatar'); return !!a && a.complete && a.naturalWidth > 0; }, 6000, 50);
+    await doisQuadros(page);
+    const m = await page.evaluate(() => {
+      const w = (id) => document.getElementById(id).getBoundingClientRect().width;
+      const botoes = ['presencaPill', 'themeBtn', 'refreshBtn', 'filtersBtn', 'helpBtn'].map((id) => document.getElementById(id)).filter((b) => b.getClientRects().length);
+      const dentro = botoes.every((b) => { const r = b.getBoundingClientRect(); return r.left >= -0.5 && r.right <= window.innerWidth + 0.5; });
+      const brand = document.getElementById('brandTitle');
+      return { avatar: w('userAvatar'), nome: w('userName'), cabecalho: document.querySelector('header').getBoundingClientRect().height,
+        estreito: document.documentElement.scrollWidth > window.innerWidth, botoesDentro: dentro, h1: brand.textContent.length > 0 && getComputedStyle(brand).display !== 'none' };
+    });
+    await ctx.close();
+    return { ...m, erros };
+  };
+  const SEM_AS_REGRAS = '@media (max-width: 400px){ header:has(#userProfileBadge:not(.hidden)) #brandBlock{ position: static !important } } @media (max-width: 340px){ header:has(#userProfileBadge:not(.hidden)) > .container{ padding-left: 1rem !important; padding-right: 1rem !important } }';
+  for (const nome of ['antigerme', 'world_12345678']) {
+    for (const w of [280, 320, 360]) {
+      for (const pilula of [true, false]) {
+        const rot = `perfil/${w}px/${nome}/${pilula ? 'com' : 'sem'} o ícone de gente`;
+        const m = await medirPerfil(w, { nome, pilula });
+        checa(m.avatar >= 31.5, `${rot}: DEFEITO — o avatar do perfil está esmagado`, `${m.avatar.toFixed(1)} px de largura (devia ter 32)`);
+        checa(m.botoesDentro && !m.estreito, `${rot}: os botões do cabeçalho passam da tela`, JSON.stringify(m));
+        checa(m.h1, `${rot}: o <h1> da marca saiu da árvore (display:none) — o leitor de tela perde o título`);
+        checa(m.cabecalho < 72, `${rot}: o cabeçalho cresceu (a decisão que custava altura de card voltou)`, `${m.cabecalho.toFixed(1)} px`);
+        checa(m.erros.length === 0, `${rot}: erro de JS`, m.erros[0]);
+        // O nome ganha folga onde o aparelho aperta: a 320 px com o ícone ele tinha 12 px.
+        if (w === 320 && pilula) checa(m.nome >= 30, `${rot}: o nome continua espremido`, `${m.nome.toFixed(1)} px (era 12)`);
+      }
+    }
+  }
+  // CONTROLE: sem as duas regras o Fold com o ícone volta ao oval esmagado — a medida enxerga o defeito.
+  const sem = await medirPerfil(280, { nome: 'antigerme', pilula: true, estilo: SEM_AS_REGRAS });
+  checa(sem.avatar < 20, 'perfil/CONTROLE: com as regras desligadas o avatar do Fold TEM que voltar a ser esmagado (a medida está cega)', `${sem.avatar.toFixed(1)} px`);
+}
+
 // ── MAPA + SERVICE WORKER: mora em `tools/smoke-offline.mjs` ──────────────
 //
 // Este bloco nasceu aqui e MUDOU DE CASA, de propósito. O offline precisa do
