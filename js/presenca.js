@@ -2552,8 +2552,8 @@ function presencaAbrirConversa(id, { reaproveitar = false } = {}) {
     // tela, e nada chegou nem ficou por ler desde então — o histórico que ela tem é o de agora, e
     // pedi-lo de novo seria uma ida ao servidor (free tier) sem nada novo pra trazer. Decidido ANTES
     // de zerar as vivas e as não lidas, que são justamente o que separa «nada novo» de «chegou algo».
-    const hAntes = Presenca.historico.get(id);
-    const cAntes = Presenca.conversas.find((x) => x.id === id);
+    const hAntes = reaproveitar ? Presenca.historico.get(id) : null;
+    const cAntes = reaproveitar ? Presenca.conversas.find((x) => x.id === id) : null;
     const nadaNovo = reaproveitar && !!hAntes && hAntes.carregada === true && !hAntes.erro
         && !hAntes.carregando && hAntes.antigas !== 'carregando' && !hAntes.esperaPerfil
         && !Presenca.vivas.has(id) && !(cAntes && cAntes.naoLidas > 0);

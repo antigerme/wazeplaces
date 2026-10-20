@@ -1468,7 +1468,7 @@ test('o "Tudo limpo!" não corta o convite quando a tela é curta', () => {
     'sumiu a centralização por margem (a que não corta)');
   // 2. Enfeite sai antes de ação: o selo verde repete o ✓ que o título já diz.
   for (const media of [/@media\s*\(max-height:\s*700px\)\s*and\s*\(max-width:\s*360px\)/,
-                       /@media\s*\(max-height:\s*480px\)\s*and\s*\(min-width:\s*600px\)/]) {
+                       /@media\s*\(max-height:\s*480px\)\s*and\s*\(min-width:\s*560px\)/]) {
     const m = CSS.match(media);
     assert.ok(m, 'sumiu o degrau responsivo do "Tudo limpo!" pra tela curta/estreita');
     const bloco = CSS.slice(m.index, CSS.indexOf('\n}', m.index));
