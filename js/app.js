@@ -1571,6 +1571,9 @@ const LIMPEZA_AO_FECHAR = {
         const img = document.getElementById('pedidoFotoImg');
         if (img) { img.onerror = null; img.removeAttribute('src'); }
         document.getElementById('pedidoWme')?.removeAttribute('href');
+        // Escondida por qualquer caminho que não o ✕ do app (o voltar do aparelho, outro diálogo, o
+        // «Sair»): a conversa de onde ela veio não volta (`Presenca.voltarDaFolha`).
+        if (window.Presenca) window.Presenca.volta = null;
     },
     pairEnterModal() {
         const campo = document.getElementById('pairCodeInput');
@@ -1630,6 +1633,12 @@ function closeModal(id, { viaHistorico = false, peloTeclado = false, focoComDest
     dfato('tela.modal', { fecha: id, viaHistorico });
     const m = document.getElementById(id);
     if (!m || m.classList.contains('hidden')) return;
+    // A folha do pedido que se abriu DA conversa, fechada pelo ✕, pelo Esc ou pelo fundo, devolve a
+    // conversa (decisão do dono, 2026-10-20): é uma TROCA de camada (`openModal` direto, como todo
+    // diálogo que esconde outro), sem `history.back()` nem entrada nova — nada espera o voltar nosso
+    // (gotcha #65). O voltar do aparelho (`viaHistorico`) fecha a folha e fica: reempilhar num
+    // `popstate` marca as entradas como puláveis. O «Sair», a queda e o `desligar` soltam a volta antes.
+    if (id === 'pedidoModal' && !viaHistorico && window.Presenca?.voltarDaFolha?.()) return;
     m.classList.add('hidden');
     if (!viaHistorico) CamadaVoltar.consumir();
     // A limpeza sabe se o fechamento veio do TECLADO (o Esc, o Enter no botão
@@ -15712,6 +15721,7 @@ function montarCard(place) {
     escreverValor(card.querySelector('.card-category'),
         place.categories && place.categories.length > 0 ? place.categories.join(', ') : '',
         'card.categories.empty');
+    if (place.categories && place.categories.length > 0) escreverCategorias(card.querySelector('.card-category'), place.categories.join(', '));
     // Endereço que virou título não se repete embaixo: seria a mesma informação
     // duas vezes, gastando uma linha que a caixa de mudanças usa melhor.
     card.querySelector('.card-address-row').classList.toggle('hidden', ident.tituloEhEndereco);
@@ -16381,7 +16391,33 @@ function renderMapa(card, place, refazendo) {
     // ganhar interação — ele é uma figura, e precisa ser igual ao que vem.
     box.style.cursor = 'zoom-in';
     box.dataset.pronto = '1';
+    ajustarEscalaDoMapa(box);
     return true;
+}
+
+// A barra de escala («100 m») mora embaixo à esquerda do mini-mapa e a legenda no
+// topo; com o mapa BAIXO (pedido com muito campo, no Galaxy Fold a caixa tem
+// 100 px) a legenda quebra em mais de uma linha e cobre a escala (3 de 3
+// legendas, medido). Decisão do dono (2026-10-20): a escala some quando é
+// COBERTA — a legenda é o que explica o desenho, e a escala inteira continua no
+// mapa ampliado, um toque adiante. Decide pela SOBREPOSIÇÃO medida, não por uma
+// altura: a quebra da legenda depende da largura e do idioma. Mede a cada
+// desenho (o `ResizeObserver` do `vigiarCaixaDoMapa` refaz quando a caixa
+// muda), tira a marca antes de medir (escondida a escala não tem retângulo) e
+// só mede com a caixa na tela. Vale pro card de fundo também: é a promessa do
+// que vem, e passa pelo mesmo `renderMapa`.
+function ajustarEscalaDoMapa(box) {
+    const escala = box.querySelector('.card-map-scale');
+    if (!escala) return;
+    escala.classList.remove('escala-coberta');
+    if (!box.clientWidth) return;
+    const e = escala.getBoundingClientRect();
+    if (!e.width) return;
+    const coberta = Array.from(box.querySelectorAll('.card-map-legend > *')).some((leg) => {
+        const r = leg.getBoundingClientRect();
+        return r.left < e.right && r.right > e.left && r.top < e.bottom && r.bottom > e.top;
+    });
+    if (coberta) escala.classList.add('escala-coberta');
 }
 
 // ── Mapa AMPLIADO: arrastar, zoom, e tiles buscados conforme navega ──────
@@ -16813,6 +16849,8 @@ function renderCardImages(card, place) {
         // mostrar que o selo visível não pagava.
         const propostaComOLocal = place.purType === 'NEW_PLACE' || place.reqType === 'VENUE';
         img.alt = altDaFoto(place, currentImgIdx + 1, urls.length);
+        // O nome do botão: o que é a foto E o que o toque faz (o `alt` sozinho só dizia o que ela é).
+        img.setAttribute('aria-label', `${img.alt}. ${t('card.img.ampliar')}`);
         img.title = propostaComOLocal ? t('card.img.novoLocal.title') : '';
         img.classList.remove('hidden');
         noImg.classList.add('hidden');
@@ -16843,6 +16881,22 @@ function renderCardImages(card, place) {
     img.addEventListener('click', (e) => {
         e.stopPropagation();
         e.preventDefault();
+        openLightbox(urls, currentImgIdx, newImageIdx, place.name, eDenuncia, place);
+    });
+    // A foto abre pelo TECLADO como pelo toque (decisão do dono, 2026-10-20; WCAG
+    // 2.1.1): ela era a única ampliação fora do Tab — o mapa vizinho já é um botão
+    // focável (R31-2-1). Só a foto VISÍVEL entra no passeio do Tab (escondida pelo
+    // `.hidden`, no slide do mapa ou quebrada, ela sai sozinha), o card de fundo
+    // segue `inert`, e o foco volta a ela quando a ampliada fecha
+    // (`devolverFocoDaAmpliacao`). Enter e Espaço abrem; SEGURADO abre uma vez só
+    // (a repetição abriria a camada de novo por cima do que a primeira abriu).
+    img.tabIndex = 0;
+    img.setAttribute('role', 'button');
+    img.addEventListener('keydown', (ev) => {
+        if (ev.target !== img || (ev.key !== 'Enter' && ev.key !== ' ')) return;
+        if (atalhoDoNavegador(ev)) return;
+        ev.stopPropagation(); ev.preventDefault();
+        if (ev.repeat) return;
         openLightbox(urls, currentImgIdx, newImageIdx, place.name, eDenuncia, place);
     });
 
@@ -18363,6 +18417,7 @@ function abrirPedidoRecebido(dados, deQuem) {
     // Categoria sai CRUA de propósito: o Waze regionaliza por PAÍS, não por
     // idioma, então traduzir erraria em metade dos países (ver gotcha #39).
     linha('pedidoCatRow', 'pedidoCat', (dados.categories || []).join(', '));
+    if ((dados.categories || []).length > 0) escreverCategorias($('pedidoCat'), dados.categories.join(', '));
     // Sem nome o endereço já virou o TÍTULO — repeti-lo aqui seria dizer a
     // mesma coisa duas vezes, que é o que o card também evita.
     linha('pedidoEndRow', 'pedidoEnd', ident.tituloEhEndereco ? '' : (dados.address || ''));
@@ -18402,6 +18457,24 @@ function ausenciaDeNomeEsperada(place) {
 // Escreve valor OU placeholder, marcando qual dos dois é. O texto entre
 // parênteses já diz sozinho (e o leitor de tela lê); o esmaecido em itálico é
 // reforço visual. Cor sozinha não serviria — WCAG 1.4.1.
+// A categoria sai CRUA do Waze, em MAIÚSCULAS e sem espaço (`RESIDENCE_HOME`), e o
+// navegador parte a palavra onde der: no Galaxy Fold «RESIDENCE_HOM / E» (39 de 51
+// pedidos reais, 50 em francês). Decisão do dono (2026-10-20): o texto continua o
+// do WME, e só a QUEBRA ganha um lugar certo — depois de cada «_», com `<wbr>`
+// (elemento, não caractere: um espaço de largura zero iria junto na cópia e alguns
+// leitores de tela o anunciam). Montado por nós do DOM, nunca por `innerHTML`: é
+// texto do Waze. O `textContent` não muda. Fonte única do card e da folha do pedido.
+function escreverCategorias(el, texto) {
+    if (!el) return;
+    const partes = String(texto).split('_');
+    el.textContent = '';
+    partes.forEach((parte, i) => {
+        const ultima = i === partes.length - 1;
+        el.appendChild(document.createTextNode(ultima ? parte : parte + '_'));
+        if (!ultima) el.appendChild(document.createElement('wbr'));
+    });
+}
+
 function escreverValor(el, valor, chaveVazio) {
     if (!el) return;
     const v = valor === null || valor === undefined ? '' : String(valor).trim();
@@ -25639,8 +25712,11 @@ const OFFLINE_CAIXA_PASSO_PX = 16;
 // contra TODA largura de 224 a 400 (de 3 em 3) e toda altura de 88 a 504 (de 8 em
 // 8), os passos de 16 a 88 dão ZERO tile faltando, e só a largura de agora deixava
 // 33 de 300 pedidos com falta. Custo MEDIDO nas 51 fixtures reais dos 6 países:
-// 98 → 100 tiles (+2%).
-const OFFLINE_CAIXA_LARGURA_MIN_PX = 224;
+// 98 → 100 tiles (+2%). Decisão de tela 1 (2026-10-20): o 568×320 deitado (iPhone SE
+// 1ª geração) passou à planta deitada, onde a foto tem 200–203 px de largura (medido a
+// 560 e a 568), abaixo dos 224 de antes: o piso desceu a 192 (múltiplo do passo de 48
+// ao teto de 400).
+const OFFLINE_CAIXA_LARGURA_MIN_PX = 192;
 const OFFLINE_CAIXA_LARGURA_MAX_PX = 400;
 const OFFLINE_CAIXA_PASSO_LARGURA_PX = 48;
 

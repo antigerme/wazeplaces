@@ -206,7 +206,7 @@ test('R19-8-01 · o CSS: a foto cede até 5.5rem, o piso do texto sai, e só den
   // degrau leem a PRIMEIRA ocorrência do @media: uma duplicata acima os desviava).
   const deitado = CSS_SEM.indexOf('.place-card.card-aperta .card-photo {', geral + 10);
   assert.ok(geral > 0 && deitado > geral, 'o card-aperta levanta o piso da foto também deitado (grade)');
-  assert.ok(CSS_SEM.slice(CSS_SEM.lastIndexOf('@media', deitado)).startsWith('@media (max-height: 480px) and (min-width: 600px) {'),
+  assert.ok(CSS_SEM.slice(CSS_SEM.lastIndexOf('@media', deitado)).startsWith('@media (max-height: 480px) and (min-width: 560px) {'),
     'o override do deitado não está no degrau de paisagem');
   assert.match(CSS_SEM.slice(deitado, deitado + 120), /min-height:\s*0/);
   // 1× nada muda: nenhuma regra solta (sem o `card-aperta`) pode ter sido mexida

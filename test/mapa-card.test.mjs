@@ -51,7 +51,7 @@ function desenhar(mapa, { w = 359, h = 200, extra = {} } = {}) {
     mapaEscala: M.mapaEscala, ESCALA_ALVO_CARD_PX: 80,
     Image: class extends El { constructor() { super('img'); } },
     API: { getRegion: () => 'row' }, t, i18nLocale: () => 'pt-BR',
-    vigiarCaixaDoMapa() {}, registrarFalhaDeTile() {},
+    vigiarCaixaDoMapa() {}, ajustarEscalaDoMapa() {}, registrarFalhaDeTile() {},
   };
   const nomes = ['pontosDoMapa', 'avisoForaDoMapa', 'formatarMetros', 'distanciaKm', 'escreverEscala', 'renderMapa'];
   const renderMapa = new Function(...Object.keys(deps), nomes.map(fatiar).join('\n') + '\nreturn renderMapa;')(

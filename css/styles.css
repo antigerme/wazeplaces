@@ -134,6 +134,13 @@ body.dark {
   outline-color: #22d3ee;
 }
 
+/* A foto do card é um botão focável (decisão do dono, 2026-10-20). Ela enche a caixa
+   (`.card-photo` corta com overflow), então o anel de 2 px a 2 px de fora seria cortado:
+   fica por DENTRO da borda da foto. */
+.card-image:focus-visible {
+  outline-offset: -3px;
+}
+
 .place-card {
   transition: transform 0.3s ease, opacity 0.3s ease;
   touch-action: none;
@@ -806,11 +813,26 @@ body > main {
 .modal-root:has(> .dialogo-cartao) {
   container: dialogo-raiz / inline-size;
 }
+/* LOTE 26 (R22-8-03) — ONDE O NAVEGADOR TEM O PORTÃO DE ROLAGEM, A FILEIRA PRENDE SEMPRE QUE O CARTÃO ROLA: o corte de 12,4rem saiu (lado a lado
+   também). O «Entendi» do «Como funciona», o 1º diálogo de todo aparelho, ficava cortado já a 1,15× em es no SE 375×667 (538–626 contra o cartão até
+   617) e, DEITADO a 1×, o afirmativo de «Sair», «Colar cookies» e «Como funciona» caía abaixo do corte (568×320 e 653×280: o cartão rola e a
+   fileira ficava no fim do conteúdo). Onde o cartão cabe nada muda (a fileira nem é `sticky`, como no lote 25: a 1× em pé nenhum celular rola).
+   O custo, dito e medido a 1× (240 pares, 6 aparelhos × pt/fr × 2 temas × 10 telas): 216 ficam byte a byte iguais e 18 são o defeito (afirmativo
+   abaixo do corte: 568×320 e o «Como funciona» em fr no de 320 px); os 6 restantes são cartões que rolavam 2 a 22 px com o botão à vista — o «Como
+   funciona» no Fold em fr e no de 320 px em pt (botão a 4 e 2 px da borda do cartão: o respiro de baixo, que a rolagem comia, volta) e o fim do
+   treino deitado em fr (4 px) —: a fileira prende no respiro e sobe até a medida da rolagem, ficando mais perto do texto de cima. Quem quiser os 6
+   byte a byte iguais volta o corte de largura e perde o «Entendi» do SE a 1,15× em es e o deitado. O ramo SEM o portão (WebKit, Firefox) segue como
+   estava: presa só abaixo de 12,4rem — prender lado a lado ali, sem como saber se o cartão rola, mudaria o desenho de TODO diálogo a 1×.
+   O foco acima da fileira lado a lado: `scroll-padding-bottom` de 7,5rem no cartão do ramo com o portão (a fileira lado a lado mede até 5,5rem +
+   o respiro de 1,5rem = 7rem, e 7,5rem com folga; o Fold a 1,8× e 2× chega a 7rem, o caso do dono). Ele vale só quando o cartão rola — que é exatamente
+   quando a fileira prende. Sem o portão só o empilhado tem padding (lado a lado a fileira nem prende, e padding a mais mudaria onde o foco
+   para a 1× com o teclado aberto). */
 @supports (container-type: scroll-state) {
   .dialogo-cartao {
     container-type: inline-size scroll-state;
+    scroll-padding-bottom: 7.5rem;
   }
-  @container dialogo (max-width: 12.4rem) and scroll-state(scrollable: block) {
+  @container dialogo scroll-state(scrollable: block) {
     .acoes-presas {
       position: sticky;
       bottom: 0;
@@ -1815,7 +1837,7 @@ button:active {
    o que sobra de largura. Grid em vez de flex-row porque assim a foto ocupa as
    duas linhas da coluna esquerda sem mexer no HTML: os mesmos três filhos,
    outra planta. De quebra o texto ganha uma coluna larga e quebra menos linha. */
-@media (max-height: 480px) and (min-width: 600px) {
+@media (max-height: 480px) and (min-width: 560px) {
   /* O `max-w-md` do <main> existe pra coluna de leitura em pé. Deitado ele
      estrangula justamente o que sobra (largura) e o endereço volta a quebrar
      em duas linhas. `main.container` = (0,1,2), vence a utility (gotcha #27). */
@@ -2418,6 +2440,13 @@ button:active {
   bottom: 3.25rem;
 }
 
+/* Decisão do dono (2026-10-20): a escala some quando a legenda a COBRE (mapa baixo, no
+   Galaxy Fold); a escala inteira segue no mapa ampliado. Quem põe a classe é o
+   `ajustarEscalaDoMapa`, por sobreposição medida. */
+.card-map-scale.escala-coberta {
+  display: none;
+}
+
 .mapa-leg {
   display: inline-flex;
   align-items: center;
@@ -2765,7 +2794,7 @@ button:active {
 }
 /* Deitado: 393px de altura pro app inteiro, e o card já usa 268. Mesmo
    raciocínio, mesmo remédio. */
-@media (max-height: 480px) and (min-width: 600px) {
+@media (max-height: 480px) and (min-width: 560px) {
   .card-flag-comment > p:first-of-type { display: none; }
   /* UMA linha aqui, e não 2 como nas outras telas — a diferença é ESTRUTURAL,
      não de gosto: deitado o card vira GRADE e a foto fica na coluna 1, ao lado

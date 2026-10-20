@@ -156,6 +156,7 @@ const Presenca = {
     vistas: new Set(),      // ids de mensagem já contados (o fluxo reentrega)
     historico: new Map(),   // pessoa -> { msgs, maisAntigas, carregada, erro, carregando }
     aberta: null,           // id da pessoa da conversa aberta
+    volta: null,            // { id, anexo, epoca }: a conversa de onde a folha do pedido recebido se abriu (`presencaVoltarDaFolha`)
     // O nome dela, guardado ao abrir: a conversa NOVA (ainda sem mensagem) só
     // tem o nome na lista de quem está no app, e a lista seguinte sem a pessoa
     // trocava o título por "Editor" (auditoria de 2026-09-29).
@@ -913,6 +914,7 @@ function presencaNaoLidasTotal() {
 
 function presencaDesligar() {
     Presenca.epoca += 1;
+    Presenca.volta = null;   // a folha do pedido que se abriu da conversa não devolve conversa de uma sessão que acabou
     presencaFluxoFechar();
     clearTimeout(Presenca.timers.fluxo);
     // O "lida" pendente é DESCARTADO, não pago: desligar é o "Sair", a troca de
@@ -2543,9 +2545,18 @@ function presencaPedirPerfil() {
     if (typeof refazerPerfilSeFaltar === 'function') refazerPerfilSeFaltar();
 }
 
-function presencaAbrirConversa(id) {
+function presencaAbrirConversa(id, { reaproveitar = false } = {}) {
     id = String(id);
     if (!PRESENCA_ID.test(id)) return;
+    // «Reaproveitar» é a VOLTA da folha do pedido (`presencaVoltarDaFolha`): a conversa já estava na
+    // tela, e nada chegou nem ficou por ler desde então — o histórico que ela tem é o de agora, e
+    // pedi-lo de novo seria uma ida ao servidor (free tier) sem nada novo pra trazer. Decidido ANTES
+    // de zerar as vivas e as não lidas, que são justamente o que separa «nada novo» de «chegou algo».
+    const hAntes = reaproveitar ? Presenca.historico.get(id) : null;
+    const cAntes = reaproveitar ? Presenca.conversas.find((x) => x.id === id) : null;
+    const nadaNovo = reaproveitar && !!hAntes && hAntes.carregada === true && !hAntes.erro
+        && !hAntes.carregando && hAntes.antigas !== 'carregando' && !hAntes.esperaPerfil
+        && !Presenca.vivas.has(id) && !(cAntes && cAntes.naoLidas > 0);
     // O pedido preso é da conversa em que foi preso. Escondida por outra camada
     // (a folha do pedido recebido), a conversa não passa pela limpeza dela, e o
     // anexo ficava: abrir a conversa com OUTRA pessoa mostrava o pedido na
@@ -2577,7 +2588,7 @@ function presencaAbrirConversa(id) {
     presencaRenderAnexo();
     presencaRenderPilula();
     presencaRenderLista();
-    presencaCarregarConversa(id);
+    if (!nadaNovo) presencaCarregarConversa(id);
     // O foco vai pro campo só com mouse (o computador, onde já se digita). No
     // DEDO, o foco no campo abre o teclado do celular por cima da conversa, bem
     // na hora em que a pessoa a abriu pra LER o que chegou (auditoria da rodada
@@ -2786,6 +2797,27 @@ function presencaCarregarAntigas(id) {
 
 function presencaFecharConversa() {
     closeModal('conversaModal');   // a limpeza do modal solta o `aberta`
+}
+
+// O ✕ (Esc, fundo) da folha do pedido que se abriu DA conversa devolve a conversa, em vez de largar a
+// pessoa no card (decisão do dono, 2026-10-20: quem abre o pedido está no meio de uma pergunta e quer
+// responder). Quem chama é o `closeModal` do app.js, só nos caminhos do APP — o voltar do aparelho fecha
+// a folha e fica (reempilhar num `popstate` marca as entradas como puláveis, e o voltar seguinte sai do
+// app). Troca de camada, não fechamento: `openModal` direto, sem `closeModal` nem entrada nova no
+// histórico (gotcha #65), então nada espera o voltar nosso. Devolve `true` se devolveu.
+// A volta só vale pra mesma sessão, com a presença de pé e ninguém aberto: o «Sair», a queda e o
+// `desligar` a soltam antes de fechar o que está aberto (`Presenca.volta = null`).
+function presencaVoltarDaFolha() {
+    const v = Presenca.volta;
+    Presenca.volta = null;
+    if (!v || !AppState.authenticated || Presenca.aberta !== null) return false;
+    if (v.epoca !== undefined && v.epoca !== Presenca.epoca) return false;
+    const folha = document.getElementById('pedidoModal');
+    if (!folha || folha.classList.contains('hidden')) return false;
+    presencaAbrirConversa(v.id, { reaproveitar: true });
+    if (Presenca.aberta !== v.id) return false;
+    if (v.anexo && !Presenca.anexo) { Presenca.anexo = v.anexo; presencaRenderAnexo(); }
+    return true;
 }
 
 // O texto no campo é da conversa `rascunhoDe`. Ele ATRAVESSAVA pra conversa com
@@ -3883,6 +3915,9 @@ function presencaMontar() {
             // ninguém: é o que alguém mostrou.
             const conv = Presenca.conversas.find((c) => c.id === id) || Presenca.online.find((p) => p.id === id);
             const de = m.meu ? (AppState.profile && AppState.profile.userName) : ((conv && conv.nome) || Presenca.nomeDaAberta);
+            // A folha esconde a conversa (um diálogo por vez) e a limpeza dela solta o `aberta` e o
+            // anexo: o ✕ da folha devolve a conversa (`presencaVoltarDaFolha`), com o que estava.
+            Presenca.volta = { id, anexo: Presenca.anexo || null, epoca: Presenca.epoca };
             window.abrirPedidoRecebido?.(m.card, de);
         });
         // Foto de terceiro que não carrega (apagada no Waze, rede caída) não
@@ -3961,6 +3996,7 @@ Object.assign(Presenca, {
     montar: presencaMontar,
     fecharConversa: presencaFecharConversa,
     esquecerAberta: presencaEsquecerAberta,
+    voltarDaFolha: presencaVoltarDaFolha,
     esquecerLista: presencaEsquecerLista,
     renderPilula: presencaRenderPilula,
     aoCarona: presencaAoCarona,

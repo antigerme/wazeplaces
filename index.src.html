@@ -1285,9 +1285,10 @@
                                      começava o arrastar NATIVO de imagem, que engole o `mouseup` — o card
                                      seguia o cursor sem botão, e o clique seguinte em qualquer lugar
                                      cometia a ação (auditoria de 2026-09-26; ver `enableSwipeOnCard`).
-                                     `tabindex="-1"`: fora do Tab, mas a foto pode RECEBER o foco de volta
-                                     quando a foto ampliada fecha — ela é quem a abriu, e sem isso o foco
-                                     caía no <body> (ver `devolverFocoDaAmpliacao`). -->
+                                     `tabindex="-1"` é só o ponto de partida: o `renderCardImages` a faz
+                                     um botão focável (`tabIndex = 0`, `role="button"`, Enter e Espaço
+                                     ampliam; decisão do dono, 2026-10-20) quando a foto está na tela, e o
+                                     foco volta a ela quando a ampliada fecha (`devolverFocoDaAmpliacao`). -->
                                 <img class="card-image w-full h-full object-cover hidden" alt="" draggable="false" tabindex="-1">
                                 <div class="card-image-new-border hidden absolute inset-0 ring-4 ring-amber-400 ring-inset pointer-events-none z-20"></div>
                                 <div class="card-image-new-badge hidden absolute top-1 left-2 z-30 text-3xl leading-none select-none pointer-events-none" style="filter: drop-shadow(0 0 2px rgba(0,0,0,0.9)) drop-shadow(0 0 6px rgba(0,0,0,0.6))" title="Foto nova proposta neste pedido" data-i18n-title="card.newPhoto.title">✨</div>
@@ -1615,9 +1616,14 @@
         <p id="lightboxAnuncio" class="sr-only" role="status" aria-live="polite"></p>
     </div>
 
+    <!-- Decisão do dono (2026-10-20): o título e o ✕ ficam PRESOS no topo. A Ajuda tem ~4.000 px, e quem a lê
+             até o fim ficava com o ✕ a milhares de pixels acima (só «Sair» à vista). `sticky` dentro do cartão que
+             rola: as margens negativas levam o cabeçalho até a borda do cartão (o padding de 1,5rem vira o dele) e
+             o `-top-6` desconta o padding do cartão, de onde o navegador mede o `sticky` (com `top-0` o texto passava
+             por cima do cabeçalho, nos 24 px da borda). O fundo é opaco nos dois temas. O `scroll-pt` mantém o foco do teclado fora de baixo do cabeçalho. -->
     <div id="helpModal" role="dialog" aria-modal="true" aria-labelledby="helpModalTitle" class="hidden fixed inset-0 modal-root pb-[calc(1rem+var(--kb-inset,0px))] bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
-        <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 max-h-[calc(85dvh-var(--kb-inset,0px))] overflow-y-auto overscroll-contain dark:bg-slate-800 dark:text-slate-200">
-            <div class="flex justify-between items-center mb-4">
+        <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 scroll-pt-[5rem] max-h-[calc(85dvh-var(--kb-inset,0px))] overflow-y-auto overscroll-contain dark:bg-slate-800 dark:text-slate-200">
+            <div class="flex justify-between items-center mb-2 pb-2 sticky -top-6 z-10 -mx-6 -mt-6 px-6 pt-6 bg-white dark:bg-slate-800">
                 <h3 id="helpModalTitle" class="text-2xl font-bold text-slate-800 dark:text-slate-100" data-i18n="modal.help.title">Ajuda</h3>
                 <button id="closeHelp" type="button" aria-label="Fechar" data-i18n-aria="common.close" class="min-w-[44px] min-h-[44px] flex items-center justify-center -mr-2 text-slate-500 hover:text-slate-700 rounded-full dark:text-slate-400">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">

@@ -2485,12 +2485,16 @@ for (const [nomeA, viewport] of APARELHOS_FONTE) {
     ['Fold 280×653 ×1,3', { width: 280, height: 653 }, 1.3], ['Fold 280×653 ×2', { width: 280, height: 653 }, 2]];
   // A 1× nenhum celular entra no estado empilhado (a fileira do Galaxy Fold tem 12,5rem, e o corte é 12,4rem): a fileira
   // segue no fluxo (`position: static`, sem o ::after) em TODOS os diálogos, nas telas que existem, inclusive deitadas.
-  const medirPosicaoDasAcoes = (id) => {
+  const medirPosicaoDasAcoes = async (id) => {
     const abrir = { logoutModal: () => abrirDialogoDoSair(), pasteModal: () => openModal('pasteModal'), pairEnterModal: () => openModal('pairEnterModal'),
       comoFuncionaModal: () => abrirComoFunciona(false), batchReadModal: () => openModal('batchReadModal'), treinoFimModal: () => openModal('treinoFimModal'),
       accessDeniedModal: () => openModal('accessDeniedModal') };
     abrir[id]();
-    return [...document.querySelectorAll(`#${id} .acoes-presas`)].map((el) => `${id}:${getComputedStyle(el).position}:${getComputedStyle(el, '::after').content}`);
+    // A consulta de rolagem (`scroll-state`) só vale depois do layout: dois quadros antes de ler a posição.
+    await new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+    const cartao = document.getElementById(id).firstElementChild;
+    return [...document.querySelectorAll(`#${id} .acoes-presas`)].map((el) => ({ id, pos: getComputedStyle(el).position, depois: getComputedStyle(el, '::after').content,
+      sobra: cartao.scrollHeight - cartao.clientHeight, suporta: CSS.supports('container-type', 'scroll-state') }));
   };
   {
     const IDS = ['logoutModal', 'pasteModal', 'pairEnterModal', 'comoFuncionaModal', 'batchReadModal', 'treinoFimModal', 'accessDeniedModal'];
@@ -2499,8 +2503,12 @@ for (const [nomeA, viewport] of APARELHOS_FONTE) {
       await entrarL25(page, 'fr');
       const posicoes = [];
       for (const id of IDS) { posicoes.push(...await page.evaluate(medirPosicaoDasAcoes, id)); await fecharL25(page); }
-      checa(posicoes.length === 7 && posicoes.every((p) => /:static:(none|normal)$/.test(p)),
-        `diálogos ${w}×${h} a 1×: a fileira de ações saiu do fluxo (position/::after) — mudaria o desenho de hoje`, posicoes.join(' | '));
+      // A 1× a fileira só sai do fluxo ONDE O CARTÃO ROLA e o navegador tem o portão de rolagem (R22-8-03: deitado, o afirmativo de 3 dos 7
+      // diálogos caía abaixo do corte); no resto — em pé, e em qualquer lugar sem rolagem — ela segue no fluxo, como sempre.
+      const presaDeVerdade = (p) => p.suporta && p.sobra >= 1;
+      checa(posicoes.length === 7 && posicoes.every((p) => (presaDeVerdade(p) ? p.pos === 'sticky' : p.pos === 'static' && /^(none|normal)$/.test(p.depois))),
+        `diálogos ${w}×${h} a 1×: a fileira de ações saiu do fluxo onde o cartão NÃO rola (ou ficou no fluxo onde ele rola) — mudaria o desenho de hoje`, JSON.stringify(posicoes));
+      if (h > w) checa(posicoes.filter((p) => p.sobra >= 1).length <= 1, `diálogos ${w}×${h} a 1×, em pé: mais de um cartão rola (${posicoes.filter((p) => p.sobra >= 1).map((p) => p.id)}): a regra de rolagem mudaria o desenho de hoje`);
       await ctx.close();
     }
   }
@@ -2659,6 +2667,44 @@ for (const [nomeA, viewport] of APARELHOS_FONTE) {
     }
     checa(sob >= 4, `foco acima da fileira: CONTROLE — sem o scroll-padding só ${sob} controles ficaram sob a fileira; a medida está cega`);
   }
+
+  // ── 10. R22-8-03 · o afirmativo lado a lado fica à vista quando o cartão ROLA (onde o navegador tem o portão de rolagem) ────
+  // O «Entendi» do «Como funciona» — o primeiro diálogo de todo aparelho — ficava cortado já a 1,15× em es no SE (538–626 contra o cartão até 617) e,
+  // deitado a 1×, o afirmativo de 3 dos 7 diálogos caía abaixo do corte. A fileira prendia só EMPILHADA; agora prende também lado a lado, mas SÓ com o
+  // cartão rolando. Sem o portão (WebKit, Firefox) a regra é a de sempre e nada disto se afirma: o bloco mede o que o navegador diz que faz.
+  const DIALOGOS_DA_FILEIRA_TODOS = [...DIALOGOS_DA_FILEIRA, ['treino', 'treinoFimModal', 'treinoFimOk'], ['negado', 'accessDeniedModal', 'closeAccessDenied']];
+  const CASOS_LADO_A_LADO = [['SE 375×667 ×1,15', { width: 375, height: 667 }, 1.15, ['pt', 'es', 'fr']], ['SE 375×667 ×1,3', { width: 375, height: 667 }, 1.3, ['pt', 'es', 'fr']],
+    ['320×568 ×1', { width: 320, height: 568 }, 1, ['es', 'fr']], ['568×320 ×1', { width: 568, height: 320 }, 1, LINGUAS], ['653×280 ×1', { width: 653, height: 280 }, 1, LINGUAS]];
+  let ladoVistos = 0, ladoSuporta = false;
+  for (const [rot, viewport, escala, langs] of CASOS_LADO_A_LADO) {
+    const { ctx, page, erros } = await novaPaginaL25(viewport, escala);
+    ladoSuporta = await page.evaluate(() => CSS.supports('container-type', 'scroll-state'));
+    for (const lang of langs) {
+      await entrarL25(page, lang);
+      for (const d of DIALOGOS_DA_FILEIRA_TODOS) {
+        const r = await page.evaluate(medirAfirmativa, d);
+        await fecharL25(page);
+        if (r.empilhado || r.sobra < 1 || !ladoSuporta) continue;
+        ladoVistos++;
+        checa(r.ok, `diálogo ${d[0]} ${rot} · ${lang}: o cartão rola, a fileira está lado a lado e o afirmativo não recebe o dedo sem rolar`, JSON.stringify(r));
+        checa(r.pos === 'sticky', `diálogo ${d[0]} ${rot} · ${lang}: o cartão rola lado a lado mas a fileira não está presa (position ${r.pos})`, JSON.stringify(r));
+      }
+    }
+    checa(erros.length === 0, `diálogos lado a lado ${rot}: erro de JS`, erros[0]);
+    await ctx.close();
+  }
+  if (ladoSuporta) {
+    checa(ladoVistos >= 25, `diálogos lado a lado: só ${ladoVistos} estados com o cartão rolando — a medida não provou nada`);
+    // CONTROLE: com a fileira no fluxo (o defeito) o MESMO deitado tem afirmativo cortado em algum diálogo.
+    let cortados = 0;
+    const { ctx, page } = await novaPaginaL25({ width: 568, height: 320 }, 1, { estilo: '.acoes-presas { position: static !important; }' });
+    for (const lang of LINGUAS) {
+      await entrarL25(page, lang);
+      for (const d of DIALOGOS_DA_FILEIRA_TODOS) { const r = await page.evaluate(medirAfirmativa, d); await fecharL25(page); if (!r.empilhado && !r.ok) cortados++; }
+    }
+    await ctx.close();
+    checa(cortados >= 3, `diálogos lado a lado: CONTROLE — sem a fileira presa só ${cortados} afirmativos ficaram cortados no 568×320; a medida está cega`);
+  } else console.log('  (pulado: este navegador não tem scroll-state — a fileira lado a lado segue no fluxo, como sempre; só o empilhado é medido, nos blocos de cima)');
 
   // ── 11. R22-7-05 · o texto grande não recorta: o cabeçalho «Lidos / Rejeitados» do Histórico, o título do fim do treino e o do «Sair», e os interruptores ───
   // Medido na rodada 22: o cabeçalho do Histórico saía pela ESQUERDA da caixa que o recorta («Lidos» virava «idos»: 3,4 px no Fold a 1,5×, 17,8 px no de 320
@@ -18601,5 +18647,5 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + o link do "Copiar link" colado no campo do código (lote 25: o ouvinte de paste do campo resgata o segredo de 20 símbolos e o campo não vira "PLA-CES"; o código colado junto do host entra no formato da tela sem resgatar sozinho; o texto que não é nenhum dos dois segue o colar do navegador)`
   + `, + o texto que entra no campo do código SEM colar (lote 26: o insertText do link resgata com o segredo e o campo não vira "HTT-PSP", a rede do input quando o beforeinput não se cancela, a frase com o código entrando no formato da tela, com os CONTROLES de digitar, do colar de verdade e do link já usado), + a fila de saída que NÃO gravou (aparelho ilegível e cota cheia: o ✓ ✕ ✓ entra no Histórico e o ✕ sem sinal reverte e avisa, com o CONTROLE do aparelho normal guardando na fila), + a troca de conta com o aparelho ilegível sem herdar o placar nem o ↑ que guarda o pedido nem o Desfazer desligado (com o CONTROLE do aparelho que lê)`
   + `, + a contagem guardada que não é número (lote 25: o histórico e o placar semeados com texto/lista/objeto/HTML — sem "0x · 07", sem "faltam NaN", sem "Lidos x", sem <img> no painel, o ✓ sobre o texto dando 1 e gravando número —, com o CONTROLE limpo "3 · 2", "10 · 4" e o texto de dígitos do placar valendo 8)`
-  + `, + o texto do sistema maior, 2ª parte (lote 25): o "Aplicar" e o "Cancelar" dos Filtros ao alcance (rolagem + hit-test + foco) no Fold e no de 320 px de 1× a 2× em 4 idiomas, sem mudar o repouso onde já se alcançava (o rodapé pendurado do Fold a 1,7× segue à vista, sem rolar); o recuo do 2º botão sem @container; o anel de foco das células nova/selecionada na TINTA, nos dois temas; a vitrine de patente em rem (o tamanho a 1×/2×/0,85×, nada sobreposto de 430 a 280 px, nada partido nem fora do corpo onde ela cabe — 430/412 px até 2×, 393 até 1,8×, 360 até 1,5×, o Fold a 1,15× e 1,3× —, o corte estreito de 10,5rem com o cartão, a escada e o título refluindo, e a geometria IGUAL com e sem a consulta de contêiner de 280 a 1280 px); o contraste alto (interruptores, aba, barra, células, botões, cartões e avisos — no Chromium, nos dois temas do sistema, com o CONTROLE do defeito de volta e o do modo desligado); a Ajuda e o pareamento quebrando o texto dentro da caixa; o "Acesso restrito" com título, 1ª frase e nome do perfil dentro do cartão no Fold a 1,5×; e a ação AFIRMATIVA dos diálogos que empilham sempre ao alcance do dedo (a fileira presa no fim do cartão, só abaixo de 12,4rem e só com o cartão rolando; a 1× nada muda, e o diálogo que empilha mas cabe também não) — cada medida com o seu CONTROLE`
-  + `, + o texto grande, lote 26 (telas): o foco do teclado SEMPRE acima da fileira presa (6 janelas × ${LINGUAS.length} idiomas × 7 diálogos, o CONTROLE sem o scroll-padding), o zoom do navegador a 400–500% nos Filtros (6 janelas, e as vizinhas em que o rodapé já se alcançava seguem sem rolar), o recorte do cabeçalho do Histórico, dos títulos e dos interruptores (4 janelas × ${LINGUAS.length} idiomas × 5 telas, o CONTROLE reproduzindo os números do auditor) e o «:» do Resumo em francês sem começar linha (varrendo a largura, com o CONTROLE do espaço comum)`);
+  + `, + o texto do sistema maior, 2ª parte (lote 25): o "Aplicar" e o "Cancelar" dos Filtros ao alcance (rolagem + hit-test + foco) no Fold e no de 320 px de 1× a 2× em 4 idiomas, sem mudar o repouso onde já se alcançava (o rodapé pendurado do Fold a 1,7× segue à vista, sem rolar); o recuo do 2º botão sem @container; o anel de foco das células nova/selecionada na TINTA, nos dois temas; a vitrine de patente em rem (o tamanho a 1×/2×/0,85×, nada sobreposto de 430 a 280 px, nada partido nem fora do corpo onde ela cabe — 430/412 px até 2×, 393 até 1,8×, 360 até 1,5×, o Fold a 1,15× e 1,3× —, o corte estreito de 10,5rem com o cartão, a escada e o título refluindo, e a geometria IGUAL com e sem a consulta de contêiner de 280 a 1280 px); o contraste alto (interruptores, aba, barra, células, botões, cartões e avisos — no Chromium, nos dois temas do sistema, com o CONTROLE do defeito de volta e o do modo desligado); a Ajuda e o pareamento quebrando o texto dentro da caixa; o "Acesso restrito" com título, 1ª frase e nome do perfil dentro do cartão no Fold a 1,5×; e a ação AFIRMATIVA dos diálogos que empilham sempre ao alcance do dedo (a fileira presa no fim do cartão com o cartão rolando — lado a lado também, onde o navegador tem o portão de rolagem —; a 1× o diálogo que cabe não muda) — cada medida com o seu CONTROLE`
+  + `, + o texto grande, lote 26 (telas): o foco do teclado SEMPRE acima da fileira presa (6 janelas × ${LINGUAS.length} idiomas × 7 diálogos, o CONTROLE sem o scroll-padding), o afirmativo lado a lado à vista quando o cartão rola (SE a 1,15× e 1,3×, 320 px, e DEITADO a 1×, só onde há scroll-state, com o CONTROLE da fileira no fluxo), o zoom do navegador a 400–500% nos Filtros (6 janelas, e as vizinhas em que o rodapé já se alcançava seguem sem rolar), o recorte do cabeçalho do Histórico, dos títulos e dos interruptores (4 janelas × ${LINGUAS.length} idiomas × 5 telas, o CONTROLE reproduzindo os números do auditor) e o «:» do Resumo em francês sem começar linha (varrendo a largura, com o CONTROLE do espaço comum)`);
