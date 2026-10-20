@@ -18546,6 +18546,89 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
 // em voo. E ele foi SABOTADO com os dois defeitos de produção: os dois
 // reprovam. Roda no CI por `npm run test:offline`.
 
+// ── Decisão de tela 2 (2026-10-20): o perfil do Galaxy Fold numa SEGUNDA FILEIRA ────────────────────────
+// O nome do perfil ficava com 12 px («a.») com o ícone de gente na tela, e a fixture deste arquivo usa o nome «a» em
+// toda parte: foi por isso que o defeito nunca apareceu. Aqui os nomes são os de VERDADE (`antigerme` e o gerado
+// `world_12345678`), com e sem foto de perfil, com e sem o ícone de gente. A regra vale ≤ 290 px e com o perfil na tela,
+// CONSTANTE (o ícone some quando não há ninguém: um cabeçalho que subisse e descesse mexeria o card por motivo alheio).
+{
+  const medirPerfil = async (w, h, { nome, avatar, pilula, lang = 'pt' }) => {
+    const ctx = await browser.newContext({ viewport: { width: w, height: h }, serviceWorkers: 'block', locale: lang === 'pt' ? 'pt-BR' : lang });
+    await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route('https://sms-profile-image.waze.com/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml',
+      body: "<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64'><rect width='64' height='64' fill='#0891b2'/></svg>" }));
+    await ctx.addInitScript(() => { try { localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true })); } catch (e) { /* segue */ } });
+    const page = await ctx.newPage();
+    const erros = [];
+    page.on('pageerror', (e) => erros.push(String(e.message || e)));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await page.evaluate(({ nome, avatar, pilula, lang }) => {
+      setLang(lang); applyI18n();
+      AppState.authenticated = true;
+      AppState.profile = { id: 1, userName: nome, rank: 5, isAreaManager: true, isStaff: false, profileImageUrl: avatar ? 'https://sms-profile-image.waze.com/12444348' : undefined };
+      document.getElementById('authScreen').classList.add('hidden');
+      document.getElementById('appScreen').classList.remove('hidden');
+      document.getElementById('filtersBtn').classList.remove('hidden');
+      document.getElementById('refreshBtn').classList.remove('hidden');
+      renderProfileHeader(AppState.profile);
+      showLoading(false);
+      const p = { venueID: 'v1', updateRequestID: 'u1', name: 'Padaria Pão Quente', categories: ['BAKERY'], address: 'Rua das Flores, 120', updateTypeKey: 'NEW_PLACE',
+        reqType: 'VENUE', imageUrls: [], createdBy: 'x', lat: -20.8, lon: -49.4, changes: [] };
+      AppState.serverTotal = 1; AppState.queue = [p]; AppState.currentPlace = p; updateStats();
+      showCurrentPlace();
+      const pill = document.getElementById('presencaPill');
+      pill.classList.toggle('hidden', !pilula);
+      if (pilula) { const c = document.getElementById('presencaCount'); c.textContent = '3'; c.classList.remove('hidden'); }
+    }, { nome, avatar, pilula, lang });
+    await doisQuadros(page);
+    if (avatar) await esperarNaPagina(page, () => { const a = document.getElementById('userAvatar'); return !!a && a.complete && a.naturalWidth > 0; }, 'a foto do perfil carregar', 6000);
+    await doisQuadros(page);
+    const m = await page.evaluate(() => {
+      const cx = (id) => document.getElementById(id);
+      const r = (el) => { const b = el.getBoundingClientRect(); return { l: b.left, r: b.right, t: b.top, b: b.bottom, w: b.width, h: b.height }; };
+      const botoes = ['presencaPill', 'themeBtn', 'refreshBtn', 'filtersBtn', 'helpBtn'].map(cx).filter((e) => e && e.getClientRects().length).map(r);
+      const nomeEl = cx('userName'), rankEl = cx('userRank'), av = cx('userAvatar');
+      const frente = document.querySelector('#cardStack .place-card:not(.card-fundo)');
+      const acoes = frente.querySelector('.card-actions').getBoundingClientRect();
+      return { header: document.querySelector('header').getBoundingClientRect().height, scrollW: document.documentElement.scrollWidth, vw: innerWidth,
+        nomeW: nomeEl.clientWidth, nomeCortado: nomeEl.scrollWidth > nomeEl.clientWidth + 0.5, rankW: rankEl.clientWidth, rankCortado: rankEl.scrollWidth > rankEl.clientWidth + 0.5,
+        avatar: av && av.getClientRects().length ? { w: av.getBoundingClientRect().width, h: av.getBoundingClientRect().height } : null,
+        alvoMin: Math.min(...botoes.map((b) => Math.min(b.w, b.h))), estouro: Math.max(0, ...botoes.map((b) => b.r - innerWidth), ...botoes.map((b) => -b.l)),
+        acoesNaTela: acoes.top >= 0 && acoes.bottom <= innerHeight + 0.5 };
+    });
+    await ctx.close();
+    return { ...m, erros };
+  };
+  const rotulo = (n, a, p) => `${n}, ${a ? 'com' : 'sem'} foto, ${p ? 'com' : 'sem'} o ícone de gente`;
+  const alturas = new Set();
+  for (const nome of ['antigerme', 'world_12345678']) for (const avatar of [true, false]) for (const pilula of [true, false]) {
+    const m = await medirPerfil(280, 653, { nome, avatar, pilula });
+    const r = rotulo(nome, avatar, pilula);
+    alturas.add(Math.round(m.header) + (avatar ? 'f' : 's'));
+    checa(m.nomeW >= 56 && !m.nomeCortado, `Fold, ${r}: o nome do perfil tem ${m.nomeW} px${m.nomeCortado ? ' e está CORTADO' : ''} (era 12 px com o ícone de gente)`);
+    checa(!m.rankCortado, `Fold, ${r}: o nível está cortado`);
+    checa(!m.avatar || (Math.abs(m.avatar.w - 32) < 0.5 && Math.abs(m.avatar.h - 32) < 0.5), `Fold, ${r}: o avatar não é 32×32 (${m.avatar && m.avatar.w}×${m.avatar && m.avatar.h})`);
+    checa(m.alvoMin >= 44, `Fold, ${r}: um botão do cabeçalho tem alvo de ${m.alvoMin} px`);
+    checa(m.estouro === 0 && m.scrollW === m.vw, `Fold, ${r}: o cabeçalho estoura (${m.estouro} px; scrollWidth ${m.scrollW} de ${m.vw})`);
+    checa(m.acoesNaTela, `Fold, ${r}: ✕ ↑ ✓ saíram da tela com o cabeçalho mais alto`);
+    checa(m.erros.length === 0, `Fold, ${r}: erro de JS: ${m.erros[0]}`);
+  }
+  // CONSTANTE: o mesmo cabeçalho com e sem o ícone (por foto: com foto o avatar de 32 px é a fileira mais alta)
+  for (const avatar of [true, false]) {
+    const com = await medirPerfil(280, 653, { nome: 'antigerme', avatar, pilula: true });
+    const sem = await medirPerfil(280, 653, { nome: 'antigerme', avatar, pilula: false });
+    checa(Math.round(com.header) === Math.round(sem.header), `Fold, ${avatar ? 'com' : 'sem'} foto: o cabeçalho tem ${Math.round(com.header)} px com o ícone de gente e ${Math.round(sem.header)} sem — ele subiria e desceria com quem entra e sai`);
+  }
+  // CONTROLE 1: o que a regra NÃO alcança fica como estava (o cabeçalho de 69 px, sem segunda fileira)
+  for (const [w, h] of [[291, 700], [320, 568], [375, 667]]) {
+    const m = await medirPerfil(w, h, { nome: 'antigerme', avatar: true, pilula: true });
+    checa(Math.round(m.header) === 69, `${w} px: o cabeçalho tem ${Math.round(m.header)} px — a segunda fileira vazou além de 290 px`);
+  }
+  // CONTROLE 2 (o instrumento enxerga o defeito de antes): a 320 px, com foto e o ícone, o nome segue curto — é o que a regra NÃO cobre
+  const antes = await medirPerfil(320, 568, { nome: 'antigerme', avatar: true, pilula: true });
+  checa(antes.nomeW < 56, `CONTROLE: a 320 px com foto e o ícone o nome tem ${antes.nomeW} px — o instrumento não vê o defeito que a regra conserta no Fold`);
+}
+
 await browser.close();
 servidor.kill();
 checa(presencaComSessaoFalsa.length === 0,
