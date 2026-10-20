@@ -25712,8 +25712,11 @@ const OFFLINE_CAIXA_PASSO_PX = 16;
 // contra TODA largura de 224 a 400 (de 3 em 3) e toda altura de 88 a 504 (de 8 em
 // 8), os passos de 16 a 88 dão ZERO tile faltando, e só a largura de agora deixava
 // 33 de 300 pedidos com falta. Custo MEDIDO nas 51 fixtures reais dos 6 países:
-// 98 → 100 tiles (+2%).
-const OFFLINE_CAIXA_LARGURA_MIN_PX = 224;
+// 98 → 100 tiles (+2%). Decisão de tela 1 (2026-10-20): o 568×320 deitado (iPhone SE
+// 1ª geração) passou à planta deitada, onde a foto tem 200–203 px de largura (medido a
+// 560 e a 568), abaixo dos 224 de antes: o piso desceu a 192 (múltiplo do passo de 48
+// ao teto de 400).
+const OFFLINE_CAIXA_LARGURA_MIN_PX = 192;
 const OFFLINE_CAIXA_LARGURA_MAX_PX = 400;
 const OFFLINE_CAIXA_PASSO_LARGURA_PX = 48;
 

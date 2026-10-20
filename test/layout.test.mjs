@@ -1490,7 +1490,7 @@ test('deitado, a barra de ações fica sob a FOTO — o texto leva a altura inte
   // UPDATE comum pede 253: o card rolava por dentro nos QUATRO tipos de pedido,
   // e conteúdo que rola desliga o arraste pra cima (gotcha #29). Movendo a barra
   // pra baixo da foto, o texto recebe as duas fileiras e só o caso extremo rola.
-  const m = CSS.match(/@media \(max-height: 480px\) and \(min-width: 600px\) \{[\s\S]*?\n\}/);
+  const m = CSS.match(/@media \(max-height: 480px\) and \(min-width: 560px\) \{[\s\S]*?\n\}/);
   assert.ok(m, 'sumiu o degrau de paisagem');
   const bloco = m[0];
   const regra = (sel) => {

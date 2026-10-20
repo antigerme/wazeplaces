@@ -1837,7 +1837,7 @@ button:active {
    o que sobra de largura. Grid em vez de flex-row porque assim a foto ocupa as
    duas linhas da coluna esquerda sem mexer no HTML: os mesmos três filhos,
    outra planta. De quebra o texto ganha uma coluna larga e quebra menos linha. */
-@media (max-height: 480px) and (min-width: 600px) {
+@media (max-height: 480px) and (min-width: 560px) {
   /* O `max-w-md` do <main> existe pra coluna de leitura em pé. Deitado ele
      estrangula justamente o que sobra (largura) e o endereço volta a quebrar
      em duas linhas. `main.container` = (0,1,2), vence a utility (gotcha #27). */
@@ -2794,7 +2794,7 @@ button:active {
 }
 /* Deitado: 393px de altura pro app inteiro, e o card já usa 268. Mesmo
    raciocínio, mesmo remédio. */
-@media (max-height: 480px) and (min-width: 600px) {
+@media (max-height: 480px) and (min-width: 560px) {
   .card-flag-comment > p:first-of-type { display: none; }
   /* UMA linha aqui, e não 2 como nas outras telas — a diferença é ESTRUTURAL,
      não de gosto: deitado o card vira GRADE e a foto fica na coluna 1, ao lado

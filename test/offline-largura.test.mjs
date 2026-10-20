@@ -62,7 +62,7 @@ const DESKTOP = { iw: 1280, ih: 800, w: 398, h: 337, pilha: 640 };
 // pela faixa varrida em qualquer um deles.
 const FAMILIAS = { celular: [RETRATO, PAISAGEM], fold: [FOLD_FECHADO, FOLD_ABERTO], desktop: [DESKTOP] };
 const alturaAte = (estados) => Math.min(504, Math.max(...estados.map((e) => e.pilha)));
-const LARGURAS_REAIS = [230, 246, 267, 326, 356, 398];
+const LARGURAS_REAIS = [200, 203, 230, 246, 267, 326, 356, 398];   // 200 e 203: o 560 e o 568×320 deitados (decisão de tela 1, 2026-10-20)
 
 let semente = 20260101;
 const rnd = () => (semente = (semente * 1664525 + 1013904223) % 4294967296) / 4294967296;
@@ -103,7 +103,7 @@ for (const [fam, estados] of Object.entries(FAMILIAS)) {
       assert.equal(faltas(g, sinteticos, larguras, hAte), 0, 'a faixa não cobre alguma (largura, altura) do card depois de girar/dobrar: o mapa fica sem tile sem rede');
       assert.equal(faltas(g, fixturesReais, larguras, hAte), 0, 'idem, nas fixtures reais dos 6 países');
       // E a faixa inteira de larguras medidas (230–398), que cobre o aparelho que ninguém listou.
-      assert.equal(faltas(g, sinteticos, LARGURAS_REAIS, hAte), 0, 'a faixa não cobre as larguras medidas do card (230–398)');
+      assert.equal(faltas(g, sinteticos, LARGURAS_REAIS, hAte), 0, 'a faixa não cobre as larguras medidas do card (200–398)');
     });
   }
 }
