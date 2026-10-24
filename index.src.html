@@ -240,10 +240,20 @@
             </div>
             <div id="userProfileBadge" class="hidden flex items-center gap-2 min-w-0 flex-1 justify-end">
                 <span id="devModeBadge" class="hidden text-[0.6875rem] font-bold text-white bg-purple-600 px-1.5 py-0.5 rounded uppercase tracking-wider" title="Modo Desenvolvedor ativo — restrições removidas" data-i18n-title="header.devBadge.title">DEV</span>
-                <div class="leading-tight text-right min-w-0">
-                    <p id="userName" class="text-xs font-bold text-slate-700 truncate dark:text-slate-200" dir="auto"></p>
-                    <p id="userRank" class="text-[0.6875rem] text-slate-500 uppercase tracking-wider truncate dark:text-slate-400"></p>
-                </div>
+                <!-- O CRACHÁ É UM BOTÃO (v2026.10.24): abre o Histórico e as
+                     Preferências (o modo "perfil" do diálogo dos Filtros), e é
+                     nele que acende o ponto da conquista nova. Só o nome e a foto
+                     são o botão, nunca o `flex-1` de fora: o vão vazio do
+                     cabeçalho viraria alvo de toque invisível. O `px-1 -mx-1` dá
+                     respiro ao fundo do toque sem tirar um pixel do nome (a
+                     margem negativa devolve o padding). Dentro de <button> só cabe
+                     conteúdo de frase: os <p> viraram <span class="block">, com
+                     os mesmos ids. -->
+                <button id="perfilBtn" type="button" class="relative flex items-center gap-2 min-w-0 min-h-[44px] px-1 -mx-1 rounded-xl text-left hover:bg-cyan-50 dark:hover:bg-cyan-500/10 transition-colors">
+                <span class="block leading-tight text-right min-w-0">
+                    <span id="userName" class="block text-xs font-bold text-slate-700 truncate dark:text-slate-200" dir="auto"></span>
+                    <span id="userRank" class="block text-[0.6875rem] text-slate-500 uppercase tracking-wider truncate dark:text-slate-400"></span>
+                </span>
                 <!-- `fetchpriority="low"` porque esta é a imagem MAIS PESADA do app e a
                      menos importante: é exibida a 32px e pesa MEGABYTES. O Waze mudou o
                      host em setembro/2026 e o tamanho subiu junto — MEDIDO nos dois:
@@ -258,6 +268,12 @@
                      explícitos porque o `w-8 h-8` só vale depois do CSS. -->
                 <img id="userAvatar" width="32" height="32" fetchpriority="low" decoding="async"
                      class="w-8 h-8 rounded-full border-2 border-cyan-200 object-cover bg-slate-100 flex-shrink-0 dark:bg-slate-800" alt="">
+                <!-- Conquista nova: um PONTO, nunca número (ver atualizarSeloDeConquista).
+                     Preso ao CANTO do botão e não à foto: o `avatarSemFoto` troca o
+                     <img> por outro, e sem foto ele some (`display: none`).
+                     `aria-hidden` porque a informação vai no aria-label do botão. -->
+                <span id="conqSelo" class="conq-selo hidden" aria-hidden="true"></span>
+                </button>
             </div>
             <!-- `gap-0`: os alvos de 44px podem encostar (é o que a barra de ações
                  do Android faz). O vão de 8px × 4 era espaçamento puro, e eram esses
@@ -304,9 +320,6 @@
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/>
                     </svg>
-                    <!-- Conquista nova: um PONTO, nunca número (ver atualizarSeloDeConquista).
-                         `aria-hidden` porque a informação vai no aria-label do botão. -->
-                    <span id="conqSelo" class="conq-selo hidden" aria-hidden="true"></span>
                 </button>
                 <button id="helpBtn" type="button" aria-label="Ajuda e configurações" data-i18n-aria="header.help.aria" title="Ajuda, atalhos, sair" data-i18n-title="header.help.title" class="min-w-[44px] min-h-[44px] flex items-center justify-center text-cyan-600 hover:text-white hover:bg-cyan-500 dark:hover:bg-cyan-500 bg-cyan-50 rounded-full transition-all dark:bg-cyan-600/20">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -574,31 +587,38 @@
             </div>
         </div>
 
-        <!-- Modal Filtros e Preferências: 3 abas (Filtros | Preferências | Histórico).
-             Rodapé é CONTEXTUAL: Cancelar/Aplicar só na aba Filtros (formulário);
-             Preferências aplicam na hora (padrão M3 pra settings) e Histórico é só
-             leitura → ambas usam "Fechar". IDs de todos os campos preservados. -->
+        <!-- O diálogo dos Filtros tem DOIS modos (v2026.10.24), na mesma caixa:
+             - o FUNIL abre os FILTROS: um formulário, sem abas, com Cancelar · Aplicar;
+             - o CRACHÁ do perfil (#perfilBtn) abre o HISTÓRICO e as PREFERÊNCIAS, em
+               duas abas que aplicam na hora (Fechar).
+             Eram três abas numa janela só, com dois jeitos de confirmar: o filtro
+             mudado e não aplicado sumia calado no "Fechar" das outras abas, e a
+             preferência mudada seguia mudada no "Cancelar". Os ids são os de antes
+             (`filtersModal`, `filtersPanel*`), e `filtersTabFilters` é o nome do
+             modo Filtros no `switchFilterTab`, não um botão. -->
         <div id="filtersModal" role="dialog" aria-modal="true" aria-labelledby="filtersModalTitle" class="hidden fixed inset-0 modal-root pb-[calc(1rem+var(--kb-inset,0px))] bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
             <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full flex flex-col max-h-[calc(85dvh-var(--kb-inset,0px))] dark:bg-slate-800 dark:text-slate-200">
-                <div class="flex justify-between items-center px-6 pt-4 pb-2 flex-shrink-0">
-                    <h3 id="filtersModalTitle" class="text-xl font-bold text-slate-800 min-w-0 break-words dark:text-slate-100" data-i18n="modal.filters.title">Filtros e Preferências</h3>
-                    <button id="closeFilters" type="button" aria-label="Fechar" data-i18n-aria="common.close" class="min-w-[44px] min-h-[44px] flex items-center justify-center -mr-2 text-slate-500 hover:text-slate-700 rounded-full dark:text-slate-400">
-                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-                    </button>
-                </div>
+                <div class="border-b border-slate-100 flex-shrink-0 dark:border-slate-700">
+                    <div class="flex justify-between items-center px-6 pt-4 pb-2">
+                        <h3 id="filtersModalTitle" class="text-xl font-bold text-slate-800 min-w-0 break-words dark:text-slate-100" data-i18n="filters.section.filters">Filtros</h3>
+                        <button id="closeFilters" type="button" aria-label="Fechar" data-i18n-aria="common.close" class="min-w-[44px] min-h-[44px] flex items-center justify-center -mr-2 text-slate-500 hover:text-slate-700 rounded-full dark:text-slate-400">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                        </button>
+                    </div>
 
-                <div class="px-6 pb-3 border-b border-slate-100 flex-shrink-0 dark:border-slate-700">
-                    <div role="tablist" aria-labelledby="filtersModalTitle" class="seg-tabs">
-                        <button type="button" role="tab" id="filtersTabFilters" aria-selected="true" aria-controls="filtersPanelFilters" class="seg-tab" data-i18n="filters.section.filters">Filtros</button>
-                        <button type="button" role="tab" id="filtersTabPrefs" aria-selected="false" tabindex="-1" aria-controls="filtersPanelPrefs" class="seg-tab" data-i18n="filters.section.preferences">Preferências</button>
-                        <button type="button" role="tab" id="filtersTabHistory" aria-selected="false" tabindex="-1" aria-controls="filtersPanelHistory" class="seg-tab" data-i18n="stats.history.title">Histórico</button>
+                    <!-- As abas só existem no modo do perfil (o JS esconde a faixa nos Filtros). -->
+                    <div id="filtersTabsBar" class="hidden px-6 pb-3">
+                        <div role="tablist" aria-labelledby="filtersModalTitle" class="seg-tabs">
+                            <button type="button" role="tab" id="filtersTabHistory" aria-selected="false" tabindex="-1" aria-controls="filtersPanelHistory" class="seg-tab" data-i18n="stats.history.title">Histórico</button>
+                            <button type="button" role="tab" id="filtersTabPrefs" aria-selected="false" tabindex="-1" aria-controls="filtersPanelPrefs" class="seg-tab" data-i18n="filters.section.preferences">Preferências</button>
+                        </div>
                     </div>
                 </div>
 
                 <div class="flex-1 overflow-y-auto overscroll-contain px-6 py-4">
 
-                    <!-- ══ ABA FILTROS ══ -->
-                    <div id="filtersPanelFilters" role="tabpanel" aria-labelledby="filtersTabFilters" class="space-y-4">
+                    <!-- ══ FILTROS (o modo do funil) ══ -->
+                    <div id="filtersPanelFilters" class="space-y-4">
                         <div class="bg-cyan-50 border border-cyan-100 dark:border-cyan-400/30 rounded-xl p-3 dark:bg-cyan-600/20">
                             <label class="flex items-center justify-between gap-3 text-sm cursor-pointer min-h-[44px]">
                                 <span class="min-w-0 break-words">
@@ -1633,8 +1653,8 @@
             </div>
 
             <div class="space-y-4 text-slate-600 dark:text-slate-300">
-                <!-- O seletor de idioma ficava SÓ em Filtros → Preferências, e o
-                     botão de Filtros é escondido enquanto não há sessão. Quem caía
+                <!-- O seletor de idioma ficava SÓ nas Preferências, e elas só
+                     abrem com sessão (hoje pelo crachá do perfil). Quem caía
                      num idioma que não lê não tinha como trocar: precisaria entrar
                      primeiro, lendo instruções que não entende. O ⓘ é o único botão
                      visível deslogado, então o escape mora aqui também. O globo e os
@@ -1710,7 +1730,7 @@
                              escrita em lugar nenhum: o aviso de desbloqueio só dispara
                              na TRANSIÇÃO de cruzar a cota, então quem já estava acima
                              dela nunca soube. Aqui é onde quem procura, procura. -->
-                        <li data-i18n-html="help.howToUse.step6">Já pegou o ritmo? Em <strong>Filtros → Preferências</strong> dá pra desligar a espera do Desfazer e tratar sem pausa</li>
+                        <li data-i18n-html="help.howToUse.step6">Já pegou o ritmo? Toque no <strong>seu nome</strong>, no alto da tela: em <strong>Preferências</strong> dá pra desligar a espera do Desfazer e tratar sem pausa</li>
                     </ol>
                 </div>
 

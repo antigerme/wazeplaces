@@ -334,12 +334,20 @@ test('o selo é um PONTO, e ele fala pra leitor de tela', () => {
   // do botão. Sem isto o selo não existe pra leitor de tela nenhum.
   assert.match(f, /setAttribute\('aria-label'/,
     'o selo deixou de anunciar no aria-label do botão');
-  assert.match(f, /conq\.selo\.aria/, 'o aria do selo deixou de vir do dicionário');
+  // O nome do crachá sai de UMA função (o desenho do cabeçalho e o ponto o escrevem).
+  assert.match(f, /rotuloDoPerfil\(tem\)/, 'o selo deixou de pedir o nome do crachá à função única');
+  const r = fatiar('rotuloDoPerfil');
+  assert.match(r, /conq\.selo\.aria/, 'o aria do selo deixou de vir do dicionário');
+  assert.match(r, /t\('header\.perfil\.aria', \{ nome \}\)/, 'o nome do crachá deixou de vir do dicionário, com o nome da pessoa');
   const html = readFileSync(new URL('../index.src.html', import.meta.url), 'utf8');
   assert.match(html, /id="conqSelo"[^>]*aria-hidden="true"/,
     'o ponto perdeu o aria-hidden — leitor de tela leria um elemento vazio');
-  assert.match(html, /id="filtersBtn"[^>]*class="[^"]*\brelative\b/,
-    'o #filtersBtn perdeu o `relative` — o selo absoluto ancoraria em outro lugar');
+  assert.match(html, /id="perfilBtn"[^>]*class="[^"]*\brelative\b/,
+    'o #perfilBtn perdeu o `relative` — o selo absoluto ancoraria em outro lugar');
+  // Desde v2026.10.24 o ponto mora no CRACHÁ do perfil, onde o Histórico abre — não no funil.
+  const iBtn = html.indexOf('id="perfilBtn"');
+  const iSelo = html.indexOf('id="conqSelo"');
+  assert.ok(iBtn > 0 && iSelo > iBtn && iSelo < html.indexOf('</button>', iBtn), 'o ponto da conquista saiu do crachá do perfil');
 });
 
 test('abrir a aba Histórico apaga o selo — e é na TROCA DE ABA, não no clique', () => {
@@ -365,9 +373,13 @@ test('o dicionário tem o texto do selo nas quatro línguas', () => {
   for (const l of ['pt', 'en', 'es', 'fr']) {
     const ini = I18N.indexOf(`\n  ${l}: {`);
     const bloco = I18N.slice(ini, I18N.indexOf('\n  },', ini));
-    for (const k of ['conq.nova', 'conq.selo.aria']) {
+    for (const k of ['conq.nova', 'conq.selo.aria', 'header.perfil.aria']) {
       assert.ok(bloco.includes(`'${k}'`), `${l}: falta ${k}`);
     }
+    // O nome acessível do crachá COMEÇA pelo nome que está na tela (WCAG 2.5.3,
+    // "label in name"): é o nome da pessoa que se fala pra um comando de voz.
+    const m = bloco.match(/'header\.perfil\.aria': '([^']*)'/);
+    assert.ok(m && m[1].startsWith('{nome}'), `${l}: o nome do crachá não começa pelo nome da pessoa`);
   }
 });
 
@@ -400,43 +412,50 @@ test('a condição do ponto tem FONTE ÚNICA — quem acende e quem leva concord
   assert.ok(!/novas\.length/.test(selo), 'a condição foi duplicada dentro do atualizarSeloDeConquista');
 });
 
-test('o botão de Filtros só desvia COM o ponto aceso', () => {
+test('o crachá do perfil só desvia COM o ponto aceso, e o funil abre sempre os Filtros', () => {
   const corpo = semComentariosJS(APP);
-  const m = /filtersBtn'\)\.addEventListener\('click',([\s\S]{0,400}?)\n    \}\);/.exec(corpo);
-  assert.ok(m, 'o handler do #filtersBtn mudou de forma');
+  const m = /perfilBtn'\)\.addEventListener\('click',([\s\S]{0,400}?)\n    \}\);/.exec(corpo);
+  assert.ok(m, 'o handler do #perfilBtn mudou de forma');
   assert.match(m[1], /if \(temConquistaNova\(\)\) abrirConquistaNova\(\);/,
     'o desvio saiu, ou deixou de depender do ponto — sem a condição ele sequestra o botão pra sempre');
-  assert.match(m[1], /else openFiltersModal\(\);/,
-    'sem o ramo normal o botão de Filtros deixa de abrir Filtros');
+  assert.match(m[1], /else abrirPerfil\(\);/,
+    'sem o ramo normal o crachá deixa de abrir o Histórico');
+  // O funil faz o que promete, sempre (v2026.10.24): o ponto não mora mais nele.
+  const f = /filtersBtn'\)\.addEventListener\('click',([^\n]*)\n/.exec(corpo);
+  assert.ok(f, 'o handler do #filtersBtn mudou de forma');
+  assert.match(f[1], /openFiltersModal\(\)/, 'o funil deixou de abrir os Filtros');
+  assert.ok(!/abrirConquistaNova|abrirPerfil|temConquistaNova/.test(f[1]), 'o funil voltou a desviar pro Histórico');
   // O atalho do PWA é um pedido EXPLÍCITO por Filtros: não pode desviar.
   const atalho = semComentariosJS(fatiar('handleLaunchAction'));
   assert.ok(!/abrirConquistaNova/.test(atalho),
     'o atalho do manifest passou a desviar — ali a pessoa escolheu "Filtros" num menu');
 });
 
-test('a troca de aba acontece DEPOIS do render, e sem esperar a rede', () => {
+test('o Histórico e as Preferências abrem JÁ desenhados e sem rede; os Filtros, sem esperar por ela', () => {
   // Os dois lados da mesma linha, e os dois quebram em silêncio:
-  //  · esperar a promise inteira = a tela pisca em Filtros por até 1337ms;
-  //  · trocar de aba antes do renderHistory = as marcas são apagadas pelo
-  //    marcarConquistasVistas e o painel renderiza já sem nada (medido:
+  //  · esperar a rede antes de trocar de aba = a tela pisca em Filtros por até 1337ms;
+  //  · trocar de aba DEPOIS de abrir = um quadro com a aba errada; e o desenho do
+  //    Histórico depois da marca de vista = o painel sem os anéis (medido:
   //    celulasMarcadas 0, tagsNova 0).
   const h = semComentariosJS(fatiar('abrirModalNaAba'));
-  assert.match(h, /const pendente = openFiltersModal\(\);/,
-    'abrirModalNaAba voltou a dar `await` no modal — a aba só trocaria depois da rede');
-  assert.ok(h.indexOf('openFiltersModal()') < h.indexOf('switchFilterTab('),
-    'a troca de aba passou pra antes da abertura');
-
-  // E a propriedade de que isso DEPENDE, no outro arquivo da dupla: tudo que
-  // importa tem que estar antes do primeiro `await` do openFiltersModal.
+  assert.match(h, /if \(aba === ABA_DOS_FILTROS\) return openFiltersModal\(\);/,
+    'os Filtros deixaram de abrir pelo openFiltersModal');
+  assert.match(h, /abrirPerfil\(aba\);/, 'o Histórico e as Preferências deixaram de abrir pelo crachá (abrirPerfil)');
+  assert.ok(!/\bawait\b/.test(h), 'abrirModalNaAba voltou a dar `await` — a aba só trocaria depois da rede');
+  // O crachá não vai à rede: os países e os estados (`popularPaisEstado`, dois pedidos
+  // ao /api, o free tier) são do formulário dos Filtros, que ali nem aparece.
+  const p = semComentariosJS(fatiar('abrirPerfil'));
+  assert.ok(!/\bawait\b|openFiltersModal|popularPaisEstado/.test(p),
+    'o crachá passou a esperar, ou a passar pelos Filtros (que vão ao Waze pelos países e estados)');
+  const iTroca = p.indexOf('switchFilterTab(aba)');
+  const iModal = p.indexOf("openModal('filtersModal')");
+  assert.ok(iTroca > 0 && iModal > iTroca, 'a aba passou a trocar DEPOIS de o modal abrir — um quadro com a aba errada');
+  // E os Filtros abrem antes da rede: o `openModal` vem antes do primeiro `await`.
   const o = semComentariosJS(fatiar('openFiltersModal'));
-  const iRender = o.indexOf('renderHistory()');
-  const iModal = o.indexOf("openModal('filtersModal')");
+  const iModalF = o.indexOf("openModal('filtersModal')");
   const iAwait = o.search(/\n\s+await /);
-  assert.ok(iRender > 0 && iModal > 0 && iAwait > 0, 'não achei as âncoras no openFiltersModal');
-  assert.ok(iRender < iAwait,
-    'entrou um `await` antes do renderHistory: o painel passa a renderizar DEPOIS da troca de aba, já sem as marcas');
-  assert.ok(iModal < iAwait,
-    'entrou um `await` antes do openModal: o modal só abriria depois da rede');
+  assert.ok(iModalF > 0 && iAwait > 0, 'não achei as âncoras no openFiltersModal');
+  assert.ok(iModalF < iAwait, 'entrou um `await` antes do openModal: os Filtros só abririam depois da rede');
 });
 
 test('o destaque mira na célula E no cartão da patente', () => {

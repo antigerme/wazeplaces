@@ -54,8 +54,10 @@ test('H1: entrar na aba Histórico DESENHA o painel, e antes de marcar as novas 
   const el = (id) => { if (!els.has(id)) els.set(id, { id, classList: classes(), setAttribute(k, v) { this[k] = v; }, getAttribute(k) { return this[k] ?? null; }, parentElement: { scrollTop: 0 }, tabIndex: 0 }); return els.get(id); };
   const deps = {
     document: { getElementById: el },
-    FILTER_TABS: [{ tab: 'filtersTabFilters', panel: 'filtersPanelFilters' }, { tab: 'filtersTabPrefs', panel: 'filtersPanelPrefs' },
-                  { tab: 'filtersTabHistory', panel: 'filtersPanelHistory' }],
+    // Desde v2026.10.24 os Filtros são um MODO do diálogo (sem aba) e as abas são
+    // as do perfil: Histórico e Preferências.
+    ABA_DOS_FILTROS: 'filtersTabFilters', t: (k) => k,
+    FILTER_TABS: [{ tab: 'filtersTabHistory', panel: 'filtersPanelHistory' }, { tab: 'filtersTabPrefs', panel: 'filtersPanelPrefs' }],
     renderHistory: () => ordem.push('desenhou'), marcarConquistasVistas: () => ordem.push('marcou'),
     renderUndoGateUI: () => {},   // a cota do Desfazer, redesenhada ao entrar nas Preferências (R15-7-A3-INC)
   };

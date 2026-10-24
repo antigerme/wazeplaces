@@ -452,21 +452,30 @@ test('R18-8-01: a renovação da queda (a fila fica) repõe o "Restam" — o "�
 });
 
 // ═══ R18-7-02 · a aba dos Filtros que muda abre no TOPO ═══════════════════════
-// As três abas dividem a mesma caixa rolável e a troca só alterna `hidden`: a aba nova
-// herdava a rolagem da anterior.
+// As abas dividem a mesma caixa rolável e a troca só alterna `hidden`: a aba nova
+// herdava a rolagem da anterior. Desde v2026.10.24 os Filtros são um MODO do diálogo
+// (sem botão de aba) e as abas são as do perfil; "qual está na tela" é o PAINEL visível,
+// por isso o `classList` daqui é de verdade (com o `hidden` do HTML).
 function filtrosComCaixa() {
   const caixa = { scrollTop: 0 };
   const els = new Map();
-  const novo = (id, extra = {}) => { const e = { id, attrs: {}, tabIndex: 0, scrollTop: 0, classList: { toggle() {}, add() {}, remove() {}, contains: () => false },
-    setAttribute(k, v) { this.attrs[k] = v; }, getAttribute(k) { return this.attrs[k] ?? null; }, ...extra }; els.set(id, e); return e; };
-  const abas = ['filtersTabFilters', 'filtersTabPrefs', 'filtersTabHistory'];
-  const paineis = ['filtersPanelFilters', 'filtersPanelPrefs', 'filtersPanelHistory'];
+  const novo = (id, extra = {}, ...iniciais) => {
+    const cs = new Set(iniciais);
+    const e = { id, attrs: {}, tabIndex: 0, scrollTop: 0,
+      classList: { toggle: (c, f) => { const on = f === undefined ? !cs.has(c) : !!f; if (on) cs.add(c); else cs.delete(c); return on; },
+        add: (c) => cs.add(c), remove: (c) => cs.delete(c), contains: (c) => cs.has(c) },
+      setAttribute(k, v) { this.attrs[k] = v; }, getAttribute(k) { return this.attrs[k] ?? null; }, ...extra };
+    els.set(id, e); return e;
+  };
+  const abas = ['filtersTabHistory', 'filtersTabPrefs'];
+  const paineis = ['filtersPanelHistory', 'filtersPanelPrefs'];
   abas.forEach((a) => novo(a));
-  paineis.forEach((p) => novo(p, { parentElement: caixa }));
-  els.get('filtersTabFilters').attrs['aria-selected'] = 'true';
+  novo('filtersPanelFilters', { parentElement: caixa });
+  paineis.forEach((p) => novo(p, { parentElement: caixa }, 'hidden'));
   const log = [];
   const deps = {
     document: { getElementById: (id) => els.get(id) || novo(id) },
+    ABA_DOS_FILTROS: 'filtersTabFilters', t: (k) => k,
     FILTER_TABS: abas.map((tab, i) => ({ tab, panel: paineis[i] })),
     renderHistory: () => log.push(['historia', caixa.scrollTop]), marcarConquistasVistas() {}, renderUndoGateUI() {},
   };

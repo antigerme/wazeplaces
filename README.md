@@ -98,7 +98,7 @@ A pílula 👥 no topo mostra quantos editores estão usando o app no mesmo paí
 
 - **As conversas passam pelo chat do Waze**: ficam guardadas lá e também aparecem no chat do WME de vocês dois.
 - **Enquanto você tria**, o WME mostra seu nome e nível no mapa, no lugar do pedido que está na sua tela, até uns 15 minutos depois da última ação. O nosso servidor não guarda nada disso.
-- Vem ligado. Pra desligar: **Filtros e Preferências → Preferências → "Ver quem está no app"**.
+- Vem ligado. Pra desligar: toque no **seu nome**, no alto da tela → **Preferências** → **"Ver quem está no app"**.
 
 ### Instalar como app no celular
 

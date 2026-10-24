@@ -127,13 +127,15 @@ const FOTO_B = 'https://sms-profile-image.waze.com/222';
 
 test('a tela de entrada APAGA o cabeçalho do perfil (foto, nome, nível e título), não só esconde', () => {
   const { registro, document } = domDeMentira({ userAvatar: { oculto: false }, userName: { oculto: false },
-    userRank: { oculto: false }, userProfileBadge: { oculto: false } });
+    userRank: { oculto: false }, userProfileBadge: { oculto: false }, perfilBtn: { oculto: false }, conqSelo: { oculto: false } });
   const velho = registro.userAvatar;
   velho.setAttribute('src', FOTO_A);
   velho.onerror = () => {};
   registro.userName.textContent = 'editor_A';
   registro.userRank.textContent = 'L6 · AM';
   registro.userProfileBadge.setAttribute('title', 'editor_A — 10 pontos');
+  // Desde v2026.10.24 o crachá é um BOTÃO, e o nome acessível dele leva o nome da pessoa.
+  registro.perfilBtn.setAttribute('aria-label', 'editor_A: histórico e preferências — conquista nova');
   const { limparCabecalhoDoPerfil } = montar(['limparCabecalhoDoPerfil', 'avatarSemFoto'], { document },
     ['limparCabecalhoDoPerfil']);
   limparCabecalhoDoPerfil();
@@ -144,6 +146,8 @@ test('a tela de entrada APAGA o cabeçalho do perfil (foto, nome, nível e títu
   assert.equal(registro.userName.textContent, '', 'o nome de quem saiu ficou no cabeçalho escondido');
   assert.equal(registro.userRank.textContent, '', 'o nível de quem saiu ficou no cabeçalho escondido');
   assert.equal(registro.userProfileBadge.getAttribute('title'), null, 'o título (pontos e edições) de quem saiu ficou');
+  assert.equal(registro.perfilBtn.getAttribute('aria-label'), null, 'o nome acessível do crachá (com o nome de quem saiu) ficou no DOM');
+  assert.ok(registro.conqSelo.classList.contains('hidden'), 'o ponto da conquista de quem saiu ficou aceso no crachá');
   assert.ok(registro.userProfileBadge.classList.contains('hidden'));
   // Quem chama: a tela de entrada — por onde passam o "Sair" e a queda.
   assert.match(fatiar('showAuthScreen'), /^\s+limparCabecalhoDoPerfil\(\);/m, 'a tela de entrada não apaga o cabeçalho');
@@ -173,7 +177,7 @@ test('perfil de OUTRA conta chegando: a foto anterior sai do <img> na hora — a
       userProfileBadge: {}, brandTitle: {} });
     registro.userAvatar.setAttribute('src', url);
     const deps = { AppState: { profile: perfil }, document, avatarFalhou: null, avatarPendente: null,
-      liberarAvatar() {}, t: (k) => k };
+      liberarAvatar() {}, t: (k) => k, atualizarSeloDeConquista() {} };
     const { renderProfileHeader, pendente } = montar(['renderProfileHeader', 'avatarSemFoto'], deps,
       ['renderProfileHeader', 'pendente'], 'function pendente() { return avatarPendente; }');
     renderProfileHeader();

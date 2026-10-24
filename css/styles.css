@@ -1361,7 +1361,10 @@ input.ui-switch:disabled {
 .seg-tabs {
   container-type: inline-size;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  /* Uma coluna por aba que EXISTE: eram três (Filtros · Preferências ·
+     Histórico) e, desde v2026.10.24, são duas (o perfil); os Filtros não têm aba. */
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
   gap: 4px;
   background: #f1f5f9; /* slate-100 */
   border-radius: 12px;
@@ -3582,11 +3585,15 @@ html.tem-sessao #authScreen { display: none; }
    banner "discreto" no topo cobre os mesmos 13 (o problema é a POSIÇÃO, não a
    cor); snackbar no rodapé TAPA o ✕ no Galaxy Fold. O selo cobre ZERO.
    Mesmo desenho da `.presenca-selo` — não custa layout, mora sobre o ícone. */
+/* Desde v2026.10.24 o ponto mora no CRACHÁ do perfil (#perfilBtn), no canto de
+   cima da foto, que é onde o Histórico abre. Preso ao canto do BOTÃO, não à
+   foto: o `avatarSemFoto` troca o <img> por outro, e sem foto ele some. O botão
+   tem 44 px de altura e a foto 32, centrada: o topo dela fica a 6 px. */
 .conq-selo {
-  position: absolute; top: 8px; right: 8px; width: 10px; height: 10px;
+  position: absolute; top: 3px; right: 0; width: 10px; height: 10px;
   border-radius: 9999px; background: #d97706;
   /* O anel é da cor do FUNDO do cabeçalho, não uma borda: é ele que separa o
-     ponto do ícone embaixo sem inventar uma cor nova. */
+     ponto da foto embaixo sem inventar uma cor nova. */
   box-shadow: 0 0 0 2px #f8fafc;
 }
 .dark .conq-selo { box-shadow: 0 0 0 2px rgb(30 41 59); }

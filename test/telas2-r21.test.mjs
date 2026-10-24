@@ -228,7 +228,7 @@ test('R21-7-07 · o cartão dos Filtros rola numa ESCADA de janelas em rem (cont
   assert.equal(corpoDosFiltros.decl.flex, 'none');
   assert.equal(corpoDosFiltros.decl.overflow, 'visible');
   assert.ok(!REGRAS.some((x) => /#filtersModal\s*>\s*div\s*>\s*\.overflow-y-auto/.test(x.sel) && x.condicao !== b.cabeca), 'a regra do corpo dos Filtros vale fora da escada (ou numa 2ª consulta que a primeira ocorrência não cobre)');
-  assert.match(HTML, /<div class="flex-1 overflow-y-auto overscroll-contain px-6 py-4">\s*<!-- ══ ABA FILTROS ══ -->/, 'o corpo dos Filtros mudou de classe: a regra da escada o alcança por `> .overflow-y-auto`');
+  assert.match(HTML, /<div class="flex-1 overflow-y-auto overscroll-contain px-6 py-4">\s*<!-- ══ FILTROS \(o modo do funil\) ══ -->/, 'o corpo dos Filtros mudou de classe: a regra da escada o alcança por `> .overflow-y-auto`');
   // O rodapé preso cobre o fim da rolagem: o `scroll-padding-bottom` faz o foco do teclado parar ACIMA dele (17 de 17 controles ficavam
   // sob o rodapé no Fold a 2×). Dois grupos: o rodapé empilhado (linha de até 15,4rem) e o lado a lado. As condições são linhas DA escada.
   // O lado a lado (o degrau largo) vem PRIMEIRO no arquivo: ele alcança também as janelas estreitas (até 15,4rem), onde o rodapé é o empilhado,

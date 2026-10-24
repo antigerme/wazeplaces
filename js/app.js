@@ -1719,8 +1719,7 @@ function setupAuthListeners() {
     });
     $('closeAccessDenied').addEventListener('click', () => closeModal('accessDeniedModal'));
     // Região default sempre 'row' pra fluxos novos (público alvo BR/Latam).
-    // Quem precisa de NA/IL muda no modal "Filtros e Preferências"
-    // depois de logar (filterRegion). Não exibimos picker no authScreen
+    // Quem precisa de NA/IL muda nos Filtros depois de logar (filterRegion). Não exibimos picker no authScreen
     // porque era fricção desnecessária pra 95% dos usuários.
 }
 
@@ -1863,20 +1862,20 @@ function setupAppListeners() {
     // (`avisosAdiadosAoVoltar`, R13-7-01).
     document.addEventListener('visibilitychange', avisosAdiadosAoVoltar);
     $('themeBtn').addEventListener('click', toggleTheme);
-    $('filtersBtn').addEventListener('click', () => {
+    // O funil faz o que promete, sempre: os Filtros (v2026.10.24). O ponto da
+    // conquista nova mora no crachá do perfil, que é onde o Histórico abre.
+    $('filtersBtn').addEventListener('click', () => { openFiltersModal(); });
+    $('perfilBtn').addEventListener('click', () => {
         // O ponto aceso é o MOTIVO do toque: leva direto ao que destravou, como
-        // o aviso do Desfazer já fazia. Sem ponto, o botão faz o que promete.
+        // o aviso do Desfazer já fazia. Sem ponto, o crachá abre o Histórico.
         //
         // Isso acontece NO MÁXIMO uma vez por conquista, e por CONSTRUÇÃO, não
         // por regra escrita: abrir a aba Histórico apaga o ponto (o
-        // `marcarConquistasVistas` do `switchFilterTab`), então o próximo toque
-        // já cai em Filtros. Medido com o app de pé, não deduzido — eu cheguei a
-        // recusar este desvio achando que ele se repetiria por dias.
-        //
-        // O atalho do PWA (`/?action=filters`) NÃO passa por aqui de propósito:
-        // ali a pessoa escolheu "Filtros" num menu, e o pedido é explícito.
+        // `marcarConquistasVistas` do `switchFilterTab`). Medido com o app de
+        // pé, não deduzido — eu cheguei a recusar este desvio achando que ele
+        // se repetiria por dias.
         if (temConquistaNova()) abrirConquistaNova();
-        else openFiltersModal();
+        else abrirPerfil();
     });
 
     // Clique no scrim fecha o modal (padrão M3/HIG pra diálogos dispensáveis)
@@ -1957,10 +1956,10 @@ function perguntarAExtensaoAoVoltar() {
     });
 }
 
-// Seletor de idioma. São DOIS controles: um em Filtros → Preferências (onde se
-// procura por preferência) e outro na Ajuda — porque o botão de Filtros fica
-// escondido sem sessão, e quem caiu num idioma que não lê precisa trocar ANTES
-// de conseguir entrar. Os dois ficam em sincronia.
+// Seletor de idioma. São DOIS controles: um nas Preferências (onde se procura
+// por preferência; abrem pelo crachá do perfil) e outro na Ajuda — porque o
+// crachá só existe com sessão, e quem caiu num idioma que não lê precisa trocar
+// ANTES de conseguir entrar. Os dois ficam em sincronia.
 const SELETORES_IDIOMA = ['langSelect', 'langSelectHelp'];
 
 function aplicarIdioma(valor) {
@@ -2063,36 +2062,55 @@ function setupLanguageSwitcher() {
     }
 }
 
-// Abas do modal "Filtros e Preferências" (padrão WAI-ARIA Tabs: aria-selected,
-// roving tabindex, navegação por setas). Cada aba mostra seu painel e ajusta o
-// rodapé: Filtros é formulário (Cancelar/Aplicar); Preferências aplicam na hora
-// e Histórico é só leitura (ambas mostram só "Fechar").
+// O diálogo dos Filtros tem DOIS modos (v2026.10.24), na mesma caixa e com os
+// ids de quando ele tinha três abas:
+// - o FUNIL abre os FILTROS (`ABA_DOS_FILTROS`): um formulário, SEM abas, com
+//   Cancelar · Aplicar;
+// - o CRACHÁ do perfil (`#perfilBtn`, `abrirPerfil`) abre o HISTÓRICO e as
+//   PREFERÊNCIAS, em duas abas (padrão WAI-ARIA Tabs: aria-selected, roving
+//   tabindex, setas). As preferências aplicam na hora e o Histórico é só leitura:
+//   o rodapé é "Fechar".
+// Eram três abas numa janela só, com DOIS jeitos de confirmar, e cada um furava
+// o outro (MEDIDO em 2026-10-24): o filtro mudado e não aplicado sumia, calado,
+// no "Fechar" das outras abas, e a preferência mudada seguia mudada no "Cancelar"
+// dos Filtros. Separadas, cada janela confirma de um jeito só. E o título deixa
+// de prometer "Filtros e Preferências" numa janela que também é o Histórico.
+//
+// `ABA_DOS_FILTROS` é o NOME do modo Filtros pro `switchFilterTab` (e pra quem o
+// chama, como o `openFiltersModal`): não há mais um botão de aba com esse id.
+const ABA_DOS_FILTROS = 'filtersTabFilters';
 const FILTER_TABS = [
-    { tab: 'filtersTabFilters', panel: 'filtersPanelFilters' },
-    { tab: 'filtersTabPrefs', panel: 'filtersPanelPrefs' },
-    { tab: 'filtersTabHistory', panel: 'filtersPanelHistory' }
+    { tab: 'filtersTabHistory', panel: 'filtersPanelHistory' },
+    { tab: 'filtersTabPrefs', panel: 'filtersPanelPrefs' }
 ];
 
 function switchFilterTab(tabId) {
     const $ = id => document.getElementById(id);
-    // A aba MUDA? As três dividem a mesma caixa rolável, e a troca só alterna `hidden`: a
+    const paineis = [{ tab: ABA_DOS_FILTROS, panel: 'filtersPanelFilters' }, ...FILTER_TABS];
+    if (!paineis.some(({ tab }) => tab === tabId)) return;
+    const filtros = tabId === ABA_DOS_FILTROS;
+    // A aba MUDA? As abas dividem a mesma caixa rolável, e a troca só alterna `hidden`: a
     // aba nova herdava a rolagem da anterior (Preferências rolada até o fim, tocar em
     // Histórico — abria no meio, com a patente e os primeiros totais cortados; R18-7-02,
     // MEDIDO nos dois motores). Aba que muda abre no topo; a MESMA aba tocada de novo (ou
     // redesenhada, como no idioma) fica onde a pessoa está. O `openModal` já zera a
     // rolagem ao abrir, e quem rola DEPOIS da troca (`abrirPreferenciaDoUndo`,
-    // `abrirConquistaNova`) não é afetado: a troca vem antes, no mesmo tique.
-    const atual = FILTER_TABS.find(({ tab }) => $(tab)?.getAttribute('aria-selected') === 'true');
+    // `abrirConquistaNova`) não é afetado: a troca vem antes, no mesmo tique. "Qual
+    // está na tela" é o PAINEL visível: o modo Filtros não tem botão de aba.
+    const atual = paineis.find(({ panel }) => { const el = $(panel); return !!el && !el.classList.contains('hidden'); });
     const mudou = !atual || atual.tab !== tabId;
-    FILTER_TABS.forEach(({ tab, panel }) => {
+    paineis.forEach(({ tab, panel }) => {
         const selected = tab === tabId;
         const btn = $(tab);
-        if (!btn) return;
-        btn.setAttribute('aria-selected', selected ? 'true' : 'false');
-        btn.tabIndex = selected ? 0 : -1;
-        $(panel).classList.toggle('hidden', !selected);
+        if (btn) {
+            btn.setAttribute('aria-selected', selected ? 'true' : 'false');
+            btn.tabIndex = selected ? 0 : -1;
+        }
+        const el = $(panel);
+        if (!el) return;
+        el.classList.toggle('hidden', !selected);
         if (selected && mudou) {
-            const caixa = $(panel).parentElement;
+            const caixa = el.parentElement;
             if (caixa) caixa.scrollTop = 0;
             // Nas janelas do degrau (zoom 300–500%, Fold com texto grande) o corpo não rola mais — quem rola é o CARTÃO
             // (`#filtersModal > div > .overflow-y-auto { overflow: visible }`), e a aba nova abria rolada, com as abas
@@ -2101,6 +2119,16 @@ function switchFilterTab(tabId) {
             if (cartao) cartao.scrollTop = 0;
         }
     });
+    // O MODO: a faixa das abas só existe no do perfil, e o título diz o que a janela
+    // é. O título troca a CHAVE (`data-i18n`), não só o texto: a troca de idioma com
+    // o diálogo aberto o retraduz pelo `applyI18n`.
+    $('filtersTabsBar')?.classList.toggle('hidden', filtros);
+    const titulo = $('filtersModalTitle');
+    if (titulo) {
+        const chave = filtros ? 'filters.section.filters' : 'modal.perfil.title';
+        titulo.setAttribute('data-i18n', chave);
+        titulo.textContent = t(chave);
+    }
     // Abrir a aba Histórico apaga o selo (decisão do owner). Fica AQUI e não no
     // handler do botão porque a aba também se alcança pelo teclado (setas, Home,
     // End) — amarrar ao clique deixaria o selo aceso pra quem navega assim.
@@ -2120,10 +2148,9 @@ function switchFilterTab(tabId) {
     // toque (R15-7-A3-INC, MEDIDO nos dois motores). Redesenhar ao ENTRAR fecha o
     // outro lado — e não custa nada por swipe, que é onde a outra opção custaria.
     if (tabId === 'filtersTabPrefs') renderUndoGateUI();
-    const isFilters = tabId === 'filtersTabFilters';
-    $('cancelFilters').classList.toggle('hidden', !isFilters);
-    $('applyFilters').classList.toggle('hidden', !isFilters);
-    $('closeFiltersFooter').classList.toggle('hidden', isFilters);
+    $('cancelFilters').classList.toggle('hidden', !filtros);
+    $('applyFilters').classList.toggle('hidden', !filtros);
+    $('closeFiltersFooter').classList.toggle('hidden', filtros);
 }
 
 function setupFilterTabs() {
@@ -6493,9 +6520,10 @@ function populateCategorySelect() {
 
 async function openFiltersModal() {
     const $ = id => document.getElementById(id);
-    // Sempre abre na aba Filtros (uso primário do botão do header); as outras
-    // abas ficam a um toque, sem "lembrar" estado velho de forma surpreendente.
-    switchFilterTab('filtersTabFilters');
+    // O modo Filtros do diálogo (o funil): o formulário, sem abas. O Histórico e as
+    // Preferências abrem pelo crachá do perfil (`abrirPerfil`). As Preferências
+    // seguem desenhadas aqui também — a mesma caixa, escondida —, como sempre foram.
+    switchFilterTab(ABA_DOS_FILTROS);
     renderDevModeSection();
     renderUndoGateUI();
     renderPresencaPref();
@@ -6528,7 +6556,6 @@ async function openFiltersModal() {
     if (sortSel) sortSel.value = ordemValida(AppState.filters.sortOrder);
     atualizarDicaDeOrdem(sortSel && (sortSel.value === 'casa' || sortSel.value === 'trabalho') ? 'perfil'
         : (sortSel && sortSel.value === 'gps' ? 'ok' : null));
-    renderHistory();
 
     // O modal ABRE AQUI, antes de qualquer rede. País e estado vêm do Waze e,
     // na PRIMEIRA abertura da sessão, são duas idas — MEDIDO com o app de pé:
@@ -13255,6 +13282,8 @@ function renderProfileHeader() {
     if (p.totalEdits) pstats.push(t('profile.edits', { n: Number(p.totalEdits) }));
     badge.title = pstats.length ? ((p.userName || '') + ' — ' + pstats.join(' · ')) : (p.userName || '');
     badge.classList.remove('hidden');
+    // O nome do botão leva o nome da pessoa (e o idioma da vez): refaz com ele.
+    atualizarSeloDeConquista();
     const brandTitle = document.getElementById('brandTitle');
     // sr-only (não 'hidden'): some visualmente mas fica na árvore de a11y como h1
     // — mantém a hierarquia de headings contínua (h1 → h2 fila → h3 card).
@@ -13294,6 +13323,10 @@ function limparCabecalhoDoPerfil() {
         const el = document.getElementById(id);
         if (el) el.textContent = '';
     }
+    // O nome acessível do crachá também (ele leva o nome da pessoa), e o ponto.
+    const perfilBtn = document.getElementById('perfilBtn');
+    if (perfilBtn) perfilBtn.removeAttribute('aria-label');
+    document.getElementById('conqSelo')?.classList.add('hidden');
     const badge = document.getElementById('userProfileBadge');
     if (badge) {
         badge.removeAttribute('title');
@@ -20584,15 +20617,30 @@ function novasNaVitrine(g) {
     return g.novas.filter((id) => mostra.has(id));
 }
 
+// O ponto mora no CRACHÁ do perfil (v2026.10.24), que é onde o Histórico abre:
+// no funil ele levava a conquistas por um ícone de filtro.
 function atualizarSeloDeConquista() {
-    const btn = document.getElementById('filtersBtn');
+    const btn = document.getElementById('perfilBtn');
     const selo = document.getElementById('conqSelo');
     if (!btn || !selo) return;
     const tem = temConquistaNova();
     selo.classList.toggle('hidden', !tem);
     // O ponto é `aria-hidden`: quem não enxerga precisa da informação no NOME
     // do botão, senão o selo não existe pra leitor de tela nenhum.
-    btn.setAttribute('aria-label', t('header.filters.aria') + (tem ? ' — ' + t('conq.selo.aria') : ''));
+    const nome = rotuloDoPerfil(tem);
+    if (nome) btn.setAttribute('aria-label', nome);
+    else btn.removeAttribute('aria-label');
+}
+
+// O nome do crachá pra quem não enxerga, numa função só (o desenho do cabeçalho e
+// o ponto da conquista o escrevem): COMEÇA pelo nome que está na tela, porque é
+// ele que se fala pra um comando de voz ("tocar em antigerme", WCAG 2.5.3), e
+// segue com o que o botão abre. Sem perfil, nada: o crachá nem aparece, e o nome
+// de quem SAIU não fica no DOM (o "Sair" é limpar de tudo).
+function rotuloDoPerfil(tem = temConquistaNova()) {
+    const nome = AppState.profile && AppState.profile.userName;
+    if (!nome) return '';
+    return t('header.perfil.aria', { nome }) + (tem ? ' — ' + t('conq.selo.aria') : '');
 }
 
 // Abrir a aba É ter visto. Some o selo e, na PRÓXIMA abertura, somem os anéis —
@@ -31550,31 +31598,45 @@ function dispararConfeteNaFila() {
     return burst;
 }
 
-// Abre o modal JÁ na aba pedida, sem esperar a rede.
+// Abre o diálogo JÁ na aba pedida, sem esperar a rede: os Filtros pelo
+// `openFiltersModal` (o modo do funil), o Histórico e as Preferências pelo
+// `abrirPerfil` (o modo do crachá), que não vai à rede nenhuma.
 //
-// `openFiltersModal` termina com `await popularPaisEstado()`, que vai ao Waze.
-// Esperar a promise INTEIRA antes de trocar de aba deixava o editor olhando a
-// aba Filtros por 480ms em rede boa e 1337ms em rede ruim (os números estão
-// medidos no comentário de lá) — e só então a tela saltava pra outra aba. Era
-// o que o caminho do Desfazer fazia; hoje os dois passam por aqui.
+// Era sempre o `openFiltersModal` e a troca de aba DEPOIS dele, e ele termina
+// com `await popularPaisEstado()`, que vai ao Waze: esperar a promise INTEIRA
+// antes de trocar de aba deixava o editor olhando a aba Filtros por 480ms em
+// rede boa e 1337ms em rede ruim (os números estão medidos no comentário de lá).
+// Hoje o Histórico e as Preferências nem passam por ele.
 //
-// Não esperar é seguro por razão ESTRUTURAL, não por sorte: tudo que importa
-// pra este desvio — `renderHistory()` e o `openModal()` — é SÍNCRONO e roda
-// ANTES do primeiro `await` da função. Chamar sem `await` executa esse trecho
-// inteiro no mesmo tick, então a troca de aba acontece antes de qualquer
-// pintura e ninguém vê a aba errada.
-//
-// `test/patentes.test.mjs` cobra essa ordem. Um `await` novo enfiado antes do
-// `renderHistory()` quebraria isto EM SILÊNCIO — e de um jeito pior que a
-// piscada: a aba Histórico apaga as marcas ao abrir (`marcarConquistasVistas`),
-// então o painel renderizaria DEPOIS, já sem nada marcado.
+// A ordem continua a de sempre, e por razão ESTRUTURAL: no `abrirPerfil` a
+// troca de aba — com o `renderHistory()` e o `marcarConquistasVistas()` — é
+// SÍNCRONA e roda antes do `openModal()`, no mesmo tique, então ninguém vê a
+// aba errada. `test/patentes.test.mjs` cobra essa ordem: um `await` enfiado
+// antes do desenho quebraria isto EM SILÊNCIO — a aba Histórico apaga as marcas
+// ao abrir, e o painel renderizaria DEPOIS, já sem nada marcado.
 function abrirModalNaAba(aba) {
-    const pendente = openFiltersModal();
-    switchFilterTab(aba);
-    return pendente;
+    if (aba === ABA_DOS_FILTROS) return openFiltersModal();
+    abrirPerfil(aba);
+    return Promise.resolve();
 }
 
-// Leva direto ao interruptor em vez de mandar procurar em Filtros → Preferências.
+// O CRACHÁ do perfil abre o Histórico e as Preferências: o modo "perfil" do
+// diálogo (ver `ABA_DOS_FILTROS`). NÃO passa pelo `openFiltersModal`: aquele
+// termina indo ao Waze pelos países e estados (`popularPaisEstado`: dois pedidos
+// ao nosso /api, o free tier) pra preencher um formulário que aqui nem aparece.
+// Tudo é SÍNCRONO, e a aba troca ANTES do `openModal` (a mesma ordem que o
+// `abrirModalNaAba` garantia): o painel nasce desenhado, nunca a aba errada por
+// um quadro.
+function abrirPerfil(aba = 'filtersTabHistory') {
+    renderDevModeSection();
+    renderUndoGateUI();
+    renderPresencaPref();
+    renderPularGuardaPref();
+    switchFilterTab(aba);
+    openModal('filtersModal');
+}
+
+// Leva direto ao interruptor em vez de mandar procurar pelas Preferências.
 async function abrirPreferenciaDoUndo() {
     // Sem sessão não há Filtros nem Preferências a abrir: o banner que sobrou da
     // sessão anterior abria os Filtros por cima da tela de entrada (R15-7-F1).
