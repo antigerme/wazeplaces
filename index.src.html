@@ -848,10 +848,9 @@
                     <!-- ══ ABA HISTÓRICO (só leitura) ══ -->
                     <div id="filtersPanelHistory" role="tabpanel" aria-labelledby="filtersTabHistory" class="hidden">
                         <div class="bg-slate-50 border border-slate-100 rounded-xl p-3 dark:bg-slate-900 dark:border-slate-700">
-                            <div class="flex flex-wrap justify-end gap-x-3 gap-y-0.5 text-[0.6875rem] uppercase tracking-wider mb-1.5">
-                                <span class="min-w-0 break-words text-emerald-700 dark:text-emerald-400" data-i18n="stats.read">Lidos</span>
-                                <span class="min-w-0 break-words text-rose-700 dark:text-rose-400" data-i18n="stats.rejected">Rejeitados</span>
-                            </div>
+                            <!-- A legenda "Lidos · Rejeitados" é desenhada pelo `renderHistory`, logo
+                                 acima das linhas que ela explica (v2026.10.24): fixa aqui, ela ficava
+                                 acima do cartão da patente, longe dos números. -->
                             <div id="historyBody"></div>
                         </div>
                         <!-- Reincidência por autor. Fica ABAIXO do placar de

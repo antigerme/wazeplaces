@@ -22582,9 +22582,8 @@ function esvaziarListaDeAutores() {
 // Só a lista de autores saía, e o resto ficava no DOM escondido — depois do
 // "Sair" e na sessão da conta que entrou, que o levava no relatório do modo dev
 // (MEDIDO; auditoria de 2026-10-03, R8-7-06). Esvaziar é seguro: o painel é
-// desenhado ao ENTRAR na aba (`switchFilterTab`) e ao abrir os Filtros
-// (`openFiltersModal`), e o ouvinte das conquistas mora no `#historyBody`, que
-// fica.
+// desenhado ao ENTRAR na aba (`switchFilterTab`, por onde o crachá do perfil o
+// abre), e o ouvinte das conquistas mora no `#historyBody`, que fica.
 function esvaziarPainelDoHistorico() {
     const el = document.getElementById('historyBody');
     if (el) el.innerHTML = '';
@@ -22676,9 +22675,17 @@ function renderHistory() {
     // editor novo vê no primeiro minuto, e ela não pode ser um vazio.
     // Os números da tela ficam ESCONDIDOS do leitor de tela (`aria-hidden`) e a frase `sr-only` fala por
     // eles: "12 · 3" sem rótulo não diz qual é qual. `sr-only` não tem caixa: o visual não muda (R21-7-04).
+    //
+    // A LEGENDA ("Lidos · Rejeitados") vem logo acima das linhas que ela explica (v2026.10.24). Ela era
+    // fixa no HTML, acima do painel inteiro, e o cartão da patente ficava no meio: uns 180 px entre a
+    // legenda e os números (MEDIDO num 412). Sai junto com as linhas — sem linhas, sem legenda — e é
+    // `aria-hidden`, porque quem não enxerga já ouve a frase inteira de cada linha.
+    const legenda = `<div class="flex flex-wrap justify-end gap-x-3 gap-y-0.5 text-[0.6875rem] uppercase tracking-wider mb-1" aria-hidden="true">` +
+        `<span class="min-w-0 break-words text-emerald-700 dark:text-emerald-400">${escapeHtml(t('stats.read'))}</span>` +
+        `<span class="min-w-0 break-words text-rose-700 dark:text-rose-400">${escapeHtml(t('stats.rejected'))}</span></div>`;
     el.innerHTML = htmlPatente() + (vazio
         ? `<p class="text-xs text-slate-500 dark:text-slate-400">${escapeHtml(t('stats.history.empty'))}</p>`
-        : rows.map(([k, v]) =>
+        : legenda + rows.map(([k, v]) =>
             `<div class="flex justify-between items-baseline text-sm py-0.5">` +
             `<span class="text-slate-600 dark:text-slate-300">${escapeHtml(t('stats.history.' + k))}</span>` +
             `<span class="tnum font-medium"><span class="sr-only">${escapeHtml(fraseDosLidosERejeitados(v.read, v.rejected))}</span>` +
