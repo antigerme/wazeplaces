@@ -170,7 +170,7 @@ console.log(`login ok (${COOKIES ? 'Waze de verdade' : 'API de mentira'}) · fil
 await page.click('#helpBtn'); await page.waitForTimeout(250);
 for (let i = 0; i < 7; i++) { await page.click('#appVersionDisplay'); await page.waitForTimeout(60); }
 await page.evaluate(() => closeModal('helpModal')); await page.waitForTimeout(200);
-await page.click('#filtersBtn'); await page.waitForTimeout(250);
+await page.click('#perfilBtn'); await page.waitForTimeout(250);   // as Preferências abrem pelo crachá (v2026.10.24)
 await page.click('#filtersTabPrefs').catch(() => {});
 await page.waitForTimeout(150);
 await page.click('#prefDevModeActive'); await page.waitForTimeout(300);
