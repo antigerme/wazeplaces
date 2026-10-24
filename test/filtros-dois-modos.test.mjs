@@ -156,3 +156,91 @@ test('a legenda "Lidos · Rejeitados" vem logo ACIMA das linhas — depois do ca
   const caixa = HTML_SEM.slice(HTML_SEM.indexOf('id="filtersPanelHistory"'), HTML_SEM.indexOf('id="historyBody"'));
   assert.ok(!/data-i18n="stats\.read"/.test(caixa), 'a legenda fixa voltou ao HTML, acima da patente');
 });
+
+// ── Os tipos de pedido em chips, em dois grupos ─────────────────────────────
+import vm from 'node:vm';
+function carregarDicionario() {
+  const ctx = { navigator: { language: 'pt' }, document: { documentElement: {} } };
+  vm.createContext(ctx);
+  vm.runInContext(readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8'), ctx);
+  return ctx.I18N_DICT;
+}
+const DICT = carregarDicionario();
+const TIPOS_DO_LOCAL = ['NEW_PLACE', 'DETAILS_UPDATE', 'FLAGGED_PLACE', 'DELETE_PLACE'];
+const TIPOS_DA_FOTO = ['NEW_PHOTO', 'FLAGGED_PHOTO', 'DELETE_PHOTO'];
+
+test('chips: dois grupos (o pedido sobre o LOCAL e sobre a FOTO), cada chip uma caixa de verdade com o nome inteiro', () => {
+  const ini = HTML_SEM.indexOf('data-i18n="filters.types.legend"');
+  const bloco = HTML_SEM.slice(ini, HTML_SEM.indexOf('for="filterCategory"', ini));
+  const grupo = (chave) => {
+    const a = bloco.indexOf(`data-i18n="filters.types.grupo.${chave}"`);
+    assert.ok(a > 0, `o grupo ${chave} sumiu`);
+    return bloco.slice(a, bloco.indexOf('</fieldset>', a));
+  };
+  const valores = (g) => [...g.matchAll(/class="filter-type chip-tipo-input" value="([A-Z_]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(valores(grupo('local')), TIPOS_DO_LOCAL, 'o grupo do LOCAL mudou');
+  assert.deepEqual(valores(grupo('foto')), TIPOS_DA_FOTO, 'o grupo da FOTO mudou');
+  for (const m of bloco.matchAll(/<label class="chip-tipo">([\s\S]*?)<\/label>/g)) {
+    const chip = m[1];
+    const tipo = /value="([A-Z_]+)"/.exec(chip)[1];
+    assert.match(chip, new RegExp(`data-i18n-aria="filters\\.types\\.${tipo}"`), `${tipo}: o leitor de tela perdeu o nome inteiro`);
+    assert.match(chip, new RegExp(`data-i18n="filters\\.types\\.curto\\.${tipo}"`), `${tipo}: o rótulo curto sumiu`);
+    // Marcado não é só cor: o ✓ mora em todo chip (o CSS o mostra no marcado).
+    assert.match(chip, /class="chip-tipo-check"/, `${tipo}: o chip sem o ✓`);
+  }
+});
+
+test('chips: o nome que o leitor de tela ouve CONTÉM o que a tela mostra, nas 4 línguas (WCAG 2.5.3)', () => {
+  for (const [lang, d] of Object.entries(DICT)) {
+    for (const tipo of [...TIPOS_DO_LOCAL, ...TIPOS_DA_FOTO]) {
+      const inteiro = d['filters.types.' + tipo], curto = d['filters.types.curto.' + tipo];
+      assert.ok(inteiro && curto, `${lang}: falta o nome de ${tipo}`);
+      assert.ok(inteiro.toLocaleLowerCase(lang).includes(curto.toLocaleLowerCase(lang)),
+        `${lang}: "${inteiro}" não contém "${curto}" — quem fala o que vê ("tocar em ${curto}") não acha o controle`);
+    }
+    assert.ok(d['filters.types.grupo.local'] && d['filters.types.grupo.foto'], `${lang}: faltam os nomes dos grupos`);
+  }
+});
+
+test('chips: o ✓ aparece no marcado (não é só a cor), e a caixa escondida segue focável', () => {
+  const CSS = readFileSync(new URL('../css/styles.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.match(CSS, /\.chip-tipo-check \{[^}]*display: none;/, 'o ✓ deixou de nascer escondido');
+  assert.match(CSS, /\.chip-tipo-input:checked \+ \.chip-tipo-cara \.chip-tipo-check \{ display: block; \}/, 'o ✓ não aparece no marcado: o estado vira só cor');
+  assert.match(CSS, /\.chip-tipo-input:focus-visible \+ \.chip-tipo-cara \{[^}]*outline: 2px solid/, 'o chip focado pelo teclado ficou sem anel');
+  const esconde = /\.chip-tipo-input \{([^}]*)\}/.exec(CSS);
+  assert.ok(esconde, 'a regra da caixa escondida sumiu');
+  assert.ok(!/display:\s*none|visibility:\s*hidden/.test(esconde[1]), 'a caixa escondida saiu do Tab (display none / visibility hidden)');
+  assert.match(CSS, /\.chip-tipo \{[^}]*min-height: 44px;/, 'o alvo do toque do chip caiu abaixo de 44 px');
+});
+
+// ── "Minha área" antes dos campos que ela desliga, e os esconde ─────────────
+test('"Minha área" vem ANTES de país, estado e área gerenciada — e ligada os ESCONDE', () => {
+  const iMinha = HTML_SEM.indexOf('id="filterMyArea"');
+  const iRegiao = HTML_SEM.indexOf('id="filterRegion"');
+  const iManual = HTML_SEM.indexOf('id="filterLugarManual"');
+  assert.ok(iRegiao > 0 && iMinha > iRegiao, 'a Região tem que vir antes (vale pros dois)');
+  assert.ok(iManual > iMinha, '"Minha área" voltou pra depois dos campos que ela desliga');
+  const manual = HTML_SEM.slice(iManual, HTML_SEM.indexOf('data-i18n="filters.section.batch"'));
+  for (const id of ['filterCountry', 'filterState', 'filterManagedArea']) {
+    assert.ok(manual.includes(`id="${id}"`), `${id} saiu do bloco que "Minha área" esconde`);
+  }
+  // O comportamento: ligada esconde, desligada mostra — pelo ouvinte e na abertura.
+  const els = { filterLugarManual: { classList: classes() } };
+  const h = montar(['mostrarLugarManual'], { document: { getElementById: (id) => els[id] || null } }, ['mostrarLugarManual']);
+  h.mostrarLugarManual(false);
+  assert.ok(els.filterLugarManual.classList.contains('hidden'), 'ligada, os três seguem à vista (cinza parecem um filtro aplicado)');
+  h.mostrarLugarManual(true);
+  assert.ok(!els.filterLugarManual.classList.contains('hidden'), 'desligada, os três não voltam');
+  const ouvinte = /filterMyArea'\)\.addEventListener\('change', \(e\) => \{([\s\S]*?)\n    \}\);/.exec(APP_SEM);
+  assert.ok(ouvinte && /mostrarLugarManual\(!checked\)/.test(ouvinte[1]), 'o interruptor deixou de esconder/mostrar os três');
+  assert.match(fatiar('openFiltersModal'), /mostrarLugarManual\(!disabled\)/, 'a abertura dos Filtros deixou de esconder os três com "Minha área" ligada');
+});
+
+test('"Minha área": a descrição diz o que ela é, sem "bbox", e que a área gerenciada também deixa de valer (4 línguas)', () => {
+  for (const [lang, d] of Object.entries(DICT)) {
+    const desc = d['filters.myArea.desc'];
+    assert.ok(!/bbox|drive area/i.test(desc), `${lang}: a descrição voltou ao jargão ("bbox", "drive area"): ${desc}`);
+    const area = d['filters.managedArea.label'].toLocaleLowerCase(lang);
+    assert.ok(desc.toLocaleLowerCase(lang).includes(area), `${lang}: a descrição não diz que a "${area}" deixa de valer: ${desc}`);
+  }
+});

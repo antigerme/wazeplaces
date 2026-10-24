@@ -1358,6 +1358,91 @@ input.ui-switch:disabled {
   }
 }
 
+/* ── OS TIPOS DE PEDIDO EM BOTÕES-FILTRO (chips, M3; v2026.10.24) ─────────────
+   Eram sete linhas de 44 px, uma por tipo: sozinhas, mais altas que a área
+   visível inteira do diálogo no iPhone SE (257 px). Viraram chips em dois grupos
+   (o pedido sobre o LOCAL e sobre uma FOTO). Cada chip é uma <input type=checkbox>
+   de verdade, escondida visualmente e FOCÁVEL (o padrão `sr-only`), dentro de um
+   <label> de 44 px de altura (a régua de toque do projeto; a "cara" do chip tem
+   36, como o chip do M3 tem 32 dentro de 48).
+   - MARCADO NÃO É SÓ COR (WCAG 1.4.1): o ✓ aparece à esquerda, e é ele que fica no
+     contraste alto, onde o fundo some (a borda engrossa junto).
+   - A BORDA do não marcado é slate-500 (4,8:1 sobre o branco; 3,5:1 sobre o
+     escuro): é o que desenha o botão (WCAG 1.4.11), como o "outline" do M3.
+   - O chip cresce 16 px ao ganhar o ✓ (o padrão do M3) e pode descer de linha:
+     a pessoa vê o que mudou, e escolher tipo é raro (vale até mudar de novo). */
+.chip-tipo-grupo {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #475569; /* slate-600 */
+}
+.dark .chip-tipo-grupo { color: #cbd5e1; }
+.chip-tipo {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  max-width: 100%;
+  cursor: pointer;
+}
+.chip-tipo-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.chip-tipo-cara {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  max-width: 100%;
+  padding: 6px 14px;
+  border-radius: 9999px;
+  border: 1px solid #64748b; /* slate-500 */
+  background: #ffffff;
+  color: #334155; /* slate-700 */
+  font-size: 0.875rem;
+  line-height: 1.25;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.chip-tipo-check {
+  display: none;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+.chip-tipo-input:checked + .chip-tipo-cara {
+  padding-left: 10px;
+  background: #ecfeff; /* cyan-50 */
+  border-color: #0891b2; /* cyan-600 */
+  color: #155e75; /* cyan-800 */
+}
+.chip-tipo-input:checked + .chip-tipo-cara .chip-tipo-check { display: block; }
+.chip-tipo-input:focus-visible + .chip-tipo-cara {
+  outline: 2px solid #0891b2;
+  outline-offset: 2px;
+}
+.chip-tipo:hover .chip-tipo-input:not(:checked) + .chip-tipo-cara { background: #f1f5f9; }
+.dark .chip-tipo-cara {
+  border-color: #64748b;
+  background: #0f172a; /* slate-900 */
+  color: #e2e8f0; /* slate-200 */
+}
+.dark .chip-tipo-input:checked + .chip-tipo-cara {
+  background: rgba(8, 145, 178, 0.25);
+  border-color: #22d3ee; /* cyan-400 */
+  color: #cffafe; /* cyan-100 */
+}
+.dark .chip-tipo:hover .chip-tipo-input:not(:checked) + .chip-tipo-cara { background: #1e293b; }
+/* (O contraste alto do chip mora no bloco ÚNICO do `forced-colors`, no fim do
+   arquivo: o guard de layout lê a primeira ocorrência de cada `@media`.) */
+
 .seg-tabs {
   container-type: inline-size;
   display: grid;
@@ -3682,6 +3767,10 @@ html.tem-sessao #authScreen { display: none; }
      com uma barra branca no lugar do rótulo. `forced-color-adjust: none` na aba
      (com as cores do SISTEMA, que é o que o modo quer) tira a placa. */
 @media (forced-colors: active) {
+  /* Os chips dos tipos de pedido (v2026.10.24): o fundo do marcado some, e o que
+     o diz é o ✓ (cor do texto, do sistema) e a borda que engrossa. */
+  .chip-tipo-input.chip-tipo-input:checked + .chip-tipo-cara { border-width: 2px; }
+
   /* O botão sem borda é texto solto: o Tailwind zera a borda de todo elemento e o
      fundo some. Seletor de elemento (0,0,1): qualquer botão que já tem borda por
      classe (✕ ↑ ✓, as células, o `.conq-link` sublinhado) a mantém. */

@@ -629,16 +629,35 @@
                             </label>
                         </div>
 
+                        <!-- OS SETE TIPOS EM BOTÕES-FILTRO (chips, M3), em dois grupos que o editor já
+                             conhece: o pedido sobre o LOCAL e o pedido sobre uma FOTO (v2026.10.24). Eram
+                             sete linhas de 44 px, uma por tipo — sozinhas, mais altas que a área visível
+                             inteira do diálogo no iPhone SE. Cada chip continua uma <input type=checkbox>
+                             de verdade (o `.filter-type` com o `value` do tipo, na ORDEM do TYPES_ALL:
+                             test/consistencia.test.mjs), escondida visualmente e focável; o nome que o
+                             leitor de tela ouve é o INTEIRO ("Novo local"), que começa pelo que se vê
+                             ("Novo") — WCAG 2.5.3. Marcado não é só cor: o ✓ aparece (e fica no
+                             contraste alto). -->
                         <fieldset class="min-w-0">
                             <legend class="text-sm font-semibold text-slate-700 block mb-2 break-words dark:text-slate-200" data-i18n="filters.types.legend">Tipos de Pedido</legend>
-                            <div class="space-y-1">
-                                <label class="flex items-center gap-3 text-sm min-h-[44px] cursor-pointer"><input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="NEW_PLACE" checked> <span class="min-w-0 break-words" data-i18n="filters.types.NEW_PLACE">Novo local</span></label>
-                                <label class="flex items-center gap-3 text-sm min-h-[44px] cursor-pointer"><input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="DETAILS_UPDATE"> <span class="min-w-0 break-words" data-i18n="filters.types.DETAILS_UPDATE">Atualização de detalhes</span></label>
-                                <label class="flex items-center gap-3 text-sm min-h-[44px] cursor-pointer"><input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="FLAGGED_PLACE"> <span class="min-w-0 break-words" data-i18n="filters.types.FLAGGED_PLACE">Local marcado</span></label>
-                                <label class="flex items-center gap-3 text-sm min-h-[44px] cursor-pointer"><input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="DELETE_PLACE" checked> <span class="min-w-0 break-words" data-i18n="filters.types.DELETE_PLACE">Excluir local</span></label>
-                                <label class="flex items-center gap-3 text-sm min-h-[44px] cursor-pointer"><input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="NEW_PHOTO" checked> <span class="min-w-0 break-words" data-i18n="filters.types.NEW_PHOTO">Nova foto</span></label>
-                                <label class="flex items-center gap-3 text-sm min-h-[44px] cursor-pointer"><input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="FLAGGED_PHOTO" checked> <span class="min-w-0 break-words" data-i18n="filters.types.FLAGGED_PHOTO">Foto sinalizada</span></label>
-                                <label class="flex items-center gap-3 text-sm min-h-[44px] cursor-pointer"><input type="checkbox" class="filter-type w-5 h-5 accent-cyan-600" value="DELETE_PHOTO" checked> <span class="min-w-0 break-words" data-i18n="filters.types.DELETE_PHOTO">Excluir foto</span></label>
+                            <div class="space-y-2">
+                                <fieldset class="min-w-0">
+                                    <legend class="chip-tipo-grupo" data-i18n="filters.types.grupo.local">Local</legend>
+                                    <div class="flex flex-wrap gap-x-2">
+                                    <label class="chip-tipo"><input type="checkbox" class="filter-type chip-tipo-input" value="NEW_PLACE" checked aria-label="Novo local" data-i18n-aria="filters.types.NEW_PLACE"><span class="chip-tipo-cara"><svg class="chip-tipo-check" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span class="min-w-0 break-words" data-i18n="filters.types.curto.NEW_PLACE">Novo</span></span></label>
+                                    <label class="chip-tipo"><input type="checkbox" class="filter-type chip-tipo-input" value="DETAILS_UPDATE" aria-label="Atualização de detalhes" data-i18n-aria="filters.types.DETAILS_UPDATE"><span class="chip-tipo-cara"><svg class="chip-tipo-check" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span class="min-w-0 break-words" data-i18n="filters.types.curto.DETAILS_UPDATE">Atualização</span></span></label>
+                                    <label class="chip-tipo"><input type="checkbox" class="filter-type chip-tipo-input" value="FLAGGED_PLACE" aria-label="Local marcado" data-i18n-aria="filters.types.FLAGGED_PLACE"><span class="chip-tipo-cara"><svg class="chip-tipo-check" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span class="min-w-0 break-words" data-i18n="filters.types.curto.FLAGGED_PLACE">Marcado</span></span></label>
+                                    <label class="chip-tipo"><input type="checkbox" class="filter-type chip-tipo-input" value="DELETE_PLACE" checked aria-label="Excluir local" data-i18n-aria="filters.types.DELETE_PLACE"><span class="chip-tipo-cara"><svg class="chip-tipo-check" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span class="min-w-0 break-words" data-i18n="filters.types.curto.DELETE_PLACE">Excluir</span></span></label>
+                                    </div>
+                                </fieldset>
+                                <fieldset class="min-w-0">
+                                    <legend class="chip-tipo-grupo" data-i18n="filters.types.grupo.foto">Foto</legend>
+                                    <div class="flex flex-wrap gap-x-2">
+                                    <label class="chip-tipo"><input type="checkbox" class="filter-type chip-tipo-input" value="NEW_PHOTO" checked aria-label="Nova foto" data-i18n-aria="filters.types.NEW_PHOTO"><span class="chip-tipo-cara"><svg class="chip-tipo-check" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span class="min-w-0 break-words" data-i18n="filters.types.curto.NEW_PHOTO">Nova</span></span></label>
+                                    <label class="chip-tipo"><input type="checkbox" class="filter-type chip-tipo-input" value="FLAGGED_PHOTO" checked aria-label="Foto sinalizada" data-i18n-aria="filters.types.FLAGGED_PHOTO"><span class="chip-tipo-cara"><svg class="chip-tipo-check" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span class="min-w-0 break-words" data-i18n="filters.types.curto.FLAGGED_PHOTO">Sinalizada</span></span></label>
+                                    <label class="chip-tipo"><input type="checkbox" class="filter-type chip-tipo-input" value="DELETE_PHOTO" checked aria-label="Excluir foto" data-i18n-aria="filters.types.DELETE_PHOTO"><span class="chip-tipo-cara"><svg class="chip-tipo-check" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span class="min-w-0 break-words" data-i18n="filters.types.curto.DELETE_PHOTO">Excluir</span></span></label>
+                                    </div>
+                                </fieldset>
                             </div>
                         </fieldset>
 
@@ -687,36 +706,43 @@
                                     </select>
                                 </div>
 
-                                <div>
-                                    <label for="filterCountry" class="text-sm font-semibold text-slate-700 block mb-2 dark:text-slate-200" data-i18n="filters.country.label">País</label>
-                                    <select id="filterCountry" class="w-full min-h-[44px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm dark:bg-slate-900 dark:border-slate-700">
-                                        <option value="30">Brasil</option>
-                                    </select>
-                                    <p id="filterCountryHint" class="hidden text-[0.6875rem] text-amber-700 dark:text-amber-300 mt-1" data-i18n="filters.country.hint">Mostrando apenas países que você pode editar.</p>
-                                </div>
-
-                                <div>
-                                    <label for="filterState" class="text-sm font-semibold text-slate-700 block mb-2 dark:text-slate-200" data-i18n="filters.state.label">Estado</label>
-                                    <select id="filterState" class="w-full min-h-[44px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm dark:bg-slate-900 dark:border-slate-700">
-                                        <option value="" data-i18n="filters.state.all">Todos os estados</option>
-                                    </select>
-                                </div>
-
-                                <div>
-                                    <label for="filterManagedArea" class="text-sm font-semibold text-slate-700 block mb-2 dark:text-slate-200" data-i18n="filters.managedArea.label">Área gerenciada</label>
-                                    <select id="filterManagedArea" class="w-full min-h-[44px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm dark:bg-slate-900 dark:border-slate-700">
-                                        <option value="" data-i18n="filters.managedArea.none">Nenhuma</option>
-                                    </select>
-                                </div>
-
+                                <!-- "MINHA ÁREA" VEM ANTES dos três campos que ela desliga (v2026.10.24): vinha
+                                     depois, e quem descia pelos campos só descobria no fim que eles não valiam.
+                                     Ligada, os três SOMEM (e não só ficam cinza) — a busca manda só a caixa da
+                                     área, sem país, estado nem área gerenciada (`fetchNextPage`) — e voltam com
+                                     os valores de antes quando ela desliga. A Região fica acima: vale pros dois. -->
                                 <div class="bg-cyan-50 border border-cyan-100 dark:border-cyan-400/30 rounded-xl p-3 dark:bg-cyan-600/20">
                                     <label class="flex items-center justify-between gap-3 text-sm cursor-pointer min-h-[44px]">
                                         <span class="min-w-0 break-words">
                                             <span class="font-semibold text-slate-700 dark:text-slate-200" data-i18n="filters.myArea.label">Filtrar pela minha área de edição</span>
-                                            <span class="block text-xs text-slate-600 dark:text-slate-300" data-i18n="filters.myArea.desc">Usa o bbox da sua "drive area" do Waze (ignora país/estado)</span>
+                                            <span class="block text-xs text-slate-600 dark:text-slate-300" data-i18n="filters.myArea.desc">Mostra os pedidos do retângulo que envolve a sua área de edição no Waze. País, estado e área gerenciada deixam de valer.</span>
                                         </span>
                                         <input id="filterMyArea" type="checkbox" class="ui-switch">
                                     </label>
+                                </div>
+
+                                <div id="filterLugarManual" class="space-y-4">
+                                    <div>
+                                        <label for="filterCountry" class="text-sm font-semibold text-slate-700 block mb-2 dark:text-slate-200" data-i18n="filters.country.label">País</label>
+                                        <select id="filterCountry" class="w-full min-h-[44px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm dark:bg-slate-900 dark:border-slate-700">
+                                            <option value="30">Brasil</option>
+                                        </select>
+                                        <p id="filterCountryHint" class="hidden text-[0.6875rem] text-amber-700 dark:text-amber-300 mt-1" data-i18n="filters.country.hint">Mostrando apenas países que você pode editar.</p>
+                                    </div>
+
+                                    <div>
+                                        <label for="filterState" class="text-sm font-semibold text-slate-700 block mb-2 dark:text-slate-200" data-i18n="filters.state.label">Estado</label>
+                                        <select id="filterState" class="w-full min-h-[44px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm dark:bg-slate-900 dark:border-slate-700">
+                                            <option value="" data-i18n="filters.state.all">Todos os estados</option>
+                                        </select>
+                                    </div>
+
+                                    <div>
+                                        <label for="filterManagedArea" class="text-sm font-semibold text-slate-700 block mb-2 dark:text-slate-200" data-i18n="filters.managedArea.label">Área gerenciada</label>
+                                        <select id="filterManagedArea" class="w-full min-h-[44px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm dark:bg-slate-900 dark:border-slate-700">
+                                            <option value="" data-i18n="filters.managedArea.none">Nenhuma</option>
+                                        </select>
+                                    </div>
                                 </div>
                             </div>
                         </div>

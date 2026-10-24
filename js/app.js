@@ -2791,6 +2791,7 @@ function setupModalListeners() {
         $('filterCountry').disabled = checked;
         $('filterState').disabled = checked;
         $('filterManagedArea').disabled = checked;
+        mostrarLugarManual(!checked);
     });
 
     // Preferências aplicam NA HORA (padrão M3 pra settings: switch = efeito
@@ -6518,6 +6519,15 @@ function populateCategorySelect() {
     sel.value = current;
 }
 
+// "Minha área" ligada ESCONDE os três campos que ela desliga (v2026.10.24): país,
+// estado e área gerenciada não valem com ela (a busca manda só a caixa da área,
+// `fetchNextPage`), e cinza na tela eles pareciam um filtro aplicado. Escondidos,
+// guardam o valor: voltam como estavam quando ela desliga. O `disabled` dos três
+// segue com quem já o escrevia (o ouvinte, a abertura e as cargas de país e estado).
+function mostrarLugarManual(mostra) {
+    document.getElementById('filterLugarManual')?.classList.toggle('hidden', !mostra);
+}
+
 async function openFiltersModal() {
     const $ = id => document.getElementById(id);
     // O modo Filtros do diálogo (o funil): o formulário, sem abas. O Histórico e as
@@ -6549,6 +6559,7 @@ async function openFiltersModal() {
     $('filterCountry').disabled = disabled;
     $('filterState').disabled = disabled;
     $('filterManagedArea').disabled = disabled;
+    mostrarLugarManual(!disabled);
 
     populateCategorySelect();
     popularOrdenacoes();

@@ -891,9 +891,11 @@ test('R23-7-04 · o canvas do QR do pareamento nunca passa do CARTÃO (max-width
 test('R23-8-04 · o fieldset dos tipos de pedido encolhe com o cartão e quebra a palavra que não cabe (min-w-0 + break-words)', () => {
   const a = HTML.indexOf('<fieldset class="min-w-0">');
   assert.ok(a > 0, 'o <fieldset> dos tipos de pedido perdeu o min-w-0: o padrão do navegador (`min-inline-size: min-content`) o deixa passar do cartão com texto grande');
-  const bloco = HTML.slice(a, HTML.indexOf('</fieldset>', a));
+  // Desde v2026.10.24 os tipos são chips em dois grupos (dois <fieldset> dentro deste): o bloco vai até o
+  // campo seguinte (a Categoria), e o rótulo que se VÊ é o curto (`filters.types.curto.*`).
+  const bloco = HTML.slice(a, HTML.indexOf('for="filterCategory"', a));
   assert.match(bloco, /<legend class="[^"]*\bbreak-words\b/, 'a legenda «Tipos de Pedido» não quebra a palavra');
-  const spans = [...bloco.matchAll(/<span class="([^"]*)" data-i18n="filters\.types\.[A-Z_]+"/g)];
+  const spans = [...bloco.matchAll(/<span class="([^"]*)" data-i18n="filters\.types\.curto\.[A-Z_]+"/g)];
   assert.equal(spans.length, 7, 'esperava os 7 tipos de pedido');
   for (const m of spans) assert.ok(/\bmin-w-0\b/.test(m[1]) && /\bbreak-words\b/.test(m[1]), `o rótulo de um tipo de pedido não encolhe/quebra: ${m[0]}`);
   assert.equal([...bloco.matchAll(/class="filter-type /g)].length, 7, 'os 7 checkboxes dos tipos continuam no fieldset');
