@@ -1443,6 +1443,71 @@ input.ui-switch:disabled {
 /* (O contraste alto do chip mora no bloco ÚNICO do `forced-colors`, no fim do
    arquivo: o guard de layout lê a primeira ocorrência de cada `@media`.) */
 
+/* ── O TEMA nas Preferências: Auto · Claro · Escuro (v2026.10.24) ──────────────
+   Três rádios de verdade com a CARA do seletor de abas (.seg-tabs/.seg-tab): o
+   mesmo trilho, a mesma opção escolhida em branco. A régua do texto é a das abas
+   (`min(…, 6.3cqw)`): a 1× os rótulos cabem até no Galaxy Fold, e com o texto do
+   sistema maior eles encolhem em vez de sair do diálogo. */
+.tema-opcoes {
+  container-type: inline-size;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 4px;
+  background: #f1f5f9; /* slate-100 */
+  border-radius: 12px;
+  padding: 4px;
+}
+.tema-opcao {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  cursor: pointer;
+}
+.tema-opcao-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.tema-opcao-cara {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 4px;
+  border-radius: 9px;
+  text-align: center;
+  overflow-wrap: anywhere;
+  font-size: 0.8125rem;
+  font-size: min(0.8125rem, 6.3cqw);
+  font-weight: 600;
+  color: #475569; /* slate-600 */
+  transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+.tema-opcao-input:checked + .tema-opcao-cara {
+  background: #ffffff;
+  color: #0e7490; /* cyan-700 */
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12);
+}
+.tema-opcao-input:focus-visible + .tema-opcao-cara {
+  outline: 2px solid #0891b2;
+  outline-offset: 2px;
+}
+.dark .tema-opcoes { background: #0f172a; /* slate-900 */ }
+.dark .tema-opcao-cara { color: #cbd5e1; /* slate-300 */ }
+.dark .tema-opcao-input:checked + .tema-opcao-cara {
+  background: #334155; /* slate-700 */
+  color: #22d3ee; /* cyan-400 */
+}
+
 .seg-tabs {
   container-type: inline-size;
   display: grid;
@@ -3770,6 +3835,13 @@ html.tem-sessao #authScreen { display: none; }
   /* Os chips dos tipos de pedido (v2026.10.24): o fundo do marcado some, e o que
      o diz é o ✓ (cor do texto, do sistema) e a borda que engrossa. */
   .chip-tipo-input.chip-tipo-input:checked + .chip-tipo-cara { border-width: 2px; }
+  /* O tema escolhido (v2026.10.24): como a aba selecionada, o FUNDO do sistema
+     (Highlight), sem a placa do navegador por trás do texto. */
+  .tema-opcao-input.tema-opcao-input:checked + .tema-opcao-cara {
+    forced-color-adjust: none;
+    background: Highlight;
+    color: HighlightText;
+  }
 
   /* O botão sem borda é texto solto: o Tailwind zera a borda de todo elemento e o
      fundo some. Seletor de elemento (0,0,1): qualquer botão que já tem borda por

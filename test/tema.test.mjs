@@ -80,13 +80,18 @@ function pagina({ sistemaEscuro, escolha = null }) {
   const localStorage = {
     getItem: (k) => (guardado.has(k) ? guardado.get(k) : null),
     setItem: (k, v) => guardado.set(k, String(v)),
+    removeItem: (k) => guardado.delete(k),
   };
   const window = { matchMedia };
+  // A linha do Tema nas Preferências (v2026.10.24): três rádios.
+  const radios = ['auto', 'light', 'dark'].map((value) => ({ value, checked: false }));
+  document.querySelectorAll = ((antes) => (sel) => (sel === 'input[name="prefTema"]' ? radios : antes(sel)))(document.querySelectorAll);
   // A carga: o script inline, e depois o `initApp`, que aplica o tema de novo.
   new Function('window', 'document', 'localStorage', SCRIPT_DO_TEMA)(window, document, localStorage);
   const app = new Function('window', 'document', 'localStorage', 'THEME_KEY',
     [fatiar('getPreferredTheme'), fatiar('applyTheme'), fatiar('toggleTheme'),
-     'return { getPreferredTheme, applyTheme, toggleTheme };'].join('\n'))(window, document, localStorage, 'waze_places_theme');
+     fatiar('modoDoTema'), fatiar('renderTemaPref'), fatiar('escolherTema'),
+     'return { getPreferredTheme, applyTheme, toggleTheme, modoDoTema, renderTemaPref, escolherTema };'].join('\n'))(window, document, localStorage, 'waze_places_theme');
   app.applyTheme(app.getPreferredTheme());
   // O que a tela mostra: a classe da raiz e a barra — a meta que VALE é a
   // primeira cuja media casa, não a primeira do documento.
@@ -97,7 +102,8 @@ function pagina({ sistemaEscuro, escolha = null }) {
       barra: vale ? vale.getAttribute('content') : null,
     };
   };
-  return { ...app, estado, escolha: () => guardado.get('waze_places_theme') || null };
+  return { ...app, estado, escolha: () => guardado.get('waze_places_theme') || null,
+    linha: () => radios.filter((r) => r.checked).map((r) => r.value) };
 }
 
 test('CONTROLE: as duas metas de mentira são as do index.src.html, na mesma ordem', () => {
@@ -128,4 +134,42 @@ test('A8: seguindo o sistema (sem escolha), o que o app aplica na abertura já �
     const s = pagina({ sistemaEscuro }).estado();
     assert.deepEqual(s, { dark: sistemaEscuro, temaClaro: !sistemaEscuro, barra: sistemaEscuro ? '#0f172a' : '#f8fafc' });
   }
+});
+
+test('o TEMA nas Preferências: "Auto" devolve o app ao aparelho (igual à recarga sem escolha), e o botão e a linha nunca discordam', () => {
+  for (const sistemaEscuro of [true, false]) {
+    const onde = `sistema ${sistemaEscuro ? 'escuro' : 'claro'}`;
+    const p = pagina({ sistemaEscuro });
+    p.renderTemaPref();
+    assert.deepEqual(p.linha(), ['auto'], `${onde}: sem escolha, a linha não diz "Auto"`);
+    // O botão do cabeçalho escolhe o contrário do aparelho, e a linha acompanha.
+    p.toggleTheme();
+    const escolhido = sistemaEscuro ? 'light' : 'dark';
+    assert.equal(p.escolha(), escolhido, 'PRÉ-CONDIÇÃO: o botão não gravou a escolha');
+    assert.deepEqual(p.linha(), [escolhido], `${onde}: o botão trocou o tema e a linha das Preferências seguiu dizendo outro`);
+    // "Auto": a chave sai, e a tela fica IGUAL à de quem nunca escolheu (a recarga sem chave).
+    p.escolherTema('auto');
+    assert.equal(p.escolha(), null, `${onde}: o "Auto" deixou uma escolha gravada — o app seguiria preso nela`);
+    assert.deepEqual(p.estado(), pagina({ sistemaEscuro }).estado(), `${onde}: o "Auto" pinta diferente da recarga sem escolha`);
+    assert.deepEqual(p.linha(), ['auto']);
+    // E Claro/Escuro pela linha valem como o botão: igual à recarga com a escolha.
+    for (const modo of ['dark', 'light']) {
+      p.escolherTema(modo);
+      assert.equal(p.escolha(), modo);
+      assert.deepEqual(p.estado(), pagina({ sistemaEscuro, escolha: modo }).estado(), `${onde}: "${modo}" pela linha pinta diferente da recarga`);
+      assert.deepEqual(p.linha(), [modo]);
+    }
+  }
+});
+
+test('o TEMA nas Preferências: rádios de verdade num grupo, nas 4 línguas, e a abertura do perfil os acerta', () => {
+  const grupo = /<fieldset id="prefTemaRow"[\s\S]*?<\/fieldset>/.exec(HTML);
+  assert.ok(grupo, 'a linha do Tema (#prefTemaRow) sumiu das Preferências');
+  const valores = [...grupo[0].matchAll(/<input type="radio" name="prefTema" value="(\w+)"/g)].map((m) => m[1]);
+  assert.deepEqual(valores, ['auto', 'light', 'dark']);
+  assert.match(grupo[0], /<legend[^>]*data-i18n="prefs\.tema\.label"/, 'o grupo sem o nome (a legenda)');
+  const APP = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  const perfil = APP.slice(APP.indexOf('function abrirPerfil('), APP.indexOf('\n}\n', APP.indexOf('function abrirPerfil(')));
+  assert.match(perfil, /renderTemaPref\(\);/, 'abrir o perfil não acerta a linha do Tema (ela mostraria o modo de antes)');
+  assert.match(APP, /r\.addEventListener\('change', \(\) => \{ if \(r\.checked\) escolherTema\(r\.value\); \}\);/, 'os rádios do Tema não escolhem nada');
 });

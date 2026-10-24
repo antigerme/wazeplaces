@@ -792,6 +792,21 @@
                             <select id="langSelect" class="w-full min-h-[44px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm dark:bg-slate-900 dark:border-slate-700"></select>
                         </div>
 
+                        <!-- O TEMA (v2026.10.24): Auto · Claro · Escuro. O botão do cabeçalho alterna
+                             claro e escuro, e depois do primeiro toque o app nunca mais voltava a seguir
+                             o aparelho — não havia caminho de volta. "Auto" é a chave AUSENTE, a mesma de
+                             quem nunca tocou no botão. Rádios de verdade (o grupo é o <fieldset>), com a
+                             cara do seletor de abas. -->
+                        <fieldset id="prefTemaRow" class="min-w-0">
+                            <legend class="text-sm font-semibold text-slate-700 block mb-1 dark:text-slate-200" data-i18n="prefs.tema.label">Tema</legend>
+                            <div class="tema-opcoes">
+                                <label class="tema-opcao"><input type="radio" name="prefTema" value="auto" class="tema-opcao-input" checked><span class="tema-opcao-cara" data-i18n="prefs.tema.auto">Auto</span></label>
+                                <label class="tema-opcao"><input type="radio" name="prefTema" value="light" class="tema-opcao-input"><span class="tema-opcao-cara" data-i18n="prefs.tema.claro">Claro</span></label>
+                                <label class="tema-opcao"><input type="radio" name="prefTema" value="dark" class="tema-opcao-input"><span class="tema-opcao-cara" data-i18n="prefs.tema.escuro">Escuro</span></label>
+                            </div>
+                            <p class="text-xs text-slate-600 mt-1 dark:text-slate-300" data-i18n="prefs.tema.desc">No Auto, o app segue o tema do aparelho.</p>
+                        </fieldset>
+
                         <div id="prefUndoRow" class="bg-amber-50 dark:bg-amber-400/10 border border-amber-100 dark:border-amber-400/30 rounded-xl p-3">
                             <label class="flex items-center justify-between gap-3 text-sm cursor-pointer min-h-[44px]">
                                 <span class="min-w-0 break-words">

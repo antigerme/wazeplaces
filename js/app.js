@@ -1862,6 +1862,9 @@ function setupAppListeners() {
     // (`avisosAdiadosAoVoltar`, R13-7-01).
     document.addEventListener('visibilitychange', avisosAdiadosAoVoltar);
     $('themeBtn').addEventListener('click', toggleTheme);
+    document.querySelectorAll('input[name="prefTema"]').forEach((r) => {
+        r.addEventListener('change', () => { if (r.checked) escolherTema(r.value); });
+    });
     // O funil faz o que promete, sempre: os Filtros (v2026.10.24). O ponto da
     // conquista nova mora no crachá do perfil, que é onde o Histórico abre.
     $('filtersBtn').addEventListener('click', () => { openFiltersModal(); });
@@ -31650,6 +31653,7 @@ function abrirPerfil(aba = 'filtersTabHistory') {
     renderUndoGateUI();
     renderPresencaPref();
     renderPularGuardaPref();
+    renderTemaPref();
     switchFilterTab(aba);
     openModal('filtersModal');
 }
@@ -31932,6 +31936,36 @@ function toggleTheme() {
     const next = isDark ? 'light' : 'dark';
     try { localStorage.setItem(THEME_KEY, next); } catch (e) {}
     applyTheme(next);
+    renderTemaPref(next);
+}
+
+// O TEMA nas Preferências (v2026.10.24): Auto · Claro · Escuro. O botão do
+// cabeçalho só alterna claro e escuro, e depois do primeiro toque o app nunca
+// mais voltava a seguir o aparelho: não havia caminho de volta. "Auto" é a chave
+// AUSENTE — a mesma de quem nunca tocou no botão —, e com ela o script do tema
+// (index.src.html) e o ouvinte do sistema (`initApp`) já seguem o aparelho.
+function modoDoTema() {
+    let guardado = null;
+    try { guardado = localStorage.getItem(THEME_KEY); } catch (e) {}
+    return guardado === 'light' || guardado === 'dark' ? guardado : 'auto';
+}
+
+// A linha das Preferências mostra o modo de AGORA. Quem escolheu passa o modo
+// (com o armazenamento bloqueado a leitura devolveria "auto" e a escolha voltaria
+// atrás na tela); sem argumento, lê o aparelho. O botão do cabeçalho também
+// passa por aqui: os dois controles nunca discordam.
+function renderTemaPref(modo = modoDoTema()) {
+    document.querySelectorAll('input[name="prefTema"]').forEach((r) => { r.checked = r.value === modo; });
+}
+
+function escolherTema(modo) {
+    const explicito = modo === 'light' || modo === 'dark';
+    try {
+        if (explicito) localStorage.setItem(THEME_KEY, modo);
+        else localStorage.removeItem(THEME_KEY);
+    } catch (e) {}
+    applyTheme(explicito ? modo : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+    renderTemaPref(explicito ? modo : 'auto');
 }
 
 // Snackbar M3: bottom-center (via #notifyStack), desliza de baixo, um clique
