@@ -2718,8 +2718,9 @@ for (const [nomeA, viewport] of APARELHOS_FONTE) {
     if (estado === 'hist') {
       // Desde v2026.10.26 a legenda é desenhada pelo `renderHistory`, junto das linhas, e SÓ com elas: com o
       // Histórico vazio ela não existe. Um dia com números a faz aparecer (o mesmo do bloco 12, abaixo).
+      // O "vazio" do Histórico é o do TOTAL acumulado (`_total`), não a soma dos dias: os dois vão juntos.
       const h = {}; const d = new Date(); const dia = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      h[dia] = { read: 5, rejected: 2 };
+      h[dia] = { read: 5, rejected: 2 }; h._total = { read: 5, rejected: 2 };
       localStorage.setItem('waze_places_history', JSON.stringify(h)); AppState.history = null;
       openModal('filtersModal'); switchFilterTab('filtersTabHistory');
       const cab = document.querySelector('#filtersPanelHistory .justify-end');
@@ -8670,13 +8671,14 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   }
 }
 
-// ── As abas de Filtros cabem em 44px nos QUATRO idiomas ────────────────────
+// ── As abas do diálogo cabem em 44px nos QUATRO idiomas ────────────────────
 // `1fr` é `minmax(auto, 1fr)`: a aba de rótulo mais longo empurra as vizinhas.
 // Em francês "Préférences" espremia "Filtres" para 41px no Galaxy Fold — e em
 // português não aparecia (gotcha #25). O conserto é corpo menor abaixo de
 // 320px; a saída óbvia (minmax(0,1fr)) foi testada e é PIOR, porque iguala em
 // 61px e CORTA o rótulo. Por isso o guard cobra as DUAS coisas: alvo ≥ 44 e
-// texto que não transborda.
+// texto que não transborda. Desde v2026.10.26 os Filtros (o funil) não têm aba:
+// as abas são as do perfil (Histórico | Preferências), e é nelas que se mede.
 {
   for (const [ap, viewport] of [['Galaxy Fold', { width: 280, height: 653 }], ['iPhone SE', { width: 375, height: 667 }]]) {
     for (const lang of LINGUAS) {
@@ -8688,7 +8690,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       }, lang);
       await page.goto(BASE, { waitUntil: 'domcontentloaded' });
       await page.waitForTimeout(450);
-      await page.evaluate(() => { AppState.authenticated = true; openModal('filtersModal'); });
+      await page.evaluate(() => { AppState.authenticated = true; switchFilterTab('filtersTabHistory'); openModal('filtersModal'); });
       await assentar(page, 200);
       const abas = await page.evaluate(() => [...document.querySelectorAll('.seg-tab')].map((e) => {
         const q = e.getBoundingClientRect();
@@ -8699,8 +8701,8 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
           vaza: e.scrollWidth > e.clientWidth + 1,
         };
       }));
-      const onde = `abas de Filtros/${ap}/${lang}`;
-      checa(abas.length === 3, `${onde}: esperava 3 abas`, String(abas.length));
+      const onde = `abas do perfil/${ap}/${lang}`;
+      checa(abas.length === 2, `${onde}: esperava 2 abas (Histórico e Preferências)`, String(abas.length));
       for (const a of abas) {
         checa(a.w >= 44 && a.h >= 44, `${onde}: "${a.txt}" com alvo ${a.w}x${a.h} (mín. 44)`);
         checa(!a.vaza, `${onde}: "${a.txt}" com o rótulo cortado`);
@@ -18497,9 +18499,17 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
       focarAutor(AppState.currentPlace.creatorId);
     });
     await doisQuadros(page);
-    // O MESMO ritual nas duas telas. O seletor de idioma mora na aba Preferências, então a troca é feita com ela na tela
-    // e os Filtros fechados em seguida; o Histórico, os autores e as conquistas só se desenham com os Filtros ABERTOS na
-    // aba deles — por isso a leitura é com eles reabertos, depois da troca.
+    // O MESMO ritual nas duas telas. Desde v2026.10.26 os Filtros (o funil) e as Preferências (o crachá do perfil) são
+    // modos diferentes do diálogo: o funil abre PRIMEIRO, pra os Filtros se desenharem no idioma de antes da troca (como
+    // quando eram uma aba da mesma janela, e o `aplicarIdioma` tem que repintá-los), e fecha antes de o crachá abrir (o
+    // fechar e o abrir no mesmo quadro sairiam do app, gotcha #65). O seletor de idioma mora nas Preferências; o
+    // Histórico, os autores e as conquistas só se desenham com a aba deles aberta — por isso a leitura é com ela
+    // reaberta, depois da troca.
+    await page.click('#filtersBtn');
+    await esperarNaPagina(page, () => !!document.querySelector('#filtersModal:not(.hidden)')
+      && (document.getElementById('filterSortHint')?.textContent || '').trim().length > 0, 10000, 50);
+    await page.keyboard.press('Escape');
+    await esperarOuExplodir(page, () => !CamadaVoltar.consumindo && !document.querySelector('.modal-root:not(.hidden)'), 'os Filtros fecharem');
     await page.click('#perfilBtn');   // as Preferências abrem pelo crachá (v2026.10.26)
     await page.evaluate(() => document.getElementById('filtersTabPrefs').click());
     if (trocarPara) await page.selectOption('#langSelect', trocarPara);
@@ -18688,7 +18698,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + o foco nas camadas de ampliar (fechar a foto e o mapa por Esc/↓/✕ devolve à foto/mapa do card, sair da edição devolve à pílula, aprovar e salvar mantêm na camada, com e sem Desfazer, e o ✨/🚩 e a miniatura com NOME, com o CONTROLE do Filtros)`
   + `, + passar as fotos com o polegar (dois arrastes seguidos a 500, 150 e 60 ms trocam a foto duas vezes sem ampliar; o duplo toque de verdade AMPLIA e volta, com o botão direito sem agir na foto)`
   + `, + faixa do carrossel não rouba o toque do mapa (2 aparelhos, com o mapa EXIGIDO na tela)`
-  + `, + abas de Filtros em 2 aparelhos × ${LINGUAS.length} idiomas (alvo 44px E rótulo sem corte)`
+  + `, + abas do perfil em 2 aparelhos × ${LINGUAS.length} idiomas (alvo 44px E rótulo sem corte)`
   + `, + Ajuda em 2 aparelhos × ${LINGUAS.length} idiomas (toda seção com o texto do MESMO tamanho medido na tela, dois-pontos no título, "Quem está no app" logo depois de "Como usar", com contraprova da lista de antes)`
   + `, + Resumo do mês em 2 aparelhos × ${LINGUAS.length} idiomas (1080×1350 de verdade, número e QR desenhados, botões na tela, download nomeado, limpeza no Esc)`
   + `, + foto de perfil em 2 aparelhos (host fora da CSP, 404, redesenho e o CONTROLE da foto boa)`
