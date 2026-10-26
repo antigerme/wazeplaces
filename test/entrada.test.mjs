@@ -134,7 +134,7 @@ test('a tela de entrada APAGA o cabeçalho do perfil (foto, nome, nível e títu
   registro.userName.textContent = 'editor_A';
   registro.userRank.textContent = 'L6 · AM';
   registro.userProfileBadge.setAttribute('title', 'editor_A — 10 pontos');
-  // Desde v2026.10.24 o crachá é um BOTÃO, e o nome acessível dele leva o nome da pessoa.
+  // Desde v2026.10.26 o crachá é um BOTÃO, e o nome acessível dele leva o nome da pessoa.
   registro.perfilBtn.setAttribute('aria-label', 'editor_A: histórico e preferências — conquista nova');
   const { limparCabecalhoDoPerfil } = montar(['limparCabecalhoDoPerfil', 'avatarSemFoto'], { document },
     ['limparCabecalhoDoPerfil']);

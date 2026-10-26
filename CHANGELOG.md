@@ -8,8 +8,8 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
-## v2026.10.24-01
-**Filtros e Preferências, reorganizados** (pedido do dono: «faça o que achar melhor e me entregue pronto»; a main de antes ficou na branch `rollback`, pra voltar se a turma não aprovar). Cada parte é UM commit e desfaz com `git revert` do commit dela.
+## v2026.10.26-01
+**Filtros e Preferências, reorganizados.** Feito em 24/10 (pedido do dono: «faça o que achar melhor e me entregue pronto») e segurado antes de ir ao ar; em 26/10, depois de ver os mockups de cada mudança, o dono liberou as seis («pode colocar tudo em produção»). A main de antes segue na branch `rollback`. Cada parte é UM commit e desfaz com `git revert` do commit dela.
 
 - **O funil abre só os Filtros, e o seu nome abre o Histórico e as Preferências.** Era uma janela só com três abas e dois jeitos de confirmar, e um furava o outro (medido): o filtro mudado e não aplicado sumia, calado, no «Fechar» das outras abas, e a preferência mudada continuava mudada no «Cancelar» dos Filtros. Agora os Filtros são um formulário (Cancelar · Aplicar) e o seu nome e a sua foto, no topo, viram um botão que abre o Histórico e as Preferências (aplicam na hora: Fechar). O ponto âmbar da conquista nova passou do funil pro seu nome, que é onde o Histórico abre. Abrir pelo nome não faz nenhum pedido ao servidor (medido: zero). A largura do nome no cabeçalho é a mesma de antes em todas as 32 combinações medidas (280 a 412 px, com e sem o ícone de gente).
 - **Tipos de pedido em botões-filtro, em dois grupos:** Local (Novo · Atualização · Marcado · Excluir) e Foto (Nova · Sinalizada · Excluir). Eram sete linhas, mais altas que a área visível inteira do diálogo no iPhone SE. Marcado tem ✓ (não é só cor), e o leitor de tela ouve o nome inteiro («Novo local»).

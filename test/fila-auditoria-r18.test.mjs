@@ -453,7 +453,7 @@ test('R18-8-01: a renovação da queda (a fila fica) repõe o "Restam" — o "�
 
 // ═══ R18-7-02 · a aba dos Filtros que muda abre no TOPO ═══════════════════════
 // As abas dividem a mesma caixa rolável e a troca só alterna `hidden`: a aba nova
-// herdava a rolagem da anterior. Desde v2026.10.24 os Filtros são um MODO do diálogo
+// herdava a rolagem da anterior. Desde v2026.10.26 os Filtros são um MODO do diálogo
 // (sem botão de aba) e as abas são as do perfil; "qual está na tela" é o PAINEL visível,
 // por isso o `classList` daqui é de verdade (com o `hidden` do HTML).
 function filtrosComCaixa() {

@@ -131,7 +131,7 @@ const I18N_DICT = {
     'filters.types.FLAGGED_PLACE': 'Local marcado', 'filters.types.DELETE_PLACE': 'Excluir local',
     'filters.types.NEW_PHOTO': 'Nova foto', 'filters.types.FLAGGED_PHOTO': 'Foto sinalizada',
     'filters.types.DELETE_PHOTO': 'Excluir foto',
-    // Os chips dos tipos (v2026.10.24): o nome curto que se VÊ, debaixo do grupo; o leitor de tela ouve o inteiro (filters.types.*),
+    // Os chips dos tipos (v2026.10.26): o nome curto que se VÊ, debaixo do grupo; o leitor de tela ouve o inteiro (filters.types.*),
     // que começa por ele (WCAG 2.5.3, conferido em test/filtros-dois-modos.test.mjs).
     'filters.types.grupo.local': 'Local', 'filters.types.grupo.foto': 'Foto',
     'filters.types.curto.NEW_PLACE': 'Novo', 'filters.types.curto.DETAILS_UPDATE': 'Atualização', 'filters.types.curto.FLAGGED_PLACE': 'Marcado', 'filters.types.curto.DELETE_PLACE': 'Excluir',
@@ -866,7 +866,7 @@ const I18N_DICT = {
     'filters.types.FLAGGED_PLACE': 'Flagged Place', 'filters.types.DELETE_PLACE': 'Delete Place',
     'filters.types.NEW_PHOTO': 'New photo', 'filters.types.FLAGGED_PHOTO': 'Flagged photo',
     'filters.types.DELETE_PHOTO': 'Delete photo',
-    // Os chips dos tipos (v2026.10.24): o nome curto que se VÊ, debaixo do grupo; o leitor de tela ouve o inteiro (filters.types.*),
+    // Os chips dos tipos (v2026.10.26): o nome curto que se VÊ, debaixo do grupo; o leitor de tela ouve o inteiro (filters.types.*),
     // que começa por ele (WCAG 2.5.3, conferido em test/filtros-dois-modos.test.mjs).
     'filters.types.grupo.local': 'Place', 'filters.types.grupo.foto': 'Photo',
     'filters.types.curto.NEW_PLACE': 'New', 'filters.types.curto.DETAILS_UPDATE': 'Update', 'filters.types.curto.FLAGGED_PLACE': 'Flagged', 'filters.types.curto.DELETE_PLACE': 'Delete',
@@ -1525,7 +1525,7 @@ const I18N_DICT = {
     'filters.types.FLAGGED_PLACE': 'Lugar denunciado', 'filters.types.DELETE_PLACE': 'Eliminar lugar',
     'filters.types.NEW_PHOTO': 'Nueva foto', 'filters.types.FLAGGED_PHOTO': 'Foto denunciada',
     'filters.types.DELETE_PHOTO': 'Borrar foto',
-    // Os chips dos tipos (v2026.10.24): o nome curto que se VÊ, debaixo do grupo; o leitor de tela ouve o inteiro (filters.types.*),
+    // Os chips dos tipos (v2026.10.26): o nome curto que se VÊ, debaixo do grupo; o leitor de tela ouve o inteiro (filters.types.*),
     // que começa por ele (WCAG 2.5.3, conferido em test/filtros-dois-modos.test.mjs).
     'filters.types.grupo.local': 'Lugar', 'filters.types.grupo.foto': 'Foto',
     'filters.types.curto.NEW_PLACE': 'Nuevo', 'filters.types.curto.DETAILS_UPDATE': 'Actualización', 'filters.types.curto.FLAGGED_PLACE': 'Denunciado', 'filters.types.curto.DELETE_PLACE': 'Eliminar',
@@ -2185,7 +2185,7 @@ const I18N_DICT = {
     'filters.types.FLAGGED_PLACE': 'Lieu signalé', 'filters.types.DELETE_PLACE': 'Supprimer le lieu',
     'filters.types.NEW_PHOTO': 'Nouvelle photo', 'filters.types.FLAGGED_PHOTO': 'Photo signalée',
     'filters.types.DELETE_PHOTO': 'Supprimer la photo',
-    // Os chips dos tipos (v2026.10.24): o nome curto que se VÊ, debaixo do grupo; o leitor de tela ouve o inteiro (filters.types.*),
+    // Os chips dos tipos (v2026.10.26): o nome curto que se VÊ, debaixo do grupo; o leitor de tela ouve o inteiro (filters.types.*),
     // que começa por ele (WCAG 2.5.3, conferido em test/filtros-dois-modos.test.mjs).
     'filters.types.grupo.local': 'Lieu', 'filters.types.grupo.foto': 'Photo',
     'filters.types.curto.NEW_PLACE': 'Nouveau', 'filters.types.curto.DETAILS_UPDATE': 'Mise à jour', 'filters.types.curto.FLAGGED_PLACE': 'Signalé', 'filters.types.curto.DELETE_PLACE': 'Supprimer',

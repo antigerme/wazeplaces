@@ -83,7 +83,7 @@ function pagina({ sistemaEscuro, escolha = null }) {
     removeItem: (k) => guardado.delete(k),
   };
   const window = { matchMedia };
-  // A linha do Tema nas Preferências (v2026.10.24): três rádios.
+  // A linha do Tema nas Preferências (v2026.10.26): três rádios.
   const radios = ['auto', 'light', 'dark'].map((value) => ({ value, checked: false }));
   document.querySelectorAll = ((antes) => (sel) => (sel === 'input[name="prefTema"]' ? radios : antes(sel)))(document.querySelectorAll);
   // A carga: o script inline, e depois o `initApp`, que aplica o tema de novo.

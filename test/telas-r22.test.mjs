@@ -15,7 +15,7 @@ const HTML = readFileSync(new URL('../index.src.html', import.meta.url), 'utf8')
 const classes = (tag) => (/class="([^"]*)"/.exec(tag) || [, ''])[1].split(/\s+/).filter(Boolean);
 
 test('R22-7-05 · o cabeçalho «Lidos / Rejeitados» do Histórico quebra em vez de sair pela esquerda — e segue à direita', () => {
-  // Desde v2026.10.24 a legenda é desenhada pelo `renderHistory`, logo acima das linhas (era fixa no
+  // Desde v2026.10.26 a legenda é desenhada pelo `renderHistory`, logo acima das linhas (era fixa no
   // HTML, acima do cartão da patente): a regra é a mesma, no molde de lá.
   const APP = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
   const m = /const legenda = `<div class="([^"]*\bjustify-end\b[^"]*)"[^>]*>` \+\s*`<span class="([^"]*)">\$\{escapeHtml\(t\('stats\.read'\)\)\}<\/span>` \+\s*`<span class="([^"]*)">\$\{escapeHtml\(t\('stats\.rejected'\)\)\}/.exec(APP);

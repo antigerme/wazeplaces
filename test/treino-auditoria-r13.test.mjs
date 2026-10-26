@@ -352,7 +352,7 @@ const FUNCOES_DAS_CONQUISTAS = ['copiaEmDia', 'lembrarTextoDaCopia', 'carregarCo
   'novasNaVitrine', 'atualizarSeloDeConquista', 'marcarConquistasVistas', 'historicoNaTela', 'agendarRedesenhoDoHistorico',
   'verConquistasNaTela', 'verConquistasAoVoltar', 'htmlConquistas', 'htmlPatente', 'aoGravarEmOutraAba',
   'podeAgirComoL6Aqui', 'definirPerfil', 'abrirConquistaNova', 'abrirModalNaAba', 'switchFilterTab',
-  // Desde v2026.10.24 o ponto mora no crachá do perfil, e o toque nele abre o
+  // Desde v2026.10.26 o ponto mora no crachá do perfil, e o toque nele abre o
   // Histórico pelo `abrirPerfil` (o modo "perfil" do diálogo); o nome do crachá
   // sai do `rotuloDoPerfil`.
   'abrirPerfil', 'rotuloDoPerfil'];

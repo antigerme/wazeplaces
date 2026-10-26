@@ -1358,7 +1358,7 @@ input.ui-switch:disabled {
   }
 }
 
-/* ── OS TIPOS DE PEDIDO EM BOTÕES-FILTRO (chips, M3; v2026.10.24) ─────────────
+/* ── OS TIPOS DE PEDIDO EM BOTÕES-FILTRO (chips, M3; v2026.10.26) ─────────────
    Eram sete linhas de 44 px, uma por tipo: sozinhas, mais altas que a área
    visível inteira do diálogo no iPhone SE (257 px). Viraram chips em dois grupos
    (o pedido sobre o LOCAL e sobre uma FOTO). Cada chip é uma <input type=checkbox>
@@ -1443,7 +1443,7 @@ input.ui-switch:disabled {
 /* (O contraste alto do chip mora no bloco ÚNICO do `forced-colors`, no fim do
    arquivo: o guard de layout lê a primeira ocorrência de cada `@media`.) */
 
-/* ── O TEMA nas Preferências: Auto · Claro · Escuro (v2026.10.24) ──────────────
+/* ── O TEMA nas Preferências: Auto · Claro · Escuro (v2026.10.26) ──────────────
    Três rádios de verdade com a CARA do seletor de abas (.seg-tabs/.seg-tab): o
    mesmo trilho, a mesma opção escolhida em branco. A régua do texto é a das abas
    (`min(…, 6.3cqw)`): a 1× os rótulos cabem até no Galaxy Fold, e com o texto do
@@ -1512,7 +1512,7 @@ input.ui-switch:disabled {
   container-type: inline-size;
   display: grid;
   /* Uma coluna por aba que EXISTE: eram três (Filtros · Preferências ·
-     Histórico) e, desde v2026.10.24, são duas (o perfil); os Filtros não têm aba. */
+     Histórico) e, desde v2026.10.26, são duas (o perfil); os Filtros não têm aba. */
   grid-auto-flow: column;
   grid-auto-columns: 1fr;
   gap: 4px;
@@ -3735,7 +3735,7 @@ html.tem-sessao #authScreen { display: none; }
    banner "discreto" no topo cobre os mesmos 13 (o problema é a POSIÇÃO, não a
    cor); snackbar no rodapé TAPA o ✕ no Galaxy Fold. O selo cobre ZERO.
    Mesmo desenho da `.presenca-selo` — não custa layout, mora sobre o ícone. */
-/* Desde v2026.10.24 o ponto mora no CRACHÁ do perfil (#perfilBtn), no canto de
+/* Desde v2026.10.26 o ponto mora no CRACHÁ do perfil (#perfilBtn), no canto de
    cima da foto, que é onde o Histórico abre. Preso ao canto do BOTÃO, não à
    foto: o `avatarSemFoto` troca o <img> por outro, e sem foto ele some. O botão
    tem 44 px de altura e a foto 32, centrada: o topo dela fica a 6 px. */
@@ -3832,10 +3832,10 @@ html.tem-sessao #authScreen { display: none; }
      com uma barra branca no lugar do rótulo. `forced-color-adjust: none` na aba
      (com as cores do SISTEMA, que é o que o modo quer) tira a placa. */
 @media (forced-colors: active) {
-  /* Os chips dos tipos de pedido (v2026.10.24): o fundo do marcado some, e o que
+  /* Os chips dos tipos de pedido (v2026.10.26): o fundo do marcado some, e o que
      o diz é o ✓ (cor do texto, do sistema) e a borda que engrossa. */
   .chip-tipo-input.chip-tipo-input:checked + .chip-tipo-cara { border-width: 2px; }
-  /* O tema escolhido (v2026.10.24): como a aba selecionada, o FUNDO do sistema
+  /* O tema escolhido (v2026.10.26): como a aba selecionada, o FUNDO do sistema
      (Highlight), sem a placa do navegador por trás do texto. */
   .tema-opcao-input.tema-opcao-input:checked + .tema-opcao-cara {
     forced-color-adjust: none;

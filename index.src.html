@@ -240,7 +240,7 @@
             </div>
             <div id="userProfileBadge" class="hidden flex items-center gap-2 min-w-0 flex-1 justify-end">
                 <span id="devModeBadge" class="hidden text-[0.6875rem] font-bold text-white bg-purple-600 px-1.5 py-0.5 rounded uppercase tracking-wider" title="Modo Desenvolvedor ativo — restrições removidas" data-i18n-title="header.devBadge.title">DEV</span>
-                <!-- O CRACHÁ É UM BOTÃO (v2026.10.24): abre o Histórico e as
+                <!-- O CRACHÁ É UM BOTÃO (v2026.10.26): abre o Histórico e as
                      Preferências (o modo "perfil" do diálogo dos Filtros), e é
                      nele que acende o ponto da conquista nova. Só o nome e a foto
                      são o botão, nunca o `flex-1` de fora: o vão vazio do
@@ -587,7 +587,7 @@
             </div>
         </div>
 
-        <!-- O diálogo dos Filtros tem DOIS modos (v2026.10.24), na mesma caixa:
+        <!-- O diálogo dos Filtros tem DOIS modos (v2026.10.26), na mesma caixa:
              - o FUNIL abre os FILTROS: um formulário, sem abas, com Cancelar · Aplicar;
              - o CRACHÁ do perfil (#perfilBtn) abre o HISTÓRICO e as PREFERÊNCIAS, em
                duas abas que aplicam na hora (Fechar).
@@ -630,7 +630,7 @@
                         </div>
 
                         <!-- OS SETE TIPOS EM BOTÕES-FILTRO (chips, M3), em dois grupos que o editor já
-                             conhece: o pedido sobre o LOCAL e o pedido sobre uma FOTO (v2026.10.24). Eram
+                             conhece: o pedido sobre o LOCAL e o pedido sobre uma FOTO (v2026.10.26). Eram
                              sete linhas de 44 px, uma por tipo — sozinhas, mais altas que a área visível
                              inteira do diálogo no iPhone SE. Cada chip continua uma <input type=checkbox>
                              de verdade (o `.filter-type` com o `value` do tipo, na ORDEM do TYPES_ALL:
@@ -706,7 +706,7 @@
                                     </select>
                                 </div>
 
-                                <!-- "MINHA ÁREA" VEM ANTES dos três campos que ela desliga (v2026.10.24): vinha
+                                <!-- "MINHA ÁREA" VEM ANTES dos três campos que ela desliga (v2026.10.26): vinha
                                      depois, e quem descia pelos campos só descobria no fim que eles não valiam.
                                      Ligada, os três SOMEM (e não só ficam cinza) — a busca manda só a caixa da
                                      área, sem país, estado nem área gerenciada (`fetchNextPage`) — e voltam com
@@ -792,7 +792,7 @@
                             <select id="langSelect" class="w-full min-h-[44px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm dark:bg-slate-900 dark:border-slate-700"></select>
                         </div>
 
-                        <!-- O TEMA (v2026.10.24): Auto · Claro · Escuro. O botão do cabeçalho alterna
+                        <!-- O TEMA (v2026.10.26): Auto · Claro · Escuro. O botão do cabeçalho alterna
                              claro e escuro, e depois do primeiro toque o app nunca mais voltava a seguir
                              o aparelho — não havia caminho de volta. "Auto" é a chave AUSENTE, a mesma de
                              quem nunca tocou no botão. Rádios de verdade (o grupo é o <fieldset>), com a
@@ -890,7 +890,7 @@
                     <div id="filtersPanelHistory" role="tabpanel" aria-labelledby="filtersTabHistory" class="hidden">
                         <div class="bg-slate-50 border border-slate-100 rounded-xl p-3 dark:bg-slate-900 dark:border-slate-700">
                             <!-- A legenda "Lidos · Rejeitados" é desenhada pelo `renderHistory`, logo
-                                 acima das linhas que ela explica (v2026.10.24): fixa aqui, ela ficava
+                                 acima das linhas que ela explica (v2026.10.26): fixa aqui, ela ficava
                                  acima do cartão da patente, longe dos números. -->
                             <div id="historyBody"></div>
                         </div>

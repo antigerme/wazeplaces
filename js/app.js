@@ -1865,7 +1865,7 @@ function setupAppListeners() {
     document.querySelectorAll('input[name="prefTema"]').forEach((r) => {
         r.addEventListener('change', () => { if (r.checked) escolherTema(r.value); });
     });
-    // O funil faz o que promete, sempre: os Filtros (v2026.10.24). O ponto da
+    // O funil faz o que promete, sempre: os Filtros (v2026.10.26). O ponto da
     // conquista nova mora no crachá do perfil, que é onde o Histórico abre.
     $('filtersBtn').addEventListener('click', () => { openFiltersModal(); });
     $('perfilBtn').addEventListener('click', () => {
@@ -2065,7 +2065,7 @@ function setupLanguageSwitcher() {
     }
 }
 
-// O diálogo dos Filtros tem DOIS modos (v2026.10.24), na mesma caixa e com os
+// O diálogo dos Filtros tem DOIS modos (v2026.10.26), na mesma caixa e com os
 // ids de quando ele tinha três abas:
 // - o FUNIL abre os FILTROS (`ABA_DOS_FILTROS`): um formulário, SEM abas, com
 //   Cancelar · Aplicar;
@@ -6522,7 +6522,7 @@ function populateCategorySelect() {
     sel.value = current;
 }
 
-// "Minha área" ligada ESCONDE os três campos que ela desliga (v2026.10.24): país,
+// "Minha área" ligada ESCONDE os três campos que ela desliga (v2026.10.26): país,
 // estado e área gerenciada não valem com ela (a busca manda só a caixa da área,
 // `fetchNextPage`), e cinza na tela eles pareciam um filtro aplicado. Escondidos,
 // guardam o valor: voltam como estavam quando ela desliga. O `disabled` dos três
@@ -20631,7 +20631,7 @@ function novasNaVitrine(g) {
     return g.novas.filter((id) => mostra.has(id));
 }
 
-// O ponto mora no CRACHÁ do perfil (v2026.10.24), que é onde o Histórico abre:
+// O ponto mora no CRACHÁ do perfil (v2026.10.26), que é onde o Histórico abre:
 // no funil ele levava a conquistas por um ícone de filtro.
 function atualizarSeloDeConquista() {
     const btn = document.getElementById('perfilBtn');
@@ -22690,7 +22690,7 @@ function renderHistory() {
     // Os números da tela ficam ESCONDIDOS do leitor de tela (`aria-hidden`) e a frase `sr-only` fala por
     // eles: "12 · 3" sem rótulo não diz qual é qual. `sr-only` não tem caixa: o visual não muda (R21-7-04).
     //
-    // A LEGENDA ("Lidos · Rejeitados") vem logo acima das linhas que ela explica (v2026.10.24). Ela era
+    // A LEGENDA ("Lidos · Rejeitados") vem logo acima das linhas que ela explica (v2026.10.26). Ela era
     // fixa no HTML, acima do painel inteiro, e o cartão da patente ficava no meio: uns 180 px entre a
     // legenda e os números (MEDIDO num 412). Sai junto com as linhas — sem linhas, sem legenda — e é
     // `aria-hidden`, porque quem não enxerga já ouve a frase inteira de cada linha.
@@ -31939,7 +31939,7 @@ function toggleTheme() {
     renderTemaPref(next);
 }
 
-// O TEMA nas Preferências (v2026.10.24): Auto · Claro · Escuro. O botão do
+// O TEMA nas Preferências (v2026.10.26): Auto · Claro · Escuro. O botão do
 // cabeçalho só alterna claro e escuro, e depois do primeiro toque o app nunca
 // mais voltava a seguir o aparelho: não havia caminho de volta. "Auto" é a chave
 // AUSENTE — a mesma de quem nunca tocou no botão —, e com ela o script do tema

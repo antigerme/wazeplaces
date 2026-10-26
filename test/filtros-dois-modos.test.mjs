@@ -1,4 +1,4 @@
-// O diálogo dos Filtros em DOIS modos (v2026.10.24): o funil abre os FILTROS (um
+// O diálogo dos Filtros em DOIS modos (v2026.10.26): o funil abre os FILTROS (um
 // formulário, sem abas, com Cancelar · Aplicar), e o crachá do perfil abre o
 // HISTÓRICO e as PREFERÊNCIAS (duas abas que aplicam na hora: Fechar).
 //

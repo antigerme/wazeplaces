@@ -344,7 +344,7 @@ test('o selo é um PONTO, e ele fala pra leitor de tela', () => {
     'o ponto perdeu o aria-hidden — leitor de tela leria um elemento vazio');
   assert.match(html, /id="perfilBtn"[^>]*class="[^"]*\brelative\b/,
     'o #perfilBtn perdeu o `relative` — o selo absoluto ancoraria em outro lugar');
-  // Desde v2026.10.24 o ponto mora no CRACHÁ do perfil, onde o Histórico abre — não no funil.
+  // Desde v2026.10.26 o ponto mora no CRACHÁ do perfil, onde o Histórico abre — não no funil.
   const iBtn = html.indexOf('id="perfilBtn"');
   const iSelo = html.indexOf('id="conqSelo"');
   assert.ok(iBtn > 0 && iSelo > iBtn && iSelo < html.indexOf('</button>', iBtn), 'o ponto da conquista saiu do crachá do perfil');
@@ -420,7 +420,7 @@ test('o crachá do perfil só desvia COM o ponto aceso, e o funil abre sempre os
     'o desvio saiu, ou deixou de depender do ponto — sem a condição ele sequestra o botão pra sempre');
   assert.match(m[1], /else abrirPerfil\(\);/,
     'sem o ramo normal o crachá deixa de abrir o Histórico');
-  // O funil faz o que promete, sempre (v2026.10.24): o ponto não mora mais nele.
+  // O funil faz o que promete, sempre (v2026.10.26): o ponto não mora mais nele.
   const f = /filtersBtn'\)\.addEventListener\('click',([^\n]*)\n/.exec(corpo);
   assert.ok(f, 'o handler do #filtersBtn mudou de forma');
   assert.match(f[1], /openFiltersModal\(\)/, 'o funil deixou de abrir os Filtros');

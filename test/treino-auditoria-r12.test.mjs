@@ -118,7 +118,7 @@ const FUNCOES_DAS_CONQUISTAS = ['copiaEmDia', 'lembrarTextoDaCopia', 'carregarCo
   // `novasNaVitrine`: o ponto e a marca de vista contam só o que a vitrine mostra (R13-7-02).
   'novasNaVitrine', 'atualizarSeloDeConquista', 'marcarConquistasVistas', 'historicoNaTela', 'agendarRedesenhoDoHistorico',
   'verConquistasNaTela', 'verConquistasAoVoltar', 'htmlConquistas', 'htmlPatente', 'aoGravarEmOutraAba',
-  // O nome do crachá do perfil, onde o ponto mora desde v2026.10.24.
+  // O nome do crachá do perfil, onde o ponto mora desde v2026.10.26.
   'rotuloDoPerfil'];
 
 // Uma ABA do app: a vitrine, o painel e o ponto de verdade, com o Histórico de

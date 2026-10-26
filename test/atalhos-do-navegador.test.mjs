@@ -204,7 +204,7 @@ test('atalhos: na área do card que rola, as setas seguem da rolagem — com e s
   }
 });
 
-// As abas do diálogo (desde v2026.10.24, as do perfil: Histórico | Preferências;
+// As abas do diálogo (desde v2026.10.26, as do perfil: Histórico | Preferências;
 // os Filtros são um modo sem aba) andam com ← → Home e End (o padrão das abas
 // WAI-ARIA). MEDIDO: Alt+→ e ⌘+→ — o Avançar — trocavam de aba, com a tecla presa.
 function montarAbas() {
