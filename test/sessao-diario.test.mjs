@@ -263,9 +263,10 @@ test('toda função que ESCREVE uma chave de armazenamento é chamada', () => {
   assert.ok(escritoras.length >= 5,
     `CONTROLE: achei só ${escritoras.length} escritoras de chave — o varredor não está enxergando`);
   for (const nome of escritoras) {
-    // REFERÊNCIA, não chamada: `addEventListener('click', toggleTheme)` passa a
-    // função sem parênteses e está viva do mesmo jeito. Exigir `nome(` acusava
-    // ela — e guard que acusa código certo é guard que ninguém lê.
+    // REFERÊNCIA, não chamada: `addEventListener('click', toggleTheme)` (o botão de
+    // tema que o cabeçalho teve até v2026.10.26-02) passava a função sem parênteses
+    // e ela estava viva do mesmo jeito. Exigir `nome(` acusava ela — e guard que
+    // acusa código certo é guard que ninguém lê.
     const refs = (APP_SEM.match(new RegExp('\\b' + nome + '\\b', 'g')) || []).length;
     assert.ok(refs >= 2,
       `${nome}() escreve uma chave de armazenamento e NINGUÉM a chama — a leitura correspondente `

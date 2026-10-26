@@ -302,10 +302,10 @@ test('R11-5-03 a página ANTERIOR que não carrega é dita; a primeira página q
 
 // ── R11-5-04: a pílula some com o foco nela ─────────────────────────────────
 
-// O cabeçalho na ordem do HTML (a pílula, o tema, o ↻, os Filtros, o ⓘ), com o
-// foco de verdade: `focus()` move o `activeElement`.
+// O cabeçalho na ordem do HTML (a pílula, o ↻, os Filtros, o ⓘ; o botão de tema saiu em
+// v2026.10.26-02), com o foco de verdade: `focus()` move o `activeElement`.
 function cabecalho(c, { semIrmaos = false } = {}) {
-  const ids = ['presencaPill', 'themeBtn', 'refreshBtn', 'filtersBtn', 'helpBtn'];
+  const ids = ['presencaPill', 'refreshBtn', 'filtersBtn', 'helpBtn'];
   const els = ids.map((id) => c.$(id));
   els.forEach((el, i) => {
     el.nextElementSibling = semIrmaos ? null : els[i + 1] || null;
@@ -334,7 +334,7 @@ test('R11-5-04 a pílula que some com o foco nela leva o foco ao vizinho do cabe
   const r = pilulaComFoco();
   assert.equal(r.visivelAntes, true, 'CONTROLE: a pílula tinha que estar na tela com a CAF no app');
   assert.equal(r.escondida, true, 'CONTROLE: sem ninguém e sem mensagem, a pílula some');
-  assert.equal(r.foco, r.h.themeBtn, 'DEFEITO: a pílula sumiu com o foco nela e o foco não foi pro próximo do cabeçalho (no navegador, ele cai no <body>)');
+  assert.equal(r.foco, r.h.refreshBtn, 'DEFEITO: a pílula sumiu com o foco nela e o foco não foi pro próximo do cabeçalho (no navegador, ele cai no <body>)');
   // CONTROLE: a CAF segue no app — a pílula fica, e o foco também.
   const k = pilulaComFoco({ online: [CAF_NO_APP] });
   assert.equal(k.escondida, false);
@@ -346,8 +346,8 @@ test('R11-5-04 a pílula que some com o foco nela leva o foco ao vizinho do cabe
 });
 
 test('R11-5-04 o vizinho que não está na tela é pulado; sem nenhum, o foco vai pro ⓘ da Ajuda', () => {
-  const r = pilulaComFoco({ escondidos: ['themeBtn'] });
-  assert.equal(r.foco, r.h.refreshBtn, 'o foco não pulou o vizinho escondido');
+  const r = pilulaComFoco({ escondidos: ['refreshBtn'] });
+  assert.equal(r.foco, r.h.filtersBtn, 'o foco não pulou o vizinho escondido');
   const s = pilulaComFoco({ semIrmaos: true });
   assert.equal(s.foco, s.h.helpBtn, 'sem vizinho, o foco não foi pro ⓘ da Ajuda');
 });

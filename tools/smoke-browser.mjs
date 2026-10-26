@@ -6027,8 +6027,6 @@ for (const como of ['teclado', 'mouse']) {
     ['refreshBtn', 1500, 'ATUALIZAR'],
     ['filtersBtn', 600, 'abrir Filtros'],
     ['applyFilters', 1500, 'aplicar Filtros'],
-    ['themeBtn', 400, 'trocar tema'],
-    ['themeBtn', 400, 'trocar tema de volta'],
     ['helpBtn', 600, 'abrir Ajuda'],
     ['closeHelp', 400, 'fechar Ajuda'],
   ];
@@ -6462,15 +6460,18 @@ for (const tema of ['dark', 'light']) {
   await ctx.close();
 }
 
-// ── O tema trocado pelo BOTÃO pinta o que a RECARGA pinta ───────────────
+// ── O tema escolhido nas PREFERÊNCIAS pinta o que a RECARGA pinta ─────────
 // Auditoria de 2026-09-29 (A8), medido: com o sistema escuro, tocar pro claro
-// deixava a barra do sistema (a meta `theme-color` que VALE) e o fundo sob o
-// app ESCUROS até recarregar — o botão não punha o `tema-claro` e só mudava a
-// PRIMEIRA meta. O test/tema.test.mjs compara classes e metas; aqui é a TELA:
-// o fundo computado do <html> e do <body> e a meta que casa com a media do
-// sistema, depois de cada toque e depois da recarga, nos dois sistemas. E a
-// sentinela do diagnóstico: calada com o tema certo, e ALERTANDO no estado que
-// o botão deixava (recriado à mão, o CONTROLE de que ela enxerga).
+// (então no botão do cabeçalho) deixava a barra do sistema (a meta `theme-color`
+// que VALE) e o fundo sob o app ESCUROS até recarregar — o botão não punha o
+// `tema-claro` e só mudava a PRIMEIRA meta. Desde v2026.10.26-02 o tema se
+// escolhe SÓ pela linha de Tema das Preferências (o botão saiu do cabeçalho), e é
+// nela que se mede: o rádio de verdade, com o diálogo do perfil aberto. O
+// test/tema.test.mjs compara classes e metas; aqui é a TELA: o fundo computado do
+// <html> e do <body> e a meta que casa com a media do sistema, depois de cada
+// escolha e depois da recarga, nos dois sistemas. E a sentinela do diagnóstico:
+// calada com o tema certo, e ALERTANDO no estado que o botão deixava (recriado à
+// mão, o CONTROLE de que ela enxerga).
 let temaMedidas = 0;
 for (const sistema of ['dark', 'light']) {
   const ctx = await browser.newContext({ viewport: { width: 412, height: 915 }, serviceWorkers: 'block', colorScheme: sistema });
@@ -6492,9 +6493,19 @@ for (const sistema of ['dark', 'light']) {
       alerta,
     };
   });
-  for (const passo of ['1º toque', '2º toque']) {
+  // A escolha pelo rádio de verdade da linha de Tema, com o diálogo do perfil aberto como o crachá o abre.
+  const escolher = async (modo) => {
+    await page.evaluate(() => {
+      AppState.authenticated = true;
+      AppState.profile = AppState.profile || { id: 1, userName: 'tester', rank: 5, isAreaManager: true, isStaff: false };
+      abrirPerfil('filtersTabPrefs');
+    });
+    await page.click(`#prefTemaRow label:has(input[name="prefTema"][value="${modo}"])`);
+  };
+  const contrario = sistema === 'dark' ? 'light' : 'dark';
+  for (const [passo, modo] of [['ida (o contrário do sistema)', contrario], ['volta (o do sistema, escolhido)', sistema], ['Auto', 'auto']]) {
     const antes = await medir();
-    await page.click('#themeBtn');
+    await escolher(modo);
     await page.waitForTimeout(250);
     const toque = await medir();
     await page.reload({ waitUntil: 'load' });
@@ -6502,9 +6513,10 @@ for (const sistema of ['dark', 'light']) {
     const recarga = await medir();
     temaMedidas++;
     const onde = `tema · sistema ${sistema}, ${passo}`;
-    checa(toque.escuro !== antes.escuro, `${onde}: o botão não trocou o tema (CONTROLE)`, JSON.stringify({ antes, toque }));
+    if (modo === 'auto') checa(toque.escuro === (sistema === 'dark'), `${onde}: o «Auto» não voltou ao tema do sistema`, JSON.stringify({ antes, toque }));
+    else checa(toque.escuro !== antes.escuro, `${onde}: a escolha não trocou o tema (CONTROLE)`, JSON.stringify({ antes, toque }));
     checa(JSON.stringify(toque) === JSON.stringify(recarga),
-      `${onde}: o botão pinta diferente da recarga — barra ou fundo só acertam recarregando`,
+      `${onde}: a escolha pinta diferente da recarga — barra ou fundo só acertam recarregando`,
       `toque ${JSON.stringify(toque)} · recarga ${JSON.stringify(recarga)}`);
     checa(toque.barra === (toque.escuro ? '#0f172a' : '#f8fafc'), `${onde}: a barra do sistema não acompanha o tema`, JSON.stringify(toque));
     checa(toque.alerta === false, `${onde}: a sentinela do tema alertou (ou não rodou) com o tema certo`, JSON.stringify(toque));
@@ -18601,10 +18613,13 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     await doisQuadros(page);
     const m = await page.evaluate(() => {
       const w = (id) => document.getElementById(id).getBoundingClientRect().width;
-      const botoes = ['presencaPill', 'themeBtn', 'refreshBtn', 'filtersBtn', 'helpBtn'].map((id) => document.getElementById(id)).filter((b) => b.getClientRects().length);
+      // O botão de tema saiu do cabeçalho em v2026.10.26-02 (decisão do dono): os 44 px dele foram pro nome.
+      const botoes = ['presencaPill', 'refreshBtn', 'filtersBtn', 'helpBtn'].map((id) => document.getElementById(id)).filter((b) => b.getClientRects().length);
       const dentro = botoes.every((b) => { const r = b.getBoundingClientRect(); return r.left >= -0.5 && r.right <= window.innerWidth + 0.5; });
       const brand = document.getElementById('brandTitle');
-      return { avatar: w('userAvatar'), nome: w('userName'), cabecalho: document.querySelector('header').getBoundingClientRect().height,
+      const nomeEl = document.getElementById('userName');
+      return { avatar: w('userAvatar'), nome: w('userName'), nomeCortado: nomeEl.scrollWidth > nomeEl.clientWidth + 1,
+        cabecalho: document.querySelector('header').getBoundingClientRect().height,
         estreito: document.documentElement.scrollWidth > window.innerWidth, botoesDentro: dentro, h1: brand.textContent.length > 0 && getComputedStyle(brand).display !== 'none' };
     });
     await ctx.close();
@@ -18623,12 +18638,21 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
         checa(m.erros.length === 0, `${rot}: erro de JS`, m.erros[0]);
         // O nome ganha folga onde o aparelho aperta: a 320 px com o ícone ele tinha 12 px.
         if (w === 320 && pilula) checa(m.nome >= 30, `${rot}: o nome continua espremido`, `${m.nome.toFixed(1)} px (era 12)`);
+        // E sem o botão de tema (v2026.10.26-02), o que o dono viu no mockup: `antigerme` inteiro no Fold sem o
+        // ícone e a 320 px com ele; `world_12345678` inteiro a 360 px com o ícone. Com o ícone, o Fold mostra o nome.
+        const inteiro = nome === 'antigerme' ? (w >= 320 || !pilula) : (w >= 360 || (w === 320 && !pilula));
+        if (inteiro) checa(!m.nomeCortado, `${rot}: o nome devia caber inteiro sem o botão de tema`, `${m.nome.toFixed(1)} px`);
+        if (w === 280 && pilula) checa(m.nome >= 30, `${rot}: no Fold com o ícone o nome devia aparecer (era 0 com o botão de tema)`, `${m.nome.toFixed(1)} px`);
       }
     }
   }
-  // CONTROLE: sem as duas regras o Fold com o ícone volta ao oval esmagado — a medida enxerga o defeito.
-  const sem = await medirPerfil(280, { nome: 'antigerme', pilula: true, estilo: SEM_AS_REGRAS });
-  checa(sem.avatar < 20, 'perfil/CONTROLE: com as regras desligadas o avatar do Fold TEM que voltar a ser esmagado (a medida está cega)', `${sem.avatar.toFixed(1)} px`);
+  // CONTROLE: as duas regras ainda dão ao perfil o que prometem. Com o botão de tema no cabeçalho, sem elas o
+  // avatar do Fold voltava ao oval esmagado; sem o botão (v2026.10.26-02) quem perde é o NOME: os 24 px das
+  // regras (o vão da marca e a margem lateral) saem dele. Sem essa diferença, a medida está cega.
+  const com = await medirPerfil(280, { nome: 'world_12345678', pilula: true });
+  const sem = await medirPerfil(280, { nome: 'world_12345678', pilula: true, estilo: SEM_AS_REGRAS });
+  checa(com.nome - sem.nome >= 20, 'perfil/CONTROLE: com as regras desligadas o nome do Fold TEM que perder os ~24 px delas (a medida está cega)',
+    `com as regras ${com.nome.toFixed(1)} px · sem ${sem.nome.toFixed(1)} px`);
 }
 
 // ── MAPA + SERVICE WORKER: mora em `tools/smoke-offline.mjs` ──────────────
@@ -18680,13 +18704,13 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + o fim do treino (Enter no "Ir para a fila" e Esc), o "Quero treinar antes" e o "Praticar" pelo TECLADO levando o foco ao ✕ do card que entra, e o "Entendi" e o Esc do "Como funciona" ao ✕ do card na tela — também no que abre sozinho (com os CONTROLES do mouse, que não move o foco pro card)`
   + `, + layout do treino em ${APARELHOS_TREINO.length} aparelhos × ${LINGUAS.length} idiomas (sobreposição, dobra, alvo e alcance, e o exemplo sintético SEM o ↗ na tela)`
   + `, + treino com fila REAL × ${LINGUAS.length} idiomas: foto, lote, folha do autor e card mortos, com contraprova de que a lixeira e as linhas da folha EXISTEM fora do treino, e o ↗ do clone na tela com o lugar dele`
-  + `, + controles do cabeçalho CLICADOS (atualizar, filtros, tema, ajuda) exigindo zero erro de JS`
+  + `, + controles do cabeçalho CLICADOS (atualizar, filtros, ajuda) exigindo zero erro de JS`
   + `, + ponto no ícone (ponto e nunca número, limpa ao zerar e ao sair, sem pedir permissão, e sem quebrar onde não há suporte)`
   + `, + aviso de sessão vencendo em 2 aparelhos × ${LINGUAS.length} idiomas (9 prazos contados pela DATA com o relógio parado às 20h — "amanhã" com 20 h de prazo —, contraste composto, não vira alvo de toque e some no "Sair")`
   + `, + treino em 5 tamanhos de fila (contador = cards, teto de 30, piso de 3, todo card inerte e variedade na frente)`
   + `, + foto de perfil medida pela REDE: não sai antes da tela pronta, mas SAI depois (com fila e com fila vazia)`
   + `, + CSP sem violação e o tema inline EXECUTANDO nos dois esquemas (hash defasado bloqueia em silêncio)`
-  + `, + tema trocado pelo BOTÃO pintando o mesmo que a RECARGA (${temaMedidas} medidas: fundo do html e do body e a barra que vale, nos 2 sistemas, ida e volta; sentinela do diagnóstico calada no tema certo e ALERTANDO no estado quebrado recriado, com o CONTROLE de que ele pinta escuro)`
+  + `, + tema escolhido nas PREFERÊNCIAS pintando o mesmo que a RECARGA (${temaMedidas} medidas: fundo do html e do body e a barra que vale, nos 2 sistemas, ida, volta e Auto; sentinela do diagnóstico calada no tema certo e ALERTANDO no estado quebrado recriado, com o CONTROLE de que ele pinta escuro)`
   + `, + pareamento com o QR VENCIDO (sem a instrução da câmera nem o "Sem câmera?", com o CONTROLE do QR valendo; o código curto pedido antes valendo até o prazo DELE, sem o "Código expirado" em cima, e a instrução dele saindo quando ele vence; e o foco do TECLADO nos botões que saem de cena — no "Fechar" quando o QR vence, no "Copiar link" quando o código chega —, com o CONTROLE do motor largando o foco no <body> e o do mouse, que não move o foco)`
   + `, + tira de miniaturas do lightbox em 3 aparelhos apertados (entra no layout sem cobrir foto nem controle, alvo 44px, e reusando a URL já em cache)`
   + `, + idade da foto na pílula (relativo até 1 ano, ano depois, plural certo, e some quando não há data)`
