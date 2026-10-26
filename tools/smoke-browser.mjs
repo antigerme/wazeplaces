@@ -2716,8 +2716,15 @@ for (const [nomeA, viewport] of APARELHOS_FONTE) {
     const fora = [];
     const nome = (el) => el.id || `${el.tagName.toLowerCase()}.${String(el.className).split(' ').slice(0, 2).join('.')}`;
     if (estado === 'hist') {
+      // Desde v2026.10.26 a legenda é desenhada pelo `renderHistory`, junto das linhas, e SÓ com elas: com o
+      // Histórico vazio ela não existe. Um dia com números a faz aparecer (o mesmo do bloco 12, abaixo).
+      const h = {}; const d = new Date(); const dia = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      h[dia] = { read: 5, rejected: 2 };
+      localStorage.setItem('waze_places_history', JSON.stringify(h)); AppState.history = null;
       openModal('filtersModal'); switchFilterTab('filtersTabHistory');
       const cab = document.querySelector('#filtersPanelHistory .justify-end');
+      // Sem a legenda, a medida não mediu nada: falha com o motivo, em vez de passar calada (ou derrubar o smoke).
+      if (!cab) return new Promise((ok) => setTimeout(() => ok(['legenda «Lidos · Rejeitados» ausente']), 0));
       const clip = cab.closest('.overflow-y-auto') || cab.closest('.dialogo-cartao') || document.getElementById('filtersModal').firstElementChild;
       const cr = clip.getBoundingClientRect(); const caixa = { left: cr.left + clip.clientLeft, right: cr.left + clip.clientLeft + clip.clientWidth };
       for (const sp of cab.children) { const p = dentro(tinta(sp), caixa); if (p > 0.5) fora.push(`${nome(sp)}:${p}`); }
