@@ -204,14 +204,14 @@ test('atalhos: na área do card que rola, as setas seguem da rolagem — com e s
   }
 });
 
-// As abas dos Filtros (Filtros | Preferências | Histórico) andam com ← → Home e
-// End (o padrão das abas WAI-ARIA). MEDIDO: Alt+→ e ⌘+→ — o Avançar — trocavam
-// de aba, com a tecla presa.
+// As abas do diálogo (desde v2026.10.26, as do perfil: Histórico | Preferências;
+// os Filtros são um modo sem aba) andam com ← → Home e End (o padrão das abas
+// WAI-ARIA). MEDIDO: Alt+→ e ⌘+→ — o Avançar — trocavam de aba, com a tecla presa.
 function montarAbas() {
   const log = [];
   const doc = { activeElement: null };
   const botoes = {};
-  for (const id of ['filtersTabFilters', 'filtersTabPrefs', 'filtersTabHistory']) {
+  for (const id of ['filtersTabHistory', 'filtersTabPrefs']) {
     botoes[id] = { id, ouvintes: {}, addEventListener(tipo, fn) { this.ouvintes[tipo] = fn; },
       focus() { doc.activeElement = this; } };
   }
@@ -230,7 +230,7 @@ function montarAbas() {
   return { tecla };
 }
 
-test('atalhos: nas abas dos Filtros, Alt, ⌘ e Ctrl com as setas, Home e End não trocam de aba', () => {
+test('atalhos: nas abas do diálogo (Histórico e Preferências), Alt, ⌘ e Ctrl com as setas, Home e End não trocam de aba', () => {
   for (const [nome, mod] of MODIFICADORES) {
     for (const k of ['ArrowLeft', 'ArrowRight', 'Home', 'End']) {
       const r = montarAbas().tecla('filtersTabPrefs', k, { [mod]: true });
@@ -241,8 +241,9 @@ test('atalhos: nas abas dos Filtros, Alt, ⌘ e Ctrl com as setas, Home e End n�
   }
   // CONTROLE: sem modificador (e com o Shift sozinho), as setas, Home e End trocam de aba.
   const a = montarAbas();
-  for (const [k, mods, alvo] of [['ArrowRight', {}, 'filtersTabHistory'], ['ArrowLeft', {}, 'filtersTabFilters'],
-    ['End', {}, 'filtersTabHistory'], ['Home', {}, 'filtersTabFilters'], ['ArrowRight', { shiftKey: true }, 'filtersTabHistory']]) {
+  // São DUAS abas, e as setas dão a volta: das Preferências (a 2ª), → e ← vão ao Histórico.
+  for (const [k, mods, alvo] of [['ArrowRight', {}, 'filtersTabHistory'], ['ArrowLeft', {}, 'filtersTabHistory'],
+    ['End', {}, 'filtersTabPrefs'], ['Home', {}, 'filtersTabHistory'], ['ArrowRight', { shiftKey: true }, 'filtersTabHistory']]) {
     const r = a.tecla('filtersTabPrefs', k, mods);
     assert.deepEqual(r.fez, ['aba:' + alvo], `CONTROLE: ${mods.shiftKey ? 'Shift+' : ''}${k} deixou de trocar de aba`);
     assert.equal(r.presa, true);

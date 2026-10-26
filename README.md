@@ -83,6 +83,7 @@ O app precisa dos seus cookies de login para acessar a fila de pedidos no seu no
    - **↑ (cima):** Pular (passa pro próximo sem decidir; com **“Pular guarda o pedido”** ligado nas Preferências, ele ganha a sua ⭐ no WME)
 5. Cometeu um erro? Tem uma **janela de 3 segundos** para clicar em "Desfazer" antes da ação ser enviada ao Waze.
 6. O botão de **ajuda (ⓘ)** no topo abre um painel com atalhos, legenda, instruções e o botão **"Sair"**.
+7. Tocando no **seu nome** (ou na sua foto), no topo, abrem o seu **Histórico** (patente, totais, conquistas, autores que você já rejeitou) e as **Preferências** (idioma, tema, Desfazer, offline…). O ponto âmbar que aparece ali avisa que você destravou uma conquista.
 
 **Coisas que aparecem no card:**
 - **Marca** do place + selo "✓ conhecida" (se está na lista oficial do Waze) ou "? não listada" (suspeita)
@@ -98,7 +99,7 @@ A pílula 👥 no topo mostra quantos editores estão usando o app no mesmo paí
 
 - **As conversas passam pelo chat do Waze**: ficam guardadas lá e também aparecem no chat do WME de vocês dois.
 - **Enquanto você tria**, o WME mostra seu nome e nível no mapa, no lugar do pedido que está na sua tela, até uns 15 minutos depois da última ação. O nosso servidor não guarda nada disso.
-- Vem ligado. Pra desligar: **Filtros e Preferências → Preferências → "Ver quem está no app"**.
+- Vem ligado. Pra desligar: toque no **seu nome**, no alto da tela → **Preferências** → **"Ver quem está no app"**.
 
 ### Instalar como app no celular
 

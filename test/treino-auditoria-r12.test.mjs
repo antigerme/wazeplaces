@@ -117,7 +117,9 @@ const FUNCOES_DAS_CONQUISTAS = ['copiaEmDia', 'lembrarTextoDaCopia', 'carregarCo
   'avaliarConquistas', 'conquistasComPortaoAqui', 'conquistasVisiveis', 'checarConquistas', 'temConquistaNova',
   // `novasNaVitrine`: o ponto e a marca de vista contam só o que a vitrine mostra (R13-7-02).
   'novasNaVitrine', 'atualizarSeloDeConquista', 'marcarConquistasVistas', 'historicoNaTela', 'agendarRedesenhoDoHistorico',
-  'verConquistasNaTela', 'verConquistasAoVoltar', 'htmlConquistas', 'htmlPatente', 'aoGravarEmOutraAba'];
+  'verConquistasNaTela', 'verConquistasAoVoltar', 'htmlConquistas', 'htmlPatente', 'aoGravarEmOutraAba',
+  // O nome do crachá do perfil, onde o ponto mora desde v2026.10.26.
+  'rotuloDoPerfil'];
 
 // Uma ABA do app: a vitrine, o painel e o ponto de verdade, com o Histórico de
 // mentira (só o total importa às conquistas de volume) e o desenho do painel
@@ -129,11 +131,11 @@ function abrirAba(comp, { naTela = true, visivel = true, tratados = 9 } = {}) {
     filtersModal: { classList: classes(...(naTela ? [] : ['hidden'])) },
     filtersPanelHistory: { classList: classes() },
     conqSelo: { classList: classes('hidden') },
-    filtersBtn: { aria: null, setAttribute(k, v) { if (k === 'aria-label') this.aria = v; } },
+    perfilBtn: { aria: null, setAttribute(k, v) { if (k === 'aria-label') this.aria = v; }, removeAttribute(k) { if (k === 'aria-label') this.aria = null; } },
   };
   const doc = { visibilityState: visivel ? 'visible' : 'hidden', getElementById: (id) => els[id] || null };
   const historico = { total: tratados };
-  const AppState = { authenticated: true, conquistas: null, history: null, autores: null };
+  const AppState = { authenticated: true, conquistas: null, history: null, autores: null, profile: { userName: 'editor_teste' } };
   const deps = {
     AppState, document: doc, localStorage: comp.para(aba), textoDaCopia: new WeakMap(),
     CONQUISTAS_KEY: CONQ, HISTORY_KEY: 'waze_places_history', AUTORES_KEY: 'waze_places_autores',
@@ -173,8 +175,8 @@ test('R12-7-01: a conquista que destrava com o Histórico NA TELA fica VISTA —
     'DEFEITO: a conquista que acendeu diante da pessoa seguiu "nova" no aparelho — o ponto volta a cada abertura');
   assert.equal(a.h.temConquistaNova(), false,
     'DEFEITO: o toque seguinte em Filtros seria DESVIADO pro Histórico pra mostrar o que ela já viu');
-  assert.ok(a.els.conqSelo.classList.contains('hidden'), 'DEFEITO: o ponto do botão de Filtros ficou aceso');
-  assert.equal(a.els.filtersBtn.aria, 'header.filters.aria', 'o nome do botão seguiu dizendo "conquista nova"');
+  assert.ok(a.els.conqSelo.classList.contains('hidden'), 'DEFEITO: o ponto do crachá do perfil ficou aceso');
+  assert.equal(a.els.perfilBtn.aria, 'header.perfil.aria', 'o nome do crachá seguiu dizendo "conquista nova"');
   // O anel fica NESTA abertura: o redesenho seguinte (outro pouso, um toque
   // numa célula) ainda o mostra.
   a.h.agendarRedesenhoDoHistorico();

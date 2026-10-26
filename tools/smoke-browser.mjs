@@ -2716,8 +2716,16 @@ for (const [nomeA, viewport] of APARELHOS_FONTE) {
     const fora = [];
     const nome = (el) => el.id || `${el.tagName.toLowerCase()}.${String(el.className).split(' ').slice(0, 2).join('.')}`;
     if (estado === 'hist') {
+      // Desde v2026.10.26 a legenda é desenhada pelo `renderHistory`, junto das linhas, e SÓ com elas: com o
+      // Histórico vazio ela não existe. Um dia com números a faz aparecer (o mesmo do bloco 12, abaixo).
+      // O "vazio" do Histórico é o do TOTAL acumulado (`_total`), não a soma dos dias: os dois vão juntos.
+      const h = {}; const d = new Date(); const dia = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      h[dia] = { read: 5, rejected: 2 }; h._total = { read: 5, rejected: 2 };
+      localStorage.setItem('waze_places_history', JSON.stringify(h)); AppState.history = null;
       openModal('filtersModal'); switchFilterTab('filtersTabHistory');
       const cab = document.querySelector('#filtersPanelHistory .justify-end');
+      // Sem a legenda, a medida não mediu nada: falha com o motivo, em vez de passar calada (ou derrubar o smoke).
+      if (!cab) return new Promise((ok) => setTimeout(() => ok(['legenda «Lidos · Rejeitados» ausente']), 0));
       const clip = cab.closest('.overflow-y-auto') || cab.closest('.dialogo-cartao') || document.getElementById('filtersModal').firstElementChild;
       const cr = clip.getBoundingClientRect(); const caixa = { left: cr.left + clip.clientLeft, right: cr.left + clip.clientLeft + clip.clientWidth };
       for (const sp of cab.children) { const p = dentro(tinta(sp), caixa); if (p > 0.5) fora.push(`${nome(sp)}:${p}`); }
@@ -8663,13 +8671,14 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   }
 }
 
-// ── As abas de Filtros cabem em 44px nos QUATRO idiomas ────────────────────
+// ── As abas do diálogo cabem em 44px nos QUATRO idiomas ────────────────────
 // `1fr` é `minmax(auto, 1fr)`: a aba de rótulo mais longo empurra as vizinhas.
 // Em francês "Préférences" espremia "Filtres" para 41px no Galaxy Fold — e em
 // português não aparecia (gotcha #25). O conserto é corpo menor abaixo de
 // 320px; a saída óbvia (minmax(0,1fr)) foi testada e é PIOR, porque iguala em
 // 61px e CORTA o rótulo. Por isso o guard cobra as DUAS coisas: alvo ≥ 44 e
-// texto que não transborda.
+// texto que não transborda. Desde v2026.10.26 os Filtros (o funil) não têm aba:
+// as abas são as do perfil (Histórico | Preferências), e é nelas que se mede.
 {
   for (const [ap, viewport] of [['Galaxy Fold', { width: 280, height: 653 }], ['iPhone SE', { width: 375, height: 667 }]]) {
     for (const lang of LINGUAS) {
@@ -8681,7 +8690,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       }, lang);
       await page.goto(BASE, { waitUntil: 'domcontentloaded' });
       await page.waitForTimeout(450);
-      await page.evaluate(() => { AppState.authenticated = true; openModal('filtersModal'); });
+      await page.evaluate(() => { AppState.authenticated = true; switchFilterTab('filtersTabHistory'); openModal('filtersModal'); });
       await assentar(page, 200);
       const abas = await page.evaluate(() => [...document.querySelectorAll('.seg-tab')].map((e) => {
         const q = e.getBoundingClientRect();
@@ -8692,8 +8701,8 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
           vaza: e.scrollWidth > e.clientWidth + 1,
         };
       }));
-      const onde = `abas de Filtros/${ap}/${lang}`;
-      checa(abas.length === 3, `${onde}: esperava 3 abas`, String(abas.length));
+      const onde = `abas do perfil/${ap}/${lang}`;
+      checa(abas.length === 2, `${onde}: esperava 2 abas (Histórico e Preferências)`, String(abas.length));
       for (const a of abas) {
         checa(a.w >= 44 && a.h >= 44, `${onde}: "${a.txt}" com alvo ${a.w}x${a.h} (mín. 44)`);
         checa(!a.vaza, `${onde}: "${a.txt}" com o rótulo cortado`);
@@ -10379,7 +10388,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       // O que a página TINHA quando a espera estourou (o runner do CI reprovou aqui uma vez, sem nada que a máquina local reproduza).
       const estado = await page.evaluate(() => ({ linhas: document.querySelectorAll('#historyBody > div.flex.justify-between').length, corpo: (document.getElementById('historyBody') || {}).childElementCount,
         logado: AppState.authenticated, perfil: !!AppState.profile, filtrosAbertos: !document.getElementById('filtersModal').classList.contains('hidden'),
-        aba: ['filtersTabFilters', 'filtersTabPrefs', 'filtersTabHistory'].find((i) => document.getElementById(i).getAttribute('aria-selected') === 'true') || null,
+        aba: ['filtersTabFilters', 'filtersTabPrefs', 'filtersTabHistory'].find((i) => document.getElementById(i)?.getAttribute('aria-selected') === 'true') || null,
         gravado: !!localStorage.getItem('waze_places_history'), url: location.href.slice(0, 60), idioma: getLang() })).catch((x) => ({ erroAoLer: String(x).slice(0, 80) }));
       throw new Error(`${e.message} — estado: ${JSON.stringify(estado)}; erros: ${JSON.stringify(erros.slice(0, 2))}; eventos: ${JSON.stringify(eventosDaPagina)}`);
     }
@@ -10390,7 +10399,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       // às cegas: se código novo travasse a página, repetir esconderia. Diz se a página CAIU, se travou, e o que ela tinha.
       const vivo = page.isClosed() ? 'página fechada' : await Promise.race([
         page.evaluate(() => ({ pronto: document.readyState, painel: !!document.getElementById('filtersPanelHistory'),
-          oculto: (document.getElementById('filtersPanelHistory') || {}).hidden, aba: ['filtersTabFilters', 'filtersTabPrefs', 'filtersTabHistory'].find((i) => document.getElementById(i).getAttribute('aria-selected') === 'true') || null,
+          oculto: (document.getElementById('filtersPanelHistory') || {}).hidden, aba: ['filtersTabFilters', 'filtersTabPrefs', 'filtersTabHistory'].find((i) => document.getElementById(i)?.getAttribute('aria-selected') === 'true') || null,
           modalAberto: !document.getElementById('filtersModal').classList.contains('hidden'), logado: AppState.authenticated, idioma: getLang() })),
         new Promise((ok) => setTimeout(() => ok('a página não respondeu em 5 s (travada)'), 5000))]).catch((x) => `evaluate falhou: ${String(x).slice(0, 100)}`);
       throw new Error(`ariaSnapshot do Histórico (${onde}/${lang}) estourou: ${String(e.message).split('\n')[0]} — página: ${JSON.stringify(vivo)}; erros: ${JSON.stringify(erros.slice(0, 2))}; eventos: ${JSON.stringify(eventosDaPagina)}`);
@@ -11446,7 +11455,8 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
         checarConquistas({ madrugada: true });  // 2. destrava UMA de verdade
         const g = carregarConquistas();
         const seloAceso = !document.getElementById('conqSelo').classList.contains('hidden');
-        const ariaComSelo = document.getElementById('filtersBtn').getAttribute('aria-label') || '';
+        // Desde v2026.10.26 o ponto mora no crachá do perfil (#perfilBtn), onde o Histórico abre.
+        const ariaComSelo = document.getElementById('perfilBtn').getAttribute('aria-label') || '';
         const bannerNoAviso = document.querySelectorAll('#bannerContainer > *').length;
         const confeteNoAviso = document.querySelectorAll('.confetti-burst span').length;
         // 3. Quanto do PLACAR o aviso cobre? Mede a TINTA (gotcha #26), com o
@@ -11544,7 +11554,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       checa(r.temContainer, `${id}: CONTROLE falhou — o #bannerContainer sumiu, a contagem de banner não vale nada`);
       checa(r.base === true, `${id}: a linha de base não foi marcada`);
       checa(r.banners === 0, `${id}: a primeira passada anunciou ${r.banners} banner(s) — devia ser silenciosa`);
-      checa(r.seloAceso, `${id}: destravou uma conquista e o selo do #filtersBtn não acendeu`);
+      checa(r.seloAceso, `${id}: destravou uma conquista e o selo do #perfilBtn não acendeu`);
       checa(r.bannerNoAviso === 0,
         `${id}: a conquista voltou a abrir banner`, `${r.bannerNoAviso} banner(s)`);
       checa(r.confeteNoAviso === 0,
@@ -12368,8 +12378,10 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     });
     await page.waitForTimeout(150);
 
-    const aba = () => page.evaluate(() => ['filtersTabFilters', 'filtersTabPrefs', 'filtersTabHistory']
-      .find((id) => document.getElementById(id).getAttribute('aria-selected') === 'true'));
+    // Desde v2026.10.26 os Filtros são um MODO do diálogo, sem botão de aba: "qual está na tela" é o PAINEL
+    // visível (devolvido com o nome de sempre, pra as conferências abaixo seguirem iguais).
+    const aba = () => page.evaluate(() => ({ filtersPanelFilters: 'filtersTabFilters', filtersPanelPrefs: 'filtersTabPrefs', filtersPanelHistory: 'filtersTabHistory' })[
+      ['filtersPanelFilters', 'filtersPanelPrefs', 'filtersPanelHistory'].find((id) => !document.getElementById(id).classList.contains('hidden'))]);
     const pontoAceso = () => page.evaluate(() =>
       !document.getElementById('conqSelo').classList.contains('hidden'));
 
@@ -12378,11 +12390,12 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
 
     // CLIQUE de verdade no botão, não a função chamada à mão: o que está em
     // jogo é o ROTEAMENTO, e chamar a função pula exatamente a parte medida.
-    await page.evaluate(() => document.getElementById('filtersBtn').click());
+    // Desde v2026.10.26 o ponto mora no CRACHÁ do perfil, e é ele que leva ao que destravou.
+    await page.evaluate(() => document.getElementById('perfilBtn').click());
     // No PRIMEIRO quadro: é aqui que um `await` no lugar errado apareceria.
     const q1 = await page.evaluate(() => new Promise((ok) => requestAnimationFrame(() => ok({
-      aba: ['filtersTabFilters', 'filtersTabPrefs', 'filtersTabHistory']
-        .find((id) => document.getElementById(id).getAttribute('aria-selected') === 'true'),
+      aba: ({ filtersPanelFilters: 'filtersTabFilters', filtersPanelPrefs: 'filtersTabPrefs', filtersPanelHistory: 'filtersTabHistory' })[
+        ['filtersPanelFilters', 'filtersPanelPrefs', 'filtersPanelHistory'].find((id) => !document.getElementById(id).classList.contains('hidden'))],
       modal: !document.getElementById('filtersModal').classList.contains('hidden'),
       marcados: document.querySelectorAll('#filtersPanelHistory .conq-cel.nova, #filtersPanelHistory .conq-card.nova').length,
       pulsando: document.querySelectorAll('.conq-alvo').length,
@@ -12408,17 +12421,26 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       checa(await pontoAceso() === false,
         `${c.id}: o ponto continuou aceso depois de a aba abrir`);
     } else {
-      checa(q1.aba === 'filtersTabFilters',
-        `${c.id}: sem novidade nenhuma o botão desviou assim mesmo — aí ele sequestra Filtros pra sempre`);
+      // Sem novidade, o crachá abre o Histórico como ele é: sem marca nem pulso (nada a apontar).
+      checa(q1.aba === 'filtersTabHistory' && q1.marcados === 0 && q1.pulsando === 0,
+        `${c.id}: sem novidade nenhuma o crachá abriu ${q1.aba} com ${q1.marcados} marca(s) e ${q1.pulsando} pulso(s)`);
     }
 
-    // Segunda abertura: tem que voltar a ser o botão de Filtros de sempre.
+    // Segunda abertura do crachá: o Histórico sem desvio (o que destravou já foi visto), e o
+    // funil abre os Filtros, sempre — com o ponto aceso ou não.
     await page.evaluate(() => closeModal('filtersModal'));
-    await page.waitForTimeout(250);
+    await esperarOuExplodir(page, () => !CamadaVoltar.consumindo && !topOpenModal(), `${c.id}: o diálogo não fechou`);
+    await page.evaluate(() => document.getElementById('perfilBtn').click());
+    await page.waitForTimeout(c.lento ? c.lento + 300 : 350);
+    const q2 = await page.evaluate(() => ({ marcados: document.querySelectorAll('#filtersPanelHistory .conq-cel.nova, #filtersPanelHistory .conq-card.nova').length,
+      pulsando: document.querySelectorAll('.conq-alvo').length }));
+    checa(await aba() === 'filtersTabHistory' && q2.marcados === 0 && q2.pulsando === 0,
+      `${c.id}: a SEGUNDA abertura do crachá ainda desvia — o desvio tem que valer uma vez por conquista`, JSON.stringify(q2));
+    await page.evaluate(() => closeModal('filtersModal'));
+    await esperarOuExplodir(page, () => !CamadaVoltar.consumindo && !topOpenModal(), `${c.id}: o diálogo não fechou (2)`);
     await page.evaluate(() => document.getElementById('filtersBtn').click());
     await page.waitForTimeout(c.lento ? c.lento + 300 : 350);
-    checa(await aba() === 'filtersTabFilters',
-      `${c.id}: a SEGUNDA abertura ainda desvia — o desvio tem que valer uma vez por conquista`);
+    checa(await aba() === 'filtersTabFilters', `${c.id}: o funil não abriu os Filtros`);
 
     checa(errosJS.length === 0, `${c.id}: erro de JS`, errosJS[0]);
     await ctx.close();
@@ -12713,8 +12735,9 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     const { ctx, page, erros } = await abrirApp({ viewport: PIXEL, aviso: 'desbloqueio' });
     await page.click(FRENTE + ' .card-btn-read');
     await esperarOuExplodir(page, () => !!AppState.pendingAction, `${rot}: o ✓ não abriu a janela`);
-    await page.click('#filtersBtn');
-    await esperarOuExplodir(page, () => (topOpenModal() || {}).id === 'filtersModal', `${rot}: os Filtros não abriram`);
+    // As Preferências abrem pelo crachá do perfil (v2026.10.26).
+    await page.click('#perfilBtn');
+    await esperarOuExplodir(page, () => (topOpenModal() || {}).id === 'filtersModal', `${rot}: o perfil não abriu`);
     await page.click('#filtersTabPrefs');
     const chave = () => page.evaluate(() => {
       const cb = document.getElementById('prefUndoEnabled');
@@ -12749,8 +12772,9 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     const { ctx, page, erros } = await abrirApp({ viewport: PIXEL, aviso: 'desbloqueio' });
     await page.click(FRENTE + ' .card-btn-read');
     await esperarOuExplodir(page, () => !!AppState.pendingAction, `${rot}: o ✓ não abriu a janela`);
-    await page.click('#filtersBtn');
-    await esperarOuExplodir(page, () => (topOpenModal() || {}).id === 'filtersModal', `${rot}: os Filtros não abriram`);
+    // O perfil abre no Histórico: as Preferências ficam ESCONDIDAS até o toque na aba (v2026.10.26).
+    await page.click('#perfilBtn');
+    await esperarOuExplodir(page, () => (topOpenModal() || {}).id === 'filtersModal', `${rot}: o perfil não abriu`);
     if (desfaz) {
       await page.click('#undoBtn');
       await esperarOuExplodir(page, () => !AppState.pendingAction, `${rot}: o "Desfazer" não fechou a janela`);
@@ -15566,7 +15590,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   const rejeitadosGravados = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('waze_places_stats') || '{}').rejected);
   // Um interruptor da aba Preferências, pelo clique (é o `change` que grava).
   const tocarPreferencia = (page, id) => page.evaluate(async (idDoInterruptor) => {
-    document.getElementById('filtersBtn').click();
+    document.getElementById('perfilBtn').click();   // as Preferências abrem pelo crachá (v2026.10.26)
     await new Promise((ok) => setTimeout(ok, 150));
     document.getElementById('filtersTabPrefs').click();
     document.getElementById(idDoInterruptor).click();
@@ -18475,10 +18499,18 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
       focarAutor(AppState.currentPlace.creatorId);
     });
     await doisQuadros(page);
-    // O MESMO ritual nas duas telas. O seletor de idioma mora na aba Preferências, então a troca é feita com ela na tela
-    // e os Filtros fechados em seguida; o Histórico, os autores e as conquistas só se desenham com os Filtros ABERTOS na
-    // aba deles — por isso a leitura é com eles reabertos, depois da troca.
+    // O MESMO ritual nas duas telas. Desde v2026.10.26 os Filtros (o funil) e as Preferências (o crachá do perfil) são
+    // modos diferentes do diálogo: o funil abre PRIMEIRO, pra os Filtros se desenharem no idioma de antes da troca (como
+    // quando eram uma aba da mesma janela, e o `aplicarIdioma` tem que repintá-los), e fecha antes de o crachá abrir (o
+    // fechar e o abrir no mesmo quadro sairiam do app, gotcha #65). O seletor de idioma mora nas Preferências; o
+    // Histórico, os autores e as conquistas só se desenham com a aba deles aberta — por isso a leitura é com ela
+    // reaberta, depois da troca.
     await page.click('#filtersBtn');
+    await esperarNaPagina(page, () => !!document.querySelector('#filtersModal:not(.hidden)')
+      && (document.getElementById('filterSortHint')?.textContent || '').trim().length > 0, 10000, 50);
+    await page.keyboard.press('Escape');
+    await esperarOuExplodir(page, () => !CamadaVoltar.consumindo && !document.querySelector('.modal-root:not(.hidden)'), 'os Filtros fecharem');
+    await page.click('#perfilBtn');   // as Preferências abrem pelo crachá (v2026.10.26)
     await page.evaluate(() => document.getElementById('filtersTabPrefs').click());
     if (trocarPara) await page.selectOption('#langSelect', trocarPara);
     await page.keyboard.press('Escape');
@@ -18494,7 +18526,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   // ali, com o idioma de agora (um formatador de data que guardasse o idioma de antes aparece aqui). A abertura dos
   // Filtros repinta o resto do modal, então só a 1ª leitura acusa um `aplicarIdioma` que esqueceu de algo dele.
   const lerComOHistorico = async (page) => {
-    await page.click('#filtersBtn');
+    await page.click('#perfilBtn');   // o Histórico abre pelo crachá (v2026.10.26)
     await page.evaluate(() => document.getElementById('filtersTabHistory').click());
     await esperarOuExplodir(page, () => document.getElementById('historyBody').children.length > 0 && document.getElementById('autoresBody').children.length > 0, 'o Histórico e os autores desenharem');
     return ler(page);
@@ -18666,7 +18698,7 @@ console.log(`✓ smoke de browser: ${APARELHOS.length} aparelhos × ${LINGUAS.le
   + `, + o foco nas camadas de ampliar (fechar a foto e o mapa por Esc/↓/✕ devolve à foto/mapa do card, sair da edição devolve à pílula, aprovar e salvar mantêm na camada, com e sem Desfazer, e o ✨/🚩 e a miniatura com NOME, com o CONTROLE do Filtros)`
   + `, + passar as fotos com o polegar (dois arrastes seguidos a 500, 150 e 60 ms trocam a foto duas vezes sem ampliar; o duplo toque de verdade AMPLIA e volta, com o botão direito sem agir na foto)`
   + `, + faixa do carrossel não rouba o toque do mapa (2 aparelhos, com o mapa EXIGIDO na tela)`
-  + `, + abas de Filtros em 2 aparelhos × ${LINGUAS.length} idiomas (alvo 44px E rótulo sem corte)`
+  + `, + abas do perfil em 2 aparelhos × ${LINGUAS.length} idiomas (alvo 44px E rótulo sem corte)`
   + `, + Ajuda em 2 aparelhos × ${LINGUAS.length} idiomas (toda seção com o texto do MESMO tamanho medido na tela, dois-pontos no título, "Quem está no app" logo depois de "Como usar", com contraprova da lista de antes)`
   + `, + Resumo do mês em 2 aparelhos × ${LINGUAS.length} idiomas (1080×1350 de verdade, número e QR desenhados, botões na tela, download nomeado, limpeza no Esc)`
   + `, + foto de perfil em 2 aparelhos (host fora da CSP, 404, redesenho e o CONTROLE da foto boa)`

@@ -351,7 +351,11 @@ const FUNCOES_DAS_CONQUISTAS = ['copiaEmDia', 'lembrarTextoDaCopia', 'carregarCo
   'avaliarConquistas', 'conquistasComPortaoAqui', 'conquistasVisiveis', 'checarConquistas', 'contagemDoHistorico', 'temConquistaNova',
   'novasNaVitrine', 'atualizarSeloDeConquista', 'marcarConquistasVistas', 'historicoNaTela', 'agendarRedesenhoDoHistorico',
   'verConquistasNaTela', 'verConquistasAoVoltar', 'htmlConquistas', 'htmlPatente', 'aoGravarEmOutraAba',
-  'podeAgirComoL6Aqui', 'definirPerfil', 'abrirConquistaNova', 'abrirModalNaAba', 'switchFilterTab'];
+  'podeAgirComoL6Aqui', 'definirPerfil', 'abrirConquistaNova', 'abrirModalNaAba', 'switchFilterTab',
+  // Desde v2026.10.26 o ponto mora no crachá do perfil, e o toque nele abre o
+  // Histórico pelo `abrirPerfil` (o modo "perfil" do diálogo); o nome do crachá
+  // sai do `rotuloDoPerfil`.
+  'abrirPerfil', 'rotuloDoPerfil'];
 function lista(nome) {
   const m = new RegExp('^const ' + nome + ' = \\[', 'm').exec(APP_SEM);
   assert.ok(m, `${nome} sumiu do app.js`);
@@ -368,7 +372,7 @@ function abrirAba(comp, { perfil = null, naTela = false, visivel = true } = {}) 
     filtersModal: { classList: classes(...(naTela ? [] : ['hidden'])) },
     filtersPanelHistory: { classList: classes(...(naTela ? [] : ['hidden'])) },
     conqSelo: { classList: classes('hidden') },
-    filtersBtn: { aria: null, setAttribute(k, v) { if (k === 'aria-label') this.aria = v; } },
+    perfilBtn: { aria: null, setAttribute(k, v) { if (k === 'aria-label') this.aria = v; }, removeAttribute(k) { if (k === 'aria-label') this.aria = null; } },
   };
   // As abas e os botões do rodapé do modal (o `switchFilterTab` os troca): genéricos.
   const generico = () => ({ classList: classes(), setAttribute(k, v) { this[k] = v; }, getAttribute(k) { return this[k] ?? null; }, parentElement: { scrollTop: 0 }, tabIndex: 0 });
@@ -390,10 +394,11 @@ function abrirAba(comp, { perfil = null, naTela = false, visivel = true } = {}) 
     renderHistory: () => { const h = aba.h.htmlConquistas(); aba.desenhos.push({ aneis: aneis(h), curador: celula(h, 'curador'), vitrine: vitrine(h) }); },
     // O perfil chega pela porta única (`definirPerfil`): o resto dela é de outros testes.
     contaSegueNoAparelho: () => true,
-    // O toque no ponto: o modal abre na aba pedida (o `openFiltersModal` desenha o painel).
+    // O funil abre os Filtros; o crachá abre o modal na aba pedida (o `switchFilterTab` desenha o painel).
     openFiltersModal: () => { els.filtersModal.classList.remove('hidden'); aba.abriu.push('filtros'); return Promise.resolve(); },
-    FILTER_TABS: [{ tab: 'filtersTabFilters', panel: 'filtersPanelFilters' }, { tab: 'filtersTabPrefs', panel: 'filtersPanelPrefs' },
-      { tab: 'filtersTabHistory', panel: 'filtersPanelHistory' }],
+    openModal: (id) => { els[id].classList.remove('hidden'); aba.abriu.push('perfil'); },
+    ABA_DOS_FILTROS: 'filtersTabFilters',
+    FILTER_TABS: [{ tab: 'filtersTabHistory', panel: 'filtersPanelHistory' }, { tab: 'filtersTabPrefs', panel: 'filtersPanelPrefs' }],
   };
   aba.h = rodar(deps, [lista('PATENTES'), lista('CONQUISTAS'), ...fontes(FUNCOES_DAS_CONQUISTAS)],
     ['temConquistaNova', 'atualizarSeloDeConquista', 'marcarConquistasVistas', 'checarConquistas', 'aoGravarEmOutraAba',
@@ -402,9 +407,9 @@ function abrirAba(comp, { perfil = null, naTela = false, visivel = true } = {}) 
   comp.abas.push(aba);
   return aba;
 }
-// O toque no botão de Filtros (o ouvinte do `setupAppListeners`): com o ponto
-// aceso, ele leva ao Histórico; sem, abre os Filtros.
-const tocarFiltros = (aba) => (aba.h.temConquistaNova() ? aba.h.abrirConquistaNova() : aba.deps.openFiltersModal());
+// O toque no crachá do perfil (o ouvinte do `setupAppListeners`): com o ponto
+// aceso, ele leva ao que destravou; sem, abre o Histórico (o `abrirPerfil`).
+const tocarFiltros = (aba) => (aba.h.temConquistaNova() ? aba.h.abrirConquistaNova() : aba.h.abrirPerfil());
 
 test('R13-7-02: sem o PERFIL, o "Curador" ganho e não visto NÃO acende o ponto — e o toque não o dá por visto sem mostrá-lo', async () => {
   // CONTROLE: com o perfil (L6), o ponto acende e o toque leva até ele — "nova".
@@ -435,7 +440,7 @@ test('R13-7-02: o perfil que CHEGA acende o ponto (`definirPerfil`) — e o toqu
   assert.equal(a.ponto(), false, 'PRÉ-CONDIÇÃO: o ponto acendeu sem o perfil');
   assert.equal(a.h.definirPerfil({ success: true, profile: L6 }), true);
   assert.equal(a.ponto(), true, 'o perfil L6 chegou e o ponto não acendeu pelo "Curador" que agora a vitrine mostra');
-  assert.equal(a.els.filtersBtn.aria, 'header.filters.aria — conq.selo.aria', 'o nome do botão não diz "conquista nova"');
+  assert.equal(a.els.perfilBtn.aria, 'header.perfil.aria — conq.selo.aria', 'o nome do crachá não diz "conquista nova"');
   await tocarFiltros(a);
   assert.equal(a.desenhos.at(-1)?.vitrine, '2 de 16');
   assert.equal(a.desenhos.at(-1)?.curador, 'conq-cel on nova', 'o toque não levou ao "Curador" novo');

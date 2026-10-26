@@ -369,8 +369,10 @@ test('R20-7-04 · `dir="auto"` na lista de autores do Histórico e no nome do pe
   const autores = fatiar('renderAutores');
   assert.match(autores, /truncate dark:text-slate-200" dir="auto">\$\{escapeHtml\(a\.nome\)\}<\/span>/,
     'o nome do autor na lista do Histórico perdeu o dir="auto"');
-  assert.match(HTML, /<p id="userName"[^>]*\bdir="auto"/, 'o nome do perfil no cabeçalho perdeu o dir="auto"');
-  assert.doesNotMatch(HTML, /<p id="userName"[^>]*text-left/);
+  // Desde v2026.10.26 o nome é um <span class="block"> dentro do crachá (o <button>
+  // não aceita <p>): a regra é a mesma.
+  assert.match(HTML, /<span id="userName"[^>]*\bdir="auto"/, 'o nome do perfil no cabeçalho perdeu o dir="auto"');
+  assert.doesNotMatch(HTML, /<span id="userName"[^>]*text-left/);
 });
 
 // ═══ R20-8-02 · a vigia da barra: medida síncrona ═════════════════════════════

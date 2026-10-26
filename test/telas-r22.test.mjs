@@ -15,7 +15,10 @@ const HTML = readFileSync(new URL('../index.src.html', import.meta.url), 'utf8')
 const classes = (tag) => (/class="([^"]*)"/.exec(tag) || [, ''])[1].split(/\s+/).filter(Boolean);
 
 test('R22-7-05 · o cabeçalho «Lidos / Rejeitados» do Histórico quebra em vez de sair pela esquerda — e segue à direita', () => {
-  const m = /<div class="([^"]*\bjustify-end\b[^"]*)">\s*<span class="([^"]*)" data-i18n="stats\.read">[^<]*<\/span>\s*<span class="([^"]*)" data-i18n="stats\.rejected">/.exec(HTML);
+  // Desde v2026.10.26 a legenda é desenhada pelo `renderHistory`, logo acima das linhas (era fixa no
+  // HTML, acima do cartão da patente): a regra é a mesma, no molde de lá.
+  const APP = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  const m = /const legenda = `<div class="([^"]*\bjustify-end\b[^"]*)"[^>]*>` \+\s*`<span class="([^"]*)">\$\{escapeHtml\(t\('stats\.read'\)\)\}<\/span>` \+\s*`<span class="([^"]*)">\$\{escapeHtml\(t\('stats\.rejected'\)\)\}/.exec(APP);
   assert.ok(m, 'o cabeçalho do Histórico mudou de forma (as duas colunas stats.read / stats.rejected dentro do .justify-end)');
   const cab = m[1].split(/\s+/);
   // `flex-wrap` sem tirar o `justify-end`: a posição (à direita, em cima dos números) é a de sempre — só ganha uma segunda linha quando não cabe.

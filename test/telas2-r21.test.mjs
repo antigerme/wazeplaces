@@ -228,7 +228,7 @@ test('R21-7-07 · o cartão dos Filtros rola numa ESCADA de janelas em rem (cont
   assert.equal(corpoDosFiltros.decl.flex, 'none');
   assert.equal(corpoDosFiltros.decl.overflow, 'visible');
   assert.ok(!REGRAS.some((x) => /#filtersModal\s*>\s*div\s*>\s*\.overflow-y-auto/.test(x.sel) && x.condicao !== b.cabeca), 'a regra do corpo dos Filtros vale fora da escada (ou numa 2ª consulta que a primeira ocorrência não cobre)');
-  assert.match(HTML, /<div class="flex-1 overflow-y-auto overscroll-contain px-6 py-4">\s*<!-- ══ ABA FILTROS ══ -->/, 'o corpo dos Filtros mudou de classe: a regra da escada o alcança por `> .overflow-y-auto`');
+  assert.match(HTML, /<div class="flex-1 overflow-y-auto overscroll-contain px-6 py-4">\s*<!-- ══ FILTROS \(o modo do funil\) ══ -->/, 'o corpo dos Filtros mudou de classe: a regra da escada o alcança por `> .overflow-y-auto`');
   // O rodapé preso cobre o fim da rolagem: o `scroll-padding-bottom` faz o foco do teclado parar ACIMA dele (17 de 17 controles ficavam
   // sob o rodapé no Fold a 2×). Dois grupos: o rodapé empilhado (linha de até 15,4rem) e o lado a lado. As condições são linhas DA escada.
   // O lado a lado (o degrau largo) vem PRIMEIRO no arquivo: ele alcança também as janelas estreitas (até 15,4rem), onde o rodapé é o empilhado,
@@ -891,9 +891,11 @@ test('R23-7-04 · o canvas do QR do pareamento nunca passa do CARTÃO (max-width
 test('R23-8-04 · o fieldset dos tipos de pedido encolhe com o cartão e quebra a palavra que não cabe (min-w-0 + break-words)', () => {
   const a = HTML.indexOf('<fieldset class="min-w-0">');
   assert.ok(a > 0, 'o <fieldset> dos tipos de pedido perdeu o min-w-0: o padrão do navegador (`min-inline-size: min-content`) o deixa passar do cartão com texto grande');
-  const bloco = HTML.slice(a, HTML.indexOf('</fieldset>', a));
+  // Desde v2026.10.26 os tipos são chips em dois grupos (dois <fieldset> dentro deste): o bloco vai até o
+  // campo seguinte (a Categoria), e o rótulo que se VÊ é o curto (`filters.types.curto.*`).
+  const bloco = HTML.slice(a, HTML.indexOf('for="filterCategory"', a));
   assert.match(bloco, /<legend class="[^"]*\bbreak-words\b/, 'a legenda «Tipos de Pedido» não quebra a palavra');
-  const spans = [...bloco.matchAll(/<span class="([^"]*)" data-i18n="filters\.types\.[A-Z_]+"/g)];
+  const spans = [...bloco.matchAll(/<span class="([^"]*)" data-i18n="filters\.types\.curto\.[A-Z_]+"/g)];
   assert.equal(spans.length, 7, 'esperava os 7 tipos de pedido');
   for (const m of spans) assert.ok(/\bmin-w-0\b/.test(m[1]) && /\bbreak-words\b/.test(m[1]), `o rótulo de um tipo de pedido não encolhe/quebra: ${m[0]}`);
   assert.equal([...bloco.matchAll(/class="filter-type /g)].length, 7, 'os 7 checkboxes dos tipos continuam no fieldset');
