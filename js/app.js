@@ -1861,7 +1861,8 @@ function setupAppListeners() {
     // E o aviso de UMA vez que saiu com a página no fundo espera a volta
     // (`avisosAdiadosAoVoltar`, R13-7-01).
     document.addEventListener('visibilitychange', avisosAdiadosAoVoltar);
-    $('themeBtn').addEventListener('click', toggleTheme);
+    // O tema se escolhe SÓ nas Preferências (Auto · Claro · Escuro): o botão ☀/🌙 do
+    // cabeçalho saiu em v2026.10.26-02 (decisão do dono).
     document.querySelectorAll('input[name="prefTema"]').forEach((r) => {
         r.addEventListener('change', () => { if (r.checked) escolherTema(r.value); });
     });
@@ -31908,11 +31909,11 @@ function getPreferredTheme() {
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
-// A raiz fica IGUAL à que o script do tema (index.src.html) deixa na carga: o
-// botão e a recarga não podem pintar coisas diferentes. Até a auditoria de
-// 2026-09-29 (A8), com o sistema escuro, trocar pro claro pelo botão deixava a
-// barra do sistema e o fundo escuros até recarregar — o claro não ganhava o
-// `tema-claro`, e só a PRIMEIRA meta mudava.
+// A raiz fica IGUAL à que o script do tema (index.src.html) deixa na carga: a
+// escolha nas Preferências e a recarga não podem pintar coisas diferentes. Até a
+// auditoria de 2026-09-29 (A8), com o sistema escuro, trocar pro claro (então pelo
+// botão do cabeçalho) deixava a barra do sistema e o fundo escuros até recarregar —
+// o claro não ganhava o `tema-claro`, e só a PRIMEIRA meta mudava.
 function applyTheme(theme) {
     const isDark = theme === 'dark';
     document.documentElement.classList.toggle('dark', isDark);
@@ -31920,10 +31921,6 @@ function applyTheme(theme) {
     // pinta o fundo escuro por media query num sistema escuro.
     document.documentElement.classList.toggle('tema-claro', !isDark);
     document.body.classList.toggle('dark', isDark);
-    document.getElementById('themeIconLight').classList.toggle('hidden', isDark);
-    document.getElementById('themeIconDark').classList.toggle('hidden', !isDark);
-    const themeBtn = document.getElementById('themeBtn');
-    if (themeBtn) themeBtn.setAttribute('aria-pressed', isDark ? 'true' : 'false');
     // Status bar (Android/PWA) acompanha a surface do header, não a cor da marca.
     // TODAS as metas: seguindo o sistema elas são duas, uma por esquema, e o
     // navegador usa a que casa com o SISTEMA — que não é a primeira.
@@ -31931,19 +31928,13 @@ function applyTheme(theme) {
         .forEach((m) => m.setAttribute('content', isDark ? '#0f172a' : '#f8fafc'));
 }
 
-function toggleTheme() {
-    const isDark = document.documentElement.classList.contains('dark');
-    const next = isDark ? 'light' : 'dark';
-    try { localStorage.setItem(THEME_KEY, next); } catch (e) {}
-    applyTheme(next);
-    renderTemaPref(next);
-}
-
-// O TEMA nas Preferências (v2026.10.26): Auto · Claro · Escuro. O botão do
-// cabeçalho só alterna claro e escuro, e depois do primeiro toque o app nunca
+// O TEMA nas Preferências (v2026.10.26): Auto · Claro · Escuro. O botão ☀/🌙 do
+// cabeçalho só alternava claro e escuro, e depois do primeiro toque o app nunca
 // mais voltava a seguir o aparelho: não havia caminho de volta. "Auto" é a chave
-// AUSENTE — a mesma de quem nunca tocou no botão —, e com ela o script do tema
-// (index.src.html) e o ouvinte do sistema (`initApp`) já seguem o aparelho.
+// AUSENTE — a mesma de quem nunca escolheu —, e com ela o script do tema
+// (index.src.html) e o ouvinte do sistema (`initApp`) seguem o aparelho. Desde
+// v2026.10.26-02 esta linha é o ÚNICO lugar de escolher o tema: o botão saiu do
+// cabeçalho (decisão do dono), e os 44 px dele foram pro nome do crachá.
 function modoDoTema() {
     let guardado = null;
     try { guardado = localStorage.getItem(THEME_KEY); } catch (e) {}
@@ -31952,8 +31943,7 @@ function modoDoTema() {
 
 // A linha das Preferências mostra o modo de AGORA. Quem escolheu passa o modo
 // (com o armazenamento bloqueado a leitura devolveria "auto" e a escolha voltaria
-// atrás na tela); sem argumento, lê o aparelho. O botão do cabeçalho também
-// passa por aqui: os dois controles nunca discordam.
+// atrás na tela); sem argumento, lê o aparelho.
 function renderTemaPref(modo = modoDoTema()) {
     document.querySelectorAll('input[name="prefTema"]').forEach((r) => { r.checked = r.value === modo; });
 }

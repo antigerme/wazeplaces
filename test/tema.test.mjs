@@ -1,14 +1,15 @@
-// Trocar o tema pelo BOTÃO tem que deixar a tela igual à que a RECARGA deixa
-// (auditoria de 2026-09-29, A8, medido no navegador): com o sistema escuro,
-// tocar pro claro deixava a barra do sistema e o fundo sob o app ESCUROS até
-// recarregar. O script do tema (inline no <head>) marca o claro com
+// Trocar o tema tem que deixar a tela igual à que a RECARGA deixa (auditoria de
+// 2026-09-29, A8, medido no navegador, então pelo botão do cabeçalho): com o
+// sistema escuro, tocar pro claro deixava a barra do sistema e o fundo sob o app
+// ESCUROS até recarregar. Desde v2026.10.26-02 o tema se escolhe SÓ pela linha das
+// Preferências (Auto · Claro · Escuro): o botão ☀/🌙 saiu do cabeçalho. O script do tema (inline no <head>) marca o claro com
 // `tema-claro` e, quando a pessoa escolheu o contrário do sistema, deixa UMA
 // meta `theme-color` na cor dela; o `applyTheme` não tirava/punha o
 // `tema-claro` e só mexia na PRIMEIRA meta — que, seguindo o sistema, é a do
 // esquema claro, não a que vale num sistema escuro.
 //
 // Roda os DOIS de verdade — o script do index.src.html e o applyTheme/
-// toggleTheme do app.js — num DOM de mentira, e compara o estado. O teste de
+// escolherTema do app.js — num DOM de mentira, e compara o estado. O teste de
 // navegador (tools/smoke-browser.mjs) mede o fundo e a barra na tela.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -89,9 +90,9 @@ function pagina({ sistemaEscuro, escolha = null }) {
   // A carga: o script inline, e depois o `initApp`, que aplica o tema de novo.
   new Function('window', 'document', 'localStorage', SCRIPT_DO_TEMA)(window, document, localStorage);
   const app = new Function('window', 'document', 'localStorage', 'THEME_KEY',
-    [fatiar('getPreferredTheme'), fatiar('applyTheme'), fatiar('toggleTheme'),
+    [fatiar('getPreferredTheme'), fatiar('applyTheme'),
      fatiar('modoDoTema'), fatiar('renderTemaPref'), fatiar('escolherTema'),
-     'return { getPreferredTheme, applyTheme, toggleTheme, modoDoTema, renderTemaPref, escolherTema };'].join('\n'))(window, document, localStorage, 'waze_places_theme');
+     'return { getPreferredTheme, applyTheme, modoDoTema, renderTemaPref, escolherTema };'].join('\n'))(window, document, localStorage, 'waze_places_theme');
   app.applyTheme(app.getPreferredTheme());
   // O que a tela mostra: a classe da raiz e a barra — a meta que VALE é a
   // primeira cuja media casa, não a primeira do documento.
@@ -111,16 +112,18 @@ test('CONTROLE: as duas metas de mentira são as do index.src.html, na mesma ord
   assert.deepEqual(metas, [['#f8fafc', CLARO], ['#0f172a', ESCURO]]);
 });
 
-test('A8: trocar o tema pelo botão deixa a tela IGUAL à da recarga — nos dois sistemas, ida e volta', () => {
+test('A8: escolher o tema nas Preferências deixa a tela IGUAL à da recarga — nos dois sistemas, ida e volta', () => {
   for (const sistemaEscuro of [true, false]) {
     const p = pagina({ sistemaEscuro });
-    for (const passo of ['1º toque', '2º toque']) {
-      p.toggleTheme();
+    // Ida: o contrário do aparelho (o caso do A8: claro num sistema escuro). Volta: o do aparelho, escolhido.
+    const ida = sistemaEscuro ? 'light' : 'dark', volta = sistemaEscuro ? 'dark' : 'light';
+    for (const [passo, modo] of [['ida', ida], ['volta', volta]]) {
+      p.escolherTema(modo);
       const depoisDoToque = p.estado();
       const recarga = pagina({ sistemaEscuro, escolha: p.escolha() }).estado();
       const onde = `sistema ${sistemaEscuro ? 'escuro' : 'claro'}, ${passo} (${p.escolha()})`;
       assert.deepEqual(depoisDoToque, recarga,
-        `${onde}: o botão pinta diferente da recarga — barra e fundo só acertam ao recarregar`);
+        `${onde}: a escolha pinta diferente da recarga — barra e fundo só acertam ao recarregar`);
       // E a recarga é o certo: UMA das duas classes, e a barra na cor do tema.
       const escuro = p.escolha() === 'dark';
       assert.deepEqual(recarga, { dark: escuro, temaClaro: !escuro, barra: escuro ? '#0f172a' : '#f8fafc' },
@@ -136,23 +139,23 @@ test('A8: seguindo o sistema (sem escolha), o que o app aplica na abertura já �
   }
 });
 
-test('o TEMA nas Preferências: "Auto" devolve o app ao aparelho (igual à recarga sem escolha), e o botão e a linha nunca discordam', () => {
+test('o TEMA nas Preferências: "Auto" devolve o app ao aparelho (igual à recarga sem escolha), e a linha diz o que vale', () => {
   for (const sistemaEscuro of [true, false]) {
     const onde = `sistema ${sistemaEscuro ? 'escuro' : 'claro'}`;
     const p = pagina({ sistemaEscuro });
     p.renderTemaPref();
     assert.deepEqual(p.linha(), ['auto'], `${onde}: sem escolha, a linha não diz "Auto"`);
-    // O botão do cabeçalho escolhe o contrário do aparelho, e a linha acompanha.
-    p.toggleTheme();
+    // A pessoa escolhe o contrário do aparelho, e a linha marca a escolha.
     const escolhido = sistemaEscuro ? 'light' : 'dark';
-    assert.equal(p.escolha(), escolhido, 'PRÉ-CONDIÇÃO: o botão não gravou a escolha');
-    assert.deepEqual(p.linha(), [escolhido], `${onde}: o botão trocou o tema e a linha das Preferências seguiu dizendo outro`);
+    p.escolherTema(escolhido);
+    assert.equal(p.escolha(), escolhido, 'PRÉ-CONDIÇÃO: a escolha não foi gravada');
+    assert.deepEqual(p.linha(), [escolhido], `${onde}: a linha das Preferências não marcou a escolha`);
     // "Auto": a chave sai, e a tela fica IGUAL à de quem nunca escolheu (a recarga sem chave).
     p.escolherTema('auto');
     assert.equal(p.escolha(), null, `${onde}: o "Auto" deixou uma escolha gravada — o app seguiria preso nela`);
     assert.deepEqual(p.estado(), pagina({ sistemaEscuro }).estado(), `${onde}: o "Auto" pinta diferente da recarga sem escolha`);
     assert.deepEqual(p.linha(), ['auto']);
-    // E Claro/Escuro pela linha valem como o botão: igual à recarga com a escolha.
+    // E Claro/Escuro pela linha valem como a recarga com a escolha.
     for (const modo of ['dark', 'light']) {
       p.escolherTema(modo);
       assert.equal(p.escolha(), modo);
@@ -172,4 +175,18 @@ test('o TEMA nas Preferências: rádios de verdade num grupo, nas 4 línguas, e 
   const perfil = APP.slice(APP.indexOf('function abrirPerfil('), APP.indexOf('\n}\n', APP.indexOf('function abrirPerfil(')));
   assert.match(perfil, /renderTemaPref\(\);/, 'abrir o perfil não acerta a linha do Tema (ela mostraria o modo de antes)');
   assert.match(APP, /r\.addEventListener\('change', \(\) => \{ if \(r\.checked\) escolherTema\(r\.value\); \}\);/, 'os rádios do Tema não escolhem nada');
+});
+
+test('o botão de tema SAIU do cabeçalho (v2026.10.26-02, decisão do dono): o tema tem UM lugar de escolha, a linha das Preferências', () => {
+  // Era ele que tirava o app do «Auto» sem avisar (um toque fixava claro ou escuro), e os 44 px dele
+  // foram pro nome do crachá. Volta só por decisão nova: aí este teste sai junto, com o motivo.
+  const APP = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  const I18N = readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8');
+  const header = HTML.slice(HTML.indexOf('<header'), HTML.indexOf('</header>'));
+  assert.ok(header.length > 1000, 'CONTROLE: o cabeçalho não foi achado no index.src.html');
+  assert.doesNotMatch(header, /<button[^>]*id="themeBtn"/, 'o botão de tema voltou ao cabeçalho');
+  assert.doesNotMatch(APP_SEM, /\btoggleTheme\b|getElementById\('theme(Btn|IconLight|IconDark)'\)/, 'o app ainda mexe no botão de tema');
+  assert.doesNotMatch(I18N, /'header\.theme\.aria'/, 'a chave do botão de tema ficou no dicionário');
+  // E o que sobra, de fato, escolhe o tema: os rádios ligados ao `escolherTema`.
+  assert.match(APP_SEM, /r\.addEventListener\('change', \(\) => \{ if \(r\.checked\) escolherTema\(r\.value\); \}\);/);
 });

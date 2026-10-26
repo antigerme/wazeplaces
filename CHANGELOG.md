@@ -8,6 +8,13 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.10.26-02
+**O botão de tema (☀/🌙) saiu do cabeçalho** (decisão do dono, com o mockup e a medida na mesa). O tema agora se escolhe só nas Preferências, na linha **Tema** (Auto · Claro · Escuro), que chegou na v2026.10.26-01. O botão era o que tirava o app do «Auto» sem avisar: um toque fixava claro ou escuro, e o app parava de seguir o aparelho.
+
+- **O nome no cabeçalho ganha os 44 px do botão.** Medido com o botão escondido: no Galaxy Fold, `antigerme` cabe inteiro (antes, 40 de 60 px), e com o ícone de gente o nome passa a aparecer (antes, só a foto); a 320 px com o ícone, `antigerme` cabe inteiro (antes, 36 px); a 360 px e no aparelho do dono, `world_12345678` cabe inteiro com o ícone (antes, 60 e 71 de 96 px).
+- **O que custa:** trocar o tema leva 3 toques (seu nome → Preferências → Claro ou Escuro) em vez de 1; no «Auto», quem quer o escuro à noite já tem isso pelo próprio aparelho. Na tela de entrada (sem login) não há como trocar o tema: vale o do aparelho.
+- **Não testado:** aparelho de verdade e teclado virtual (a validação é no navegador emulado e nos testes).
+
 ## v2026.10.26-01
 **Filtros e Preferências, reorganizados.** Feito em 24/10 (pedido do dono: «faça o que achar melhor e me entregue pronto») e segurado antes de ir ao ar; em 26/10, depois de ver os mockups de cada mudança, o dono liberou as seis («pode colocar tudo em produção»). A main de antes segue na branch `rollback`. Cada parte é UM commit e desfaz com `git revert` do commit dela.
 

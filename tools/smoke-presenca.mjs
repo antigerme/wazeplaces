@@ -780,7 +780,8 @@ try {
           praDireitaDoBotao: sr.right - br.right, noTopoDaTela: sr.top, rem: parseFloat(getComputedStyle(document.documentElement).fontSize),
           digitoDentro: tr.left >= sr.left - 0.5 && tr.right <= sr.right + 0.5 && tr.top >= sr.top - 0.5 && tr.bottom <= sr.bottom + 0.5,
           contraste: (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05),
-          vizinhoRecebe: recebe('themeBtn'), pilulaRecebe: recebe('presencaPill'),
+          // O vizinho da pílula no cabeçalho: o ↻ (o botão de tema, que vinha antes dele, saiu em v2026.10.26-02).
+          vizinhoRecebe: recebe('refreshBtn'), pilulaRecebe: recebe('presencaPill'),
         };
       };
       const preparaSelo = (a) => p6.evaluate((a) => {
@@ -1517,7 +1518,7 @@ try {
     await dormir(150);
     const pilulaSumiu = await ana.page.evaluate(() => document.getElementById('presencaPill').classList.contains('hidden'));
     const focoDepois = await focoNoCabecalho();
-    if (pilulaSumiu && focoDepois === 'themeBtn') ok('a pílula sumiu com o foco nela: o foco foi pro vizinho do cabeçalho (o do tema) — não pro <body>');
+    if (pilulaSumiu && focoDepois === 'refreshBtn') ok('a pílula sumiu com o foco nela: o foco foi pro vizinho do cabeçalho (o ↻) — não pro <body>');
     else anota(`a pílula sumiu com o foco nela e o foco foi pra ${focoDepois} (pílula escondida: ${pilulaSumiu})`);
     const acao = reg(ana.id).api.find((x) => x.rota === 'validar-place');
     if (acao && acao.c.presenca && Array.isArray(acao.c.presenca.conhecidos) && acao.c.presenca.conhecidos.includes('183164343')) ok('a ação leva as conversas conhecidas de carona');

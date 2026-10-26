@@ -19,7 +19,7 @@ const I18N_DICT = {
     'common.cancel': 'Cancelar', 'common.confirm': 'Confirmar', 'common.apply': 'Aplicar',
     'common.close': 'Fechar', 'common.logout': 'Sair',
     // header (aria/title)
-    'header.theme.aria': 'Alternar tema', 'header.refresh.aria': 'Buscar novamente',
+    'header.refresh.aria': 'Buscar novamente',
     'toast.paisDoPerfil': 'Mostrando a fila de {pais}, onde você edita. Dá pra trocar em Filtros.',
     'toast.paisDoPerfilSemNome': 'Mostrando a fila do país onde você edita. Dá pra trocar em Filtros.',
     'auth.autoLogin.credito': 'Extensão por <a href="https://www.waze.com/user/editor/daflash" target="_blank" rel="noopener noreferrer" class="text-purple-600 dark:text-purple-300 hover:text-purple-700 hover:underline font-semibold">@daflash</a> · comunidade WME',
@@ -766,7 +766,7 @@ const I18N_DICT = {
   en: {
     'common.cancel': 'Cancel', 'common.confirm': 'Confirm', 'common.apply': 'Apply',
     'common.close': 'Close', 'common.logout': 'Log out',
-    'header.theme.aria': 'Toggle theme', 'header.refresh.aria': 'Fetch again',
+    'header.refresh.aria': 'Fetch again',
     'toast.paisDoPerfil': 'Showing the queue for {pais}, where you edit. You can change it in Filters.',
     'toast.paisDoPerfilSemNome': 'Showing the queue for the country where you edit. You can change it in Filters.',
     'auth.autoLogin.credito': 'Extension by <a href="https://www.waze.com/user/editor/daflash" target="_blank" rel="noopener noreferrer" class="text-purple-600 dark:text-purple-300 hover:text-purple-700 hover:underline font-semibold">@daflash</a> · WME community',
@@ -1425,7 +1425,7 @@ const I18N_DICT = {
   es: {
     'common.cancel': 'Cancelar', 'common.confirm': 'Confirmar', 'common.apply': 'Aplicar',
     'common.close': 'Cerrar', 'common.logout': 'Salir',
-    'header.theme.aria': 'Cambiar tema', 'header.refresh.aria': 'Buscar de nuevo',
+    'header.refresh.aria': 'Buscar de nuevo',
     'toast.paisDoPerfil': 'Mostrando la cola de {pais}, donde editas. Puedes cambiarlo en Filtros.',
     'toast.paisDoPerfilSemNome': 'Mostrando la cola del país donde editas. Puedes cambiarlo en Filtros.',
     'auth.autoLogin.credito': 'Extensión de <a href="https://www.waze.com/user/editor/daflash" target="_blank" rel="noopener noreferrer" class="text-purple-600 dark:text-purple-300 hover:text-purple-700 hover:underline font-semibold">@daflash</a> · comunidad WME',
@@ -2085,7 +2085,7 @@ const I18N_DICT = {
   fr: {
     'common.cancel': 'Annuler', 'common.confirm': 'Confirmer', 'common.apply': 'Appliquer',
     'common.close': 'Fermer', 'common.logout': 'Se déconnecter',
-    'header.theme.aria': 'Changer de thème', 'header.refresh.aria': 'Rechercher à nouveau',
+    'header.refresh.aria': 'Rechercher à nouveau',
     'toast.paisDoPerfil': 'Voici la file de {pais}, où vous éditez. Vous pouvez la changer dans Filtres.',
     'toast.paisDoPerfilSemNome': 'Voici la file du pays où vous éditez. Vous pouvez la changer dans Filtres.',
     'auth.autoLogin.credito': 'Extension par <a href="https://www.waze.com/user/editor/daflash" target="_blank" rel="noopener noreferrer" class="text-purple-600 dark:text-purple-300 hover:text-purple-700 hover:underline font-semibold">@daflash</a> · communauté WME',

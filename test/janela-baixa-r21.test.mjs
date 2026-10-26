@@ -344,7 +344,7 @@ test('R21-5-03 · o selo ainda cresce com o texto (o dígito inteiro dentro dele
   assert.match(SELO['box-shadow'], /0 0 0 2px/, 'o anel do selo mudou');
   assert.equal(SELO.position, 'absolute');
   // O botão da pílula segue relativo e de 44px mínimo: a conta do `50%` parte dele.
-  const pilula = HTML.slice(HTML.indexOf('id="presencaPill"'), HTML.indexOf('id="themeBtn"'));
+  const pilula = HTML.slice(HTML.indexOf('id="presencaPill"'), HTML.indexOf('id="refreshBtn"'));
   assert.match(pilula, /class="hidden relative min-w-\[44px\] min-h-\[44px\] flex items-center justify-center/);
   assert.match(pilula, /id="presencaIconMsg" class="hidden w-6 h-6"/);
   assert.match(pilula, /id="presencaIconGente" class="w-6 h-6"/);
