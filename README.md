@@ -142,7 +142,7 @@ Editores nível 1, ou sem badge de Area Manager, recebem a mensagem **"Acesso re
   - `server/node.mjs` — adaptador **VM/Node** (sessões em filesystem, chave em env/arquivo).
 - **Auth:** cookies do WME → sessão criptografada server-side (**AES-256-GCM**). O client só guarda um `sessionToken` opaco.
 
-> Histórico: até a v2.x o backend era PHP + Apache. A v3.0 migrou pra JS (Cloudflare/Node) mantendo o mesmo contrato de API. O planejamento e o mapa de conversão estão em [`docs/cloudflare-migration.md`](docs/cloudflare-migration.md).
+> Histórico: até a v2.x o backend era PHP + Apache. A v3.0 migrou pra JS (Cloudflare/Node) mantendo o mesmo contrato de API.
 
 ### Arquitetura
 
@@ -279,7 +279,7 @@ npx wrangler deploy
 | Comando de implantação | `npx wrangler deploy` |
 | Compilações para ramificações de não produção | deixe marcado (gera preview de cada PR) |
 
-Clique **Implantar**. O binding `SESSIONS` vem do `wrangler.jsonc` (por isso o `id` precisa estar preenchido — passo 1). O Secret `ENCRYPTION_KEY` você já criou no passo 2 (ou configure no dashboard: projeto → **Settings → Variables and Secrets → Add → tipo Secret**). Detalhes em [`docs/cloudflare-migration.md`](docs/cloudflare-migration.md).
+Clique **Implantar**. O binding `SESSIONS` vem do `wrangler.jsonc` (por isso o `id` precisa estar preenchido — passo 1). O Secret `ENCRYPTION_KEY` você já criou no passo 2 (ou configure no dashboard: projeto → **Settings → Variables and Secrets → Add → tipo Secret**).
 
 **Conferir que a API subiu (uma linha):**
 
@@ -485,7 +485,7 @@ A checagem de `errorList[0].code` acontece **antes** da regra `5xx → transient
 ### O que NÃO está implementado (decisão consciente)
 
 - Rate limiting no nível do app (Waze Staff pediu pra manter sem, por ora)
-- iOS/desktop nativo (a PWA cobre; ver `docs/native-android-analysis.md`)
+- iOS/desktop nativo (a PWA cobre)
 
 (O Tailwind já é pré-compilado: `npm run css` gera o `css/app.css`, que é commitado.)
 

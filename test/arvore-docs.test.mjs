@@ -46,7 +46,7 @@ function blocoDeCodigo(doc, ancora) {
 
 // Cada entrada: { caminho, nome, ehPasta, linha }. A indentação é de 4 colunas por nível ("│   " ou 4 espaços); a
 // linha de comentário que continua a descrição de uma entrada não tem "├── " e não conta. "(sem vendor: …)" é
-// nota, não arquivo. O nome é a 1ª palavra depois do conector e pode ter barra ("scripts/md2pdf.py").
+// nota, não arquivo. O nome é a 1ª palavra depois do conector e pode ter barra (uma pasta e o arquivo numa linha só).
 function lerArvore(texto) {
   const pilha = [];
   const saida = [];
@@ -81,8 +81,9 @@ test('árvores: o instrumento leu as duas (CONTROLE: entradas que têm que estar
       assert.ok(caminhos.includes(c), `${doc}: o leitor não achou "${c}" na árvore`);
     }
   }
-  // O nome com barra e o nível 2: o leitor tem que montar o caminho inteiro.
-  assert.ok(claude.some((e) => e.caminho === 'docs/scripts/md2pdf.py'), 'o leitor não montou docs/scripts/md2pdf.py (nome com barra)');
+  // A última entrada de uma pasta (o conector "└── ") também é lida, com o caminho inteiro. Era o
+  // `docs/scripts/md2pdf.py`, que saiu na limpeza de 2026-10-26.
+  assert.ok(claude.some((e) => e.caminho === 'docs/gotchas.md'), 'o leitor não montou docs/gotchas.md (a última entrada da pasta, com "└── ")');
   // E a nota "(sem vendor …)" não virou arquivo.
   assert.ok(!claude.some((e) => e.nome.startsWith('(')), 'uma nota entre parênteses virou entrada da árvore');
 });
