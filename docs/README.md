@@ -49,66 +49,6 @@ E atualizar este README com a nova versão (campo `version` no `package.json` ex
 
 ---
 
-## `native-android-analysis.md` + `.pdf`
-
-Análise técnica completa do que mudaria se reescrevêssemos o app como Android nativo (Kotlin) ou cross-platform (Flutter, KMM). Cobre:
-
-- Por que o backend existe (CORS + segurança de cookies) — escrito quando ele ainda era PHP; hoje é JS (core + adaptadores), e o argumento vale igual
-- Por que sumiria num nativo de verdade (sem CORS, Android Keystore mais seguro)
-- 3 opções de fluxo de auth no nativo (WebView login é a recomendada)
-- Ganhos (UX, push, performance, segurança, infraestrutura, distribuição)
-- Perdas (iOS, desktop, velocidade de iteração, curva de aprendizado)
-- Arquitetura comparada com diagramas
-- Esboço de implementação Kotlin (~150 linhas pra MVP)
-- Custo realista em horas
-- Caminhos intermediários (TWA, Capacitor, Flutter, coexistência)
-- Recomendação por horizonte de tempo
-
-**Gerado em**: junho 2026, em resposta a colegas pedindo versão mobile nativa.
-
-**Pra que serve aqui**: documento de discussão pra evitar repetir essa conversa com cada novo colaborador que sugerir "vamos fazer um app nativo". O `.md` é a fonte; o `.pdf` é o entregável formatado pra compartilhar fora do GitHub (WhatsApp, e-mail, etc).
-
-### Regenerar o PDF
-
-Se atualizar o `.md`, regere o PDF:
-
-```bash
-pip install weasyprint markdown pygments
-python3 docs/scripts/md2pdf.py docs/native-android-analysis.md docs/native-android-analysis.pdf
-```
-
-(Ver `docs/scripts/md2pdf.py` — script de ~30 linhas com CSS pra A4 + paleta cyan que combina com o app.)
-
----
-
-## `cloudflare-migration.md` + `.pdf`
-
-Planejamento técnico da migração do stack de então (PHP + Apache) para Cloudflare
-Workers, mantendo fallback pra VM RedHat. **FEITA na v3.0** — o documento
-fica como registro de por que cada peça é como é. Cobre:
-
-- Padrão **core compartilhado + adaptadores** (aprendido do projeto `botequei`):
-  uma lógica só, cascas finas por plataforma — resolve o "dois backends dobram
-  manutenção"
-- Mapa de conversão função-a-função PHP → JS (`config.php` + 9 endpoints)
-- Sessões: `/tmp` → Workers KV (CF) / filesystem (VM), com ajuste de TTL pro
-  limite de escrita do KV
-- Cripto: `openssl` → Web Crypto (roda igual em Worker e Node), sugestão de subir
-  pra AES-GCM
-- Estrutura de arquivos, `_headers`, `wrangler.jsonc`, Secrets
-- Fallback VM RedHat com systemd + nginx (espelhando o README do botequei)
-- Passo a passo, esforço (~3-4 dias) e limites do free tier
-
-**Gerado em**: junho 2026, em resposta ao interesse em migrar pra Cloudflare
-(precedente: o `botequei` fez essa migração com sucesso).
-
-**Pra que serve aqui**: base de decisão e roteiro de implementação. Como os
-outros docs, o `.md` é a fonte e o `.pdf` é o entregável pra compartilhar.
-Regenerar o PDF: `python3 docs/scripts/md2pdf.py docs/cloudflare-migration.md docs/cloudflare-migration.pdf`.
-
-
----
-
 ## `waze-api.md`
 
 Superfície **medida** da API que o WME usa: a tabela `paths` completa (44
@@ -149,10 +89,17 @@ sempre carregado; aqui mora o inteiro teor, pra ler quando o assunto aparece.
 
 ---
 
-## `auditoria-2026-09.md`
+## O que saiu na limpeza de 2026-10-26
 
-O arquivo de TRABALHO da auditoria completa pedida pelo owner em 2026-09-25: o
-que já foi feito e verificado em produção, o que falta, o que espera decisão
-dele e como retomar num contêiner novo (a retomada automática aponta pra cá).
-Quando a auditoria terminar, vira o registro final dela — ou sai, se o owner
-preferir.
+O arquivo de trabalho da auditoria de 2026-09, a história dos lotes de correção
+(`lotes.md`), a análise do Android nativo e o plano da migração pro Cloudflare
+(com os PDFs e o `scripts/md2pdf.py` que os gerava) saíram do repositório: o
+trabalho deles terminou. O apêndice da sala própria saiu do `gotchas.md` pelo
+mesmo motivo. Estão todos no git, no último commit que os tinha:
+
+```bash
+git show e1937b8:docs/lotes.md
+```
+
+O passo a passo da VM, que o plano da migração também tinha, está no README
+(«Opção B»).

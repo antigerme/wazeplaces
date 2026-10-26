@@ -76,7 +76,7 @@ PWA = instala no celular sem precisar de Play Store / App Store. Funciona offlin
 | **PWA** | manifest + service worker network-first pra HTML/JS/CSS, cache-first pra imagens | HTML/código sempre fresco (fim do version skew), imagens rápidas. Auto-update via `controllerchange`. |
 | **i18n** | UI em pt/en/es/fr (`js/i18n.js`, sem lib); código em português + inglês misturado | O app nasceu pra editores do Brasil e hoje atende a comunidade global (ver a seção **i18n**). |
 
-> **v3.0 — migração PHP → JS (Cloudflare/Node).** Até a v2.x o backend era PHP 7.4 + Apache + `.htaccess`, sessões em `/tmp` com AES-256-CBC, `start.sh`/`start.bat` com `PHP_CLI_SERVER_WORKERS`. Tudo isso foi **removido**. Se você achar referência a PHP/`.htaccess`/`start.sh`/cURL/`config.php` em qualquer lugar (fora de `docs/` histórico), é resíduo — corrija. Contrato de API preservado (mesmos paths, agora **sem `.php`**). Mapa de conversão: `docs/cloudflare-migration.md`.
+> **v3.0 — migração PHP → JS (Cloudflare/Node).** Até a v2.x o backend era PHP 7.4 + Apache + `.htaccess`, sessões em `/tmp` com AES-256-CBC, `start.sh`/`start.bat` com `PHP_CLI_SERVER_WORKERS`. Tudo isso foi **removido**. Se você achar referência a PHP/`.htaccess`/`start.sh`/cURL/`config.php` em qualquer lugar (fora do CHANGELOG, que é história), é resíduo — corrija. Contrato de API preservado (mesmos paths, agora **sem `.php`**).
 
 **Não introduza build step, framework, bundler, ORM, ou banco de dados sem discussão explícita com o usuário.** Valor explícito do projeto: simplicidade extrema. O backend é ESM puro rodável direto com `node` (sem `npm install` — zero dependências).
 
@@ -194,7 +194,7 @@ wazeplaces/
 │   ├── corpo.mjs            # Leitura do corpo na VM: junta BYTES e decodifica uma vez (acento cortado
 │   │                        #   entre dois pedaços virava \uFFFD). Módulo próprio pra ser testável
 │   ├── wme-grpc.mjs         # O fio gRPC-web da presença e do chat DO WME (fase 1 da troca da sala
-│   │                        #   própria, que saiu na fase 4 — ver o apêndice do docs/gotchas.md).
+│   │                        #   própria, que saiu na fase 4).
 │   │                        #   PURO: monta e lê protobuf; quem chama é o core. Pedidos byte a byte
 │   │                        #   iguais aos do WME (test/wme-grpc.test.mjs)
 │   ├── marca-app.mjs        # A MARCA de quem usa o app, gravada nos últimos dígitos da posição da
@@ -302,19 +302,12 @@ wazeplaces/
 ├── docs/                    # Referência pra dev (NÃO servido em runtime)
 │   ├── README.md            # Procedência dos docs
 │   ├── wme-sdk-typings.d.ts # Tipagens oficiais do WME SDK (Waze) — referência canônica de schemas
-│   ├── native-android-analysis.md  # Discussão sobre eventual versão Android nativa
-│   ├── native-android-analysis.pdf # Mesmo doc renderizado pra compartilhar
-│   ├── cloudflare-migration.md     # Planejamento de migração Cloudflare Pages/Workers (+ fallback VM RedHat)
-│   ├── cloudflare-migration.pdf    # Mesmo doc renderizado pra compartilhar
 │   ├── waze-api.md          # Superfície MEDIDA da API do Waze: a tabela `paths` inteira do
 │   │                        #   WME (44 caminhos REST), os 44 métodos gRPC-web, e os limites
 │   │                        #   que o `info/config` publica SEM credencial. Cada linha marcada
 │   │                        #   com a procedência ([HAR] / [bundle] / [vivo]), porque "o WME sabe
 │   │                        #   chamar" e "o servidor aceita hoje" não são a mesma coisa.
-│   ├── auditoria-2026-09.md # A auditoria em voltas: estado, achados por rodada e o que foi pra produção (0. Estado agora)
-│   ├── gotchas.md           # A HISTÓRIA de cada gotcha (a regra curta mora aqui, na seção 🪤)
-│   ├── lotes.md             # A HISTÓRIA dos lotes de correção R5–R27 (movida deste arquivo em 2026-10-20: ele carregava a cada mensagem)
-│   └── scripts/md2pdf.py    # Conversor markdown → PDF estilizado (paleta cyan do app)
+│   └── gotchas.md           # A HISTÓRIA de cada gotcha (a regra curta mora aqui, na seção 🪤)
 ├── README.md                # Doc pública (editores leigos + devs)
 ├── CLAUDE.md                # Este arquivo
 ├── .github/                 # O CI (workflows/ci.yml: sintaxe, testes, smokes, guard do CACHE_NAME e um job paralelo no WebKit)
@@ -323,6 +316,8 @@ wazeplaces/
 ```
 
 **`docs/wme-sdk-typings.d.ts`**: tipagem oficial do Waze Map Editor SDK (v2.354). Não é importada em runtime — está aqui só pra consultar quando surgir dúvida sobre o schema do Waze (campos do `Venue`, valores válidos de enum, formato de `OpeningHour`/`NavigationPoint`, etc.). Use sempre como referência canônica antes de inventar estrutura no `handleBuscarPlaces` (em `server/core.mjs`).
+
+**O que saiu do `docs/` na limpeza de 2026-10-26** — a história dos lotes de correção (R5–R27), o arquivo de trabalho da auditoria de 2026-09, a análise do Android nativo, o plano da migração pro Cloudflare (com os PDFs e o `md2pdf.py`) e o apêndice da sala própria no `gotchas.md` — está no git: `git show e1937b8:docs/<arquivo>`. O passo a passo da VM, que o plano da migração também tinha, está no README («Opção B»).
 
 ---
 
@@ -526,13 +521,11 @@ Motivo: HAR é uma foto do passado, chega em 5–20MB, e cada dúvida nova custa
 
 ---
 
-> **Histórico dos lotes desta seção (3 parágrafos, R5–R24):** `docs/lotes.md` → «🔐 Fluxo de autenticação». As regras que ainda valem estão nos itens acima; o parágrafo de cada lote guarda o *porquê* e as medições.
-
 ## 👥 Presença e conversa entre editores
 
 Triar pedido era trabalho solitário: a companhia já existia (dá pra ver pedidos sumindo da própria fila), mas não era **visível**. A pílula do cabeçalho mostra quem mais está usando o app no país do filtro, e dali sai uma conversa 1:1.
 
-**DESDE A FASE 3 (v2026.09.24-01) a lista e a conversa são as do WME**, e a sala própria (o crachá, o WebSocket do `/sala`, o Durable Object `SalaDO`, o TURN e a rota `presenca`) saiu na fase 4. A história dela (por que era a fila, a presença como conexão, o crachá, o TURN, o recibo pelo DataChannel e os gotchas do socket) está no apêndice do `docs/gotchas.md`. O que decide código hoje está na subseção da troca, mais abaixo. Da época da sala continuam valendo: não há bloqueio de pessoa, a anistia de 9 dias do interruptor, o mandar o pedido aberto (com o transporte novo) e os gotchas da pílula.
+**DESDE A FASE 3 (v2026.09.24-01) a lista e a conversa são as do WME**, e a sala própria (o crachá, o WebSocket do `/sala`, o Durable Object `SalaDO`, o TURN e a rota `presenca`) saiu na fase 4. A história dela (por que era a fila, a presença como conexão, o crachá, o TURN, o recibo pelo DataChannel e os gotchas do socket) saiu do repositório na limpeza de 2026-10-26 e está no git (`git show e1937b8:docs/gotchas.md`, o apêndice). O que decide código hoje está na subseção da troca, mais abaixo. Da época da sala continuam valendo: não há bloqueio de pessoa, a anistia de 9 dias do interruptor, o mandar o pedido aberto (com o transporte novo) e os gotchas da pílula.
 
 **NÃO há bloqueio de pessoa, e isso é decisão, não pendência** (v2026.08.22-08, do owner). O portão do login já exige **L2+ E Area Manager** (L3+ até 2026-09-09): quem entra passou por um filtro de maturidade da própria comunidade, e abuso se resolve **no Waze**, onde a conta existe de verdade — não numa lista local que só vale num aparelho. O recurso chegou a existir e foi removido inteiro; enquanto durou, custou TRÊS defeitos em dois dias (beco sem saída, contagem inflada e uma folha que se contradizia). `tools/smoke-presenca.mjs` cobra a AUSÊNCIA do RECURSO: nenhum seletor de bloqueio e nenhuma chave no objeto `Presenca`. **A faxina do resíduo saiu em v2026.09.10-06** — o app apagava `waze_places_bloqueados` do aparelho na carga, e isso era migração; foi removida junto com o resto do legado, a pedido do owner, com o argumento de que o app não está em produção. Consequência assumida: num aparelho que teve o recurso a chave permanece até alguém limpar, e ela guardava ids de peer. Se a demanda voltar, releia o saldo antes.
 
@@ -602,8 +595,6 @@ Decidido pelo owner em 2026-09-23, com o relatório medido na mesa: o app vai us
 - **Fixture de gRPC só com as contas do owner** (antigerme 12444348, cafanha 183164343). A lista de online gravada tinha terceiros e ficou de fora; a resposta do `GetMessagingProvider` (token e chave) nunca entra. Conferido por leitura ESTRUTURAL do protobuf: procurar dígitos nos bytes crus deu dois falsos positivos (um id colado na etiqueta do campo seguinte e um pedaço de uuid).
 - **Validar exige as duas contas ao mesmo tempo**, como o owner avisou: testar uma, fechar e abrir a outra mede a expiração, não a presença.
 - **Validado em PRODUÇÃO com duas contas entrando pelo app** (2026-09-25, uma L6+AM e uma L2+AM): cada uma aparece em "Triando agora" pra outra, com a distância; a mensagem chega em ~130 ms pelo tempo real, sem pedido ao nosso servidor, e a resposta em 1,5 s. O recibo "Lida" chegou pelo fluxo 1 e 3 s depois de a outra abrir a conversa, em duas medições, sem reconexão, e a tela mostrou o "Lida" no mesmo instante. O "às vezes só na reconexão seguinte" da fase 3 não se repetiu. Pra medir o "Lida", o seletor é `#conversaMsgs .conversa-lida`: o `.presenca-recibo` é um SVG, com o estado na classe e no `aria-label`.
-
-> **Histórico dos lotes desta seção (15 parágrafos, R5–R24):** `docs/lotes.md` → «A presença e o chat DO WME — a troca da sala própria (fases 1 a 4)». As regras que ainda valem estão nos itens acima; o parágrafo de cada lote guarda o *porquê* e as medições.
 
 ## 🔄 «Manter conectado» — o servidor renova o cookie do Waze (v2026.10.16-01; revisto nos lotes 29 e 30)
 
@@ -771,8 +762,6 @@ Até **500 pedidos** o Waze devolve a fila numa única chamada (`hasMore: false`
 
 **Mas a fila grande vem em PÁGINAS de 500 pedidos, e a página é contada sobre a lista do MOMENTO.** MEDIDO em 2026-09-25, na fila real do Brasil e só lendo, em duas medições. (a) **A divisa repete o local**: os 697 pedidos (com os lidos e os 7 tipos) vieram em 503 + 199 cards; o Waze pagina por PEDIDO, mas cada página traz o LOCAL com todos os pedidos pendentes dele, e o `buildPlacesFromSearch` faz um card por pedido — o local com pedidos dos dois lados vem nas duas páginas (5 repetidos, de 2 locais). (b) **A página anda**: a mesma conta, no mesmo instante, deu 500 + 307 com "lidos também" e 500 + 54 com "só não lidos", e os 4 lidos da página 1 fizeram a página 1 do segundo filtro chegar exatamente 4 pedidos mais fundo — a página é contada DEPOIS dos filtros, sobre a lista do momento. Cada pedido que a pessoa trata (ou que outro editor resolve) SOBE os de baixo, e cada pedido novo os DESCE. O app pedia a "próxima página" quando sobravam 3 cards, ou seja depois de a pessoa tratar a página 1, e ela vinha vazia: "Tudo limpo!" com dezenas de pendentes (54 na fila do owner naquele dia), que só apareciam ao atualizar. **Desde v2026.09.25-02 a busca SEMPRE relê a partir da página 1** e tira o que já passou pela fila (`pedidosQueEntraramNaFila`, zerado no `resetQueue`; filtro `semOsQueJaPassaramPelaFila`, depois do `semOsJaDecididos`). Ela anda pelas páginas enquanto não acha pedido novo — no "lidos também" as primeiras são as já lidas, que continuam pendentes lá — e para quando a fila tem com o que seguir (algo novo, e mais que `PREFETCH_THRESHOLD`), no fim, ou num dos tetos (`MAX_EMPTY_PAGES`, `MAX_PAGINAS_POR_BUSCA`). Custa o mesmo que antes: uma leitura por busca, mais só onde as primeiras páginas já são conhecidas. O D13 conta POR PÁGINA (`bloqueadosPorPagina`), senão cada releitura somaria o mesmo bloqueado de novo. **Sem rede a busca nem tenta**: com card na fila ela espera calada (antes desistia da fila com um toast vermelho), e com a fila vazia a tela é a de "sem sinal", que a volta da rede refaz. O que passou pela pessoa só volta ao atualizar, como sempre: o pulado e o lido do "lidos também" não voltam na mesma fila. **Com a fila VAZIA, a volta da rede (e o "Tentar de novo") É um atualizar** (`retomarBusca`): uma correção desta mesma auditoria a trocou por "só retomar", e quem pulava tudo sem sinal (o card de foto sem a foto) via a fila terminar vazia com os pedidos pendentes — achado pela auditoria EM PRODUÇÃO, e hoje a seção 9b do smoke do offline o cobre. Com card na tela, só retoma: o reset arrancaria o card da mão. A busca que releu anota `busca.reposicao` no diário. **Uma ordem que não é a padrão lê TODAS as páginas antes do primeiro card** (`ordemPrecisaDaFilaInteira`, v2026.09.29-01): "Mais antigos" e as de distância ordenavam só a página 1, e o mais antigo de uma fila de 554 aparecia no card 499. "Mais antigos" pede `SORTING_UPDATE_TIME_ASC` ao Waze (lista branca `ORDENS_DA_BUSCA` no core), que ordena pela atualização do LOCAL e não pela data do PEDIDO — por isso ler tudo, e a `assinaturaDeBusca` leva `ordemDoWaze()`. Custo MEDIDO: no total da triagem as leituras são as mesmas; a abertura ganha uma leitura por página (554 pedidos: 2 em vez de 1). **E quem decide é a ordem que VALE** (`ordemValida`), não a salva: "Perto de…" sem referência é ordem por data e lê uma página; antes do perfil, a salva segue valendo. `test/busca-viva.test.mjs` roda o `fetchNextPage` de verdade contra um Waze com essa regra — com o CONTROLE de que a lógica antiga perde pedidos nele —, e o bloco "A fila VIVA" do smoke de layout faz o mesmo com o ✕ de verdade e a rede caindo no meio. **A página da sessão que caiu não entra** (R14-1-02): o `fetchNextPage` guarda a `epocaDaSessao` e descarta a resposta que volta com outra — sem sessão na volta, ela vale como a busca 401 (`loadError`, `hasMore` falso), que a renovação recompõe; com a sessão já renovada, o laço busca de novo; o fim do `startFetching` não desenha nem anuncia sem sessão (harness que fatia o `fetchNextPage` declara `epocaDaSessao`). **Com card, o `retomarBusca` repõe pelo `maybePrefetch`**, sem o `startFetching` (que redesenhava o card e largava o foco do teclado no `<body>`, R14-6-01). **Com a fila vazia e uma janela do Desfazer aberta, o refazer SEM gesto espera o fim dela** — QUALQUER janela (`janelaDoDesfazerAberta`: a do card e as três da foto ampliada, aprovar, excluir e renomear). O `aoFim` de cada uma é atendido por `atenderOFimDaJanela` (fonte única, numa microtarefa) quando a janela acaba — a escrita saiu ou foi desfeita —, nunca no `cancel`/`cancelar` da sessão que acaba, e o `resetQueue` despacha as da foto com `semORefazerAdiado` (senão a fila seria refeita duas vezes): a rede que volta e o perfil que chega despachavam a última decisão em ~1,4 s, e a exclusão ou o nome da foto em ~0,9 s (R14-2-05, R14-6-02 e o irmão da foto, pedido extra). O "Tentar de novo" é gesto (`retomarBusca({ gesto: true })`) e despacha como o ↻. Harness que fatia o `retomarBusca` provê `maybePrefetch`; o que fatia o `retomarBusca` ou a `refazerFilaReal` leva a `janelaDoDesfazerAberta` e as três pendências da foto em `null` (no buraco negro, a janela seria verdadeira e a fila nunca seria refeita); o que fatia o `scheduleAction` ou uma janela da foto leva a `atenderOFimDaJanela`.
 
-> **Histórico dos lotes desta seção (11 parágrafos, R5–R24):** `docs/lotes.md` → «Resposta do `buscar-places`». As regras que ainda valem estão nos itens acima; o parágrafo de cada lote guarda o *porquê* e as medições.
-
 ### Filtro de permissão de edição
 
 `handleBuscarPlaces` (em `server/core.mjs`) **descarta** venues que o usuário logado não pode editar antes de devolver pro app. Campo `venue.permissions` é um **bitmask signed 32-bit**:
@@ -883,8 +872,6 @@ Editar `js/app.js` sem `npm run js` deixou o navegador sem `enfileirarSaida` enq
 
 ---
 
-> **Histórico dos lotes desta seção (1 parágrafos, R5–R24):** `docs/lotes.md` → «📤 Fila de saída — `transient` deixa de ser perda». As regras que ainda valem estão nos itens acima; o parágrafo de cada lote guarda o *porquê* e as medições.
-
 ## 📴 Disponível offline — o TRABALHO sobrevive à sombra de sinal
 
 Degrau 2, v2026.09.21-08. O Degrau 1 (fila de saída) fez a **ação** sobreviver; isto faz o **trabalho** sobreviver. Toggle **opt-in ESTRITO** (`=== true`), **desmarcado de fábrica**, última linha da aba Preferências — decisão do owner: *"é exceção e não o padrão"*. **Quem não marca não paga NADA**: nem byte, nem requisição, nem sequer uma URL de foto diferente.
@@ -966,8 +953,6 @@ Degrau 2, v2026.09.21-08. O Degrau 1 (fila de saída) fez a **ação** sobrevive
 Antes/depois com o smoke novo (o MESMO arquivo nos dois lados): **13 reprovações na main de antes, 0 no conserto** — e cada uma nomeia um sintoma do relato. Nomear certo exigiu um conserto no próprio instrumento: a ESTRADA classificava "card de foto" pelo que estava VISÍVEL, então a foto escondida pelo aviso contava como card de mapa e a falha saía como "os mapas desenharam 3/4". Hoje quem diz se o card tem foto é o PEDIDO.
 
 ---
-
-> **Histórico dos lotes desta seção (7 parágrafos, R5–R24):** `docs/lotes.md` → «📴 Disponível offline — o TRABALHO sobrevive à sombra de sinal». As regras que ainda valem estão nos itens acima; o parágrafo de cada lote guarda o *porquê* e as medições.
 
 ## 🧠 AppState e fila de places
 
@@ -1511,8 +1496,6 @@ mesma pergunta em 40 bytes por elemento.
 
 ---
 
-> **Histórico dos lotes desta seção (7 parágrafos, R5–R24):** `docs/lotes.md` → «🔬 Diagnóstico do modo dev — o que ele captura, e por quê». As regras que ainda valem estão nos itens acima; o parágrafo de cada lote guarda o *porquê* e as medições.
-
 ## 🎨 Padrões de UI
 
 - **Header**: logo + perfil (avatar/nome/rank — é o BOTÃO `#perfilBtn`, que abre o Histórico e as Preferências e leva o ponto da conquista nova; só o nome e a foto, nunca o `flex-1` de fora, com `px-1 -mx-1` pra não tirar pixel do nome, medido em 32 combinações) + refresh + filtros + ajuda (o botão de tema ☀/🌙 SAIU em v2026.10.26-02, decisão do dono: o tema se escolhe nas Preferências, e os 44 px dele foram pro nome — no Fold `antigerme` cabe inteiro sem o ícone de gente, e com ele o nome aparece; a 320 px com o ícone `antigerme` cabe inteiro; a 360 px e no aparelho do dono `world_12345678` cabe inteiro com o ícone. Medido com o botão escondido; `test/tema.test.mjs` reprova se ele voltar). Alvos de toque mínimos 44px (`min-w-[44px] min-h-[44px]`) — régua M3 (48dp) / HIG (44pt); manter em botões novos
@@ -1563,8 +1546,6 @@ mesma pergunta em 40 bytes por elemento.
 - **Realce só onde a tela ESCONDE, nunca onde ela repete.** O diff já mostra antigo e novo lado a lado; marcar a diferença de `Bom Atacarejo` → `Strapasson` é explicar o que o editor acabou de ler — e o owner recusou duas propostas assim (*"os editores de mapas não são assim tão burros para precisar dessa muleta"*). O que o olho NÃO pega é a diferença que **não muda o tamanho** do texto: `El Prat T1` → `El Prat T2`, `Terminal 2F` → `Terminal 2C`, `Inglesia` → `Iglesia`. Sem mudança de tamanho não há pista de forma. `realceDoMiolo()` em `app.js` é a fonte única da regra, e os três limiares saíram de 453 mudanças reais de 13 países — cada um travado em `test/layout.test.mjs` por um caso REAL logo acima e logo abaixo, porque afrouxar um limiar sem isso passa verde. **E o realce tem que sobreviver ao `line-clamp`**: na primeira versão ele saía invisível em todo aparelho estreito, cortado junto com o fim do nome — daí a janela em volta da diferença, que de quebra conserta o card já esconder ali a informação que decide.
 - **Contador que muda de 1 não conta, PULA.** Entre 12 e 13 não existe inteiro pra mostrar: contar é invisível. `setCount` pula (`.count-pop`) sempre que o número muda e só conta quando |Δ| ≥ 2 (ex.: fila carregando 0 → 191). Toda escrita direta PARA a contagem em curso: o quadro seguinte da anterior escrevia o alvo velho por cima, e o "Restam" ficava com o número velho. **O pulo é só `animation`** (transform, que não mexe no layout): o `display: inline-block` que o `.count-pop` tinha crescia o placar 2 px no SE 2016 e no Fold e empurrava o card a cada ✕ ↑ ✓ (medido nos dois motores); o smoke de layout mede a altura do placar e o topo do card no meio do pulo, com contraprova.
 - **Versão visível**: fim do modal de Ajuda, `v{verLabel(APP_VERSION)}` (ex.: `v2026.07.18-01`) — sempre bump o serial em mudança visual (formato `YYYYMMDDnn`, ver seção do Service Worker). Morava num `<footer>` fixo até v2026.07.27-05; saiu porque custava 40px de rolagem em toda tela e **não devolvia um pixel de card** (o card é `dvh`, não sobra de layout) — num 393×852 esses 40px eram 65% de toda a rolagem, e rolagem disputa com o gesto de "pular". O botão ⓘ está no header **inclusive deslogado**, que é exatamente quando se pergunta "qual versão você está vendo?"
-
-> **Histórico dos lotes desta seção (3 parágrafos, R5–R24):** `docs/lotes.md` → «🎨 Padrões de UI». As regras que ainda valem estão nos itens acima; o parágrafo de cada lote guarda o *porquê* e as medições.
 
 ### PWA: splash e capturas de instalação
 
@@ -1830,7 +1811,7 @@ Bugs já encontrados e corrigidos — **não repita**:
 
 | Decisão | PR/Commit | Por quê |
 |---|---|---|
-| **Backend JS (Cloudflare/Node), core+adapters** | v3.0 | Sem servidor pra manter, escala automática, edge; VM Node como fallback. Padrão validado no botequei. Ver `docs/cloudflare-migration.md` |
+| **Backend JS (Cloudflare/Node), core+adapters** | v3.0 | Sem servidor pra manter, escala automática, edge; VM Node como fallback (o passo a passo está no README, «Opção B»). Padrão validado no botequei |
 | Sessões em Workers KV (CF) / filesystem (VM), AES-256-GCM | v3.0 | KV tem TTL nativo; GCM é autenticado; store injetado no core |
 | ~~`start.sh` / `/tmp` / `.htaccess`~~ | v2.x (removido na v3.0) | Eram do stack PHP+Apache; histórico só |
 | Total "Restam" via `serverTotal` (não `queue.length`) | (PR add-total-pendentes) | Skip não deveria mudar contador — usuário não tratou |
