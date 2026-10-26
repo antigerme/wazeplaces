@@ -75,7 +75,7 @@
       "sizes": "780x1688",
       "type": "image/jpeg",
       "form_factor": "narrow",
-      "label": "Filters for the seven Waze request types, with preferences and history"
+      "label": "Filters: the seven Waze request types as chips, grouped by place and photo"
     },
     {
       "src": "icons/screenshots/desktop.jpg",

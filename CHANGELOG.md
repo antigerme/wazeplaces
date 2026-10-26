@@ -8,6 +8,13 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.10.26-03
+**As capturas da instalação foram refeitas com a tela de hoje.** São as imagens que o Chrome mostra quando oferece instalar o app, e as três miniaturas da tela de entrada saem delas. As de antes eram de agosto: mostravam o botão de tema, um cabeçalho sem ↻ nem funil e o diálogo antigo de «Filtros e Preferências» com três abas.
+
+- **O mesmo jeito de antes:** a fila real, lida só pra leitura com a conta do dono, em inglês (o Chrome não deixa variar as capturas por idioma), no tema escuro, num celular de 390 px e no computador. O nome de quem mandou cada pedido aparece como «wazer», e a foto de perfil do dono ficou de fora. Escolhidas sem rosto, sem placa legível e sem telefone de pessoa.
+- **As seis telas:** um local novo com foto, uma foto nova ao lado das que o local já tem, o mapa com o antes e o depois, as mudanças propostas, os Filtros novos (os tipos de pedido em chips, por Local e Foto) e o app no computador.
+- **Num celular de até 400 px o logo não aparece no cabeçalho** quando a pessoa está logada (é o espaço do nome, desde a v2026.10.20-03), e as capturas mostram isso como é.
+
 ## v2026.10.26-02
 **O botão de tema (☀/🌙) saiu do cabeçalho** (decisão do dono, com o mockup e a medida na mesa). O tema agora se escolhe só nas Preferências, na linha **Tema** (Auto · Claro · Escuro), que chegou na v2026.10.26-01. O botão era o que tirava o app do «Auto» sem avisar: um toque fixava claro ou escuro, e o app parava de seguir o aparelho.
 
