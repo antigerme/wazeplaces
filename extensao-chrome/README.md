@@ -405,7 +405,7 @@ A sessão que o servidor ainda criar depois de a ida ser cancelada (ele não sab
 embora, e pode seguir a ida até o fim) fica sem dono, e vence sozinha (em até 21 dias sem uso), como na
 0.3.3.
 
-**Precisa ser publicada** pra valer. Se a 0.3.3 ainda não tiver sido publicada, a 0.3.4 a leva junto.
+**Publicada** na Chrome Web Store (conferido em 2026-10-26: o pacote da loja é igual a esta pasta, fora o `update_url` e o `_metadata/` que a loja acrescenta).
 
 | app | extensão | resultado |
 |---|---|---|
