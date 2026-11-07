@@ -8,6 +8,13 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.11.07-01
+**As linhas brancas finas na lateral direita e embaixo, ao puxar o card rápido pra direita, eram barras de rolagem da página.** O card que sai gira e passa da borda da tela; pra direita esse excesso fazia a página ganhar rolagem pelos ~350 ms da saída, e o app desenhava as barras. A da direita e a de baixo aparecem juntas, por isso a impressão de duas linhas. Medido num celular de 393×740: a página ganhava até 689 px de largura e 36 de altura pra direita, e **nada** pra esquerda ou parada. O vídeo do dono mostra a barra de baixo ocupando 40% da largura no quadro logo depois do puxão.
+
+- **O conserto:** enquanto o card está sendo arrastado, saindo ou voltando pro lugar, a página não ganha barra de rolagem (só nesse intervalo). O lado de **largura** é cortado sempre; o de **altura** só se a página não rolava antes, porque em tela baixa ou com texto grande ela rola de propósito, e cortar aí fazia a rolagem pular pro topo e a coluna alargar no meio do arraste (medido a 360×740 com texto 1,5×: a rolagem ia de 19 px a 0). Vale também pro ✕ e ✓ por botão e pelas setas do teclado, que fazem o mesmo gesto de saída.
+- **Barra da página no tema escuro:** ela saía com as cores do tema claro (quase branca sobre o fundo escuro), porque a regra do tema escuro não alcançava o próprio `<html>`. Agora segue o tema, em qualquer barra que um dia apareça.
+- **Pra quem usa o modo dev:** o diagnóstico passa a registrar o excesso de rolagem da página e acusa o alerta `paginaRolaComCardNoAr` se, com o card no ar, a página ainda tiver barra. A captura do arraste cai exatamente nesse instante.
+
 ## v2026.10.26-03
 **As capturas da instalação foram refeitas com a tela de hoje.** São as imagens que o Chrome mostra quando oferece instalar o app, e as três miniaturas da tela de entrada saem delas. As de antes eram de agosto: mostravam o botão de tema, um cabeçalho sem ↻ nem funil e o diálogo antigo de «Filtros e Preferências» com três abas.
 

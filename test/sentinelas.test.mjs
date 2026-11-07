@@ -639,3 +639,46 @@ test('R12-4-04: a marca do gesto é a ESPERA do FAB — vale enquanto o gesto du
   assert.deepEqual(chaves(montar()(geometria(depois))), ['indicadorEscondido'],
     'CONTROLE: o FAB parado em cima do número, sem gesto, deixou de ser acusado');
 });
+
+// ═══ a página com barra de rolagem COM O CARD NO AR (relato de 2026-11-07) ═══
+// O card que sai pra DIREITA gira e passa da janela, e a página ganhava
+// rolagem nos dois eixos por ~350 ms: as "linhas brancas" finas nas bordas
+// direita e de baixo. O conserto liga `html.card-em-voo` (overflow: hidden)
+// durante o gesto. Excesso SOZINHO não é o defeito (o `hidden` o deixa), e
+// rolagem FORA do gesto também não (a página rola na vertical em tela baixa).
+test('sentinelas: página com barra de rolagem COM o card no ar — dispara (os números medidos a 393×740)', () => {
+  const c = sao();
+  c.paginaRola = { excessoX: 689, excessoY: 36, rolaX: true, rolaY: true, cardEmVoo: true };
+  const r = montar()(c);
+  assert.deepEqual(chaves(r), ['paginaRolaComCardNoAr']);
+  assert.equal(r[0].excessoX, 689);
+  assert.equal(r[0].excessoY, 36);
+  // Só o eixo vertical (celular alto, onde só o canto girado desce) também acusa.
+  c.paginaRola = { excessoX: 0, excessoY: 24, rolaX: true, rolaY: true, cardEmVoo: true };
+  assert.deepEqual(chaves(montar()(c)), ['paginaRolaComCardNoAr']);
+});
+
+test('sentinelas: página com o card no ar e o corte LIGADO cala — o excesso fica, a barra não (o controle)', () => {
+  const c = sao();
+  c.paginaRola = { excessoX: 689, excessoY: 36, rolaX: false, rolaY: false, cardEmVoo: true };
+  assert.deepEqual(montar()(c), []);
+});
+
+test('sentinelas: página que JÁ rolava na vertical cala o eixo vertical — o card só alonga a barra que existia', () => {
+  const c = sao();
+  // 360×740 com texto 1,5×: a página já rola (barra clássica de 10 px) e o card soma excesso.
+  c.paginaRola = { excessoX: 0, excessoY: 37, rolaX: false, rolaY: true, cardEmVoo: true, jaRolavaNaVertical: true };
+  assert.deepEqual(montar()(c), []);
+  // O horizontal segue acusando, rolasse a página na vertical ou não.
+  c.paginaRola = { excessoX: 300, excessoY: 37, rolaX: true, rolaY: true, cardEmVoo: true, jaRolavaNaVertical: true };
+  assert.deepEqual(chaves(montar()(c)), ['paginaRolaComCardNoAr']);
+});
+
+test('sentinelas: página rolável FORA do gesto cala — rolar na vertical em tela baixa é de propósito', () => {
+  const c = sao();
+  c.paginaRola = { excessoX: 0, excessoY: 120, rolaX: true, rolaY: true, cardEmVoo: false };
+  assert.deepEqual(montar()(c), []);
+  // Captura velha, sem o campo, também cala (o relatório de antes do v2026.11.07-01).
+  delete c.paginaRola;
+  assert.deepEqual(montar()(c), []);
+});
