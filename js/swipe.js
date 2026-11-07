@@ -79,7 +79,8 @@ function avisarFimDoGesto(card) {
 // baixo desce, então a página ganhava rolagem nos dois eixos pelos ~350 ms da
 // saída — e o app pinta as barras (finas, claras) nas bordas direita e de
 // baixo. MEDIDO no Chromium a 393×740: +689 px de largura e +36 de altura na
-// saída pra direita, ZERO na saída pra esquerda e em repouso; e no vídeo do
+// saída pra direita; pra esquerda ZERO de largura e ~35 de altura (o canto
+// desce dos dois lados), e em repouso zero; o ✓/✕ por botão faz a mesma saída; e no vídeo do
 // celular do dono, a barra horizontal a 40% da largura no quadro seguinte ao
 // do puxão. A classe liga o corte (`html.card-em-voo`, no styles.css) só
 // enquanto há gesto NO CARD — a página rola na vertical de propósito em tela

@@ -662,7 +662,9 @@ for (const est of ESTADOS.filter((e) => !['deslogado', 'filaVazia', 'desfazerCor
 // cai do lado que rola e o canto de baixo desce, e a página ganhava rolagem nos
 // dois eixos por ~350 ms — as barras finas e claras na borda direita e de baixo
 // (vídeo do dono, 2026-11-07; medido: +689 px de largura e +36 de altura a
-// 393×740, ZERO pra esquerda e em repouso). O conserto é `html.card-em-voo`
+// 393×740 pra direita; pra esquerda ZERO de largura e ~35 de altura, e em
+// repouso zero — o canto girado desce dos dois lados). O botão ✓/✕ faz a
+// mesma saída e tem os mesmos cenários. O conserto é `html.card-em-voo`
 // (`sincronizarCorteDaPagina`, no swipe.js), ligado só durante o gesto.
 //
 // MEDE O QUE A PESSOA VERIA: há excesso E o viewport rola nele. O `hidden` não
@@ -711,14 +713,24 @@ console.log('\n7. CARD NO AR — arrastando, saindo ou voltando, a página não 
     const repouso = await page.evaluate(AMOSTRA);
     // Começa no TOPO do card: com texto grande o centro cai na área que rola (`.card-content-rola`), que não inicia arraste.
     const a = await page.evaluate(() => { const r = cardDaFrente().getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + Math.min(60, r.height / 4) }; });
-    const alvo = { direita: [160, 8], esquerda: [-160, 8], cima: [0, -200], volta: [30, 2] }[dir];
-    await page.mouse.move(a.x, a.y);
-    await page.mouse.down();
-    await page.mouse.move(a.x + alvo[0], a.y + alvo[1], { steps: 6 });
-    await page.waitForTimeout(120);                       // o card segue o dedo: o excesso já existe
-    const segurando = await page.evaluate(AMOSTRA);
-    await page.evaluate(GRAVAR, 700);                     // grava a saída (ou a volta) quadro a quadro
-    await page.mouse.up();
+    // `botao-lido` / `botao-rejeitar`: o ✓/✕ fazem a MESMA saída (triggerSwipe → animateSwipeOut) sem arraste.
+    const botao = { 'botao-lido': '.card-btn-read', 'botao-rejeitar': '.card-btn-reject' }[dir];
+    let segurando;
+    if (botao) {
+      await page.evaluate(GRAVAR, 700);                   // grava a saída quadro a quadro, a partir do clique
+      await page.evaluate((sel) => cardDaFrente().querySelector(sel).click(), botao);
+      await page.waitForTimeout(120);                     // o card já está saindo: o excesso já existe
+      segurando = await page.evaluate(AMOSTRA);
+    } else {
+      const alvo = { direita: [160, 8], esquerda: [-160, 8], cima: [0, -200], volta: [30, 2] }[dir];
+      await page.mouse.move(a.x, a.y);
+      await page.mouse.down();
+      await page.mouse.move(a.x + alvo[0], a.y + alvo[1], { steps: 6 });
+      await page.waitForTimeout(120);                     // o card segue o dedo: o excesso já existe
+      segurando = await page.evaluate(AMOSTRA);
+      await page.evaluate(GRAVAR, 700);                   // grava a saída (ou a volta) quadro a quadro
+      await page.mouse.up();
+    }
     const fim = await esperarNaPagina(page, FIM_DO_GESTO, 8000, 100);
     const quadros = await page.evaluate(() => window.__quadros);
     const depois = await page.evaluate(AMOSTRA);
@@ -731,7 +743,7 @@ console.log('\n7. CARD NO AR — arrastando, saindo ou voltando, a página não 
     .filter((k) => JSON.stringify(r.repouso[k]) !== JSON.stringify(r.segurando[k]));
 
   // ── A. A página que NÃO rola em repouso: sem barra em nenhum eixo, em toda saída ──
-  for (const dir of ['direita', 'esquerda', 'cima', 'volta']) {
+  for (const dir of ['direita', 'esquerda', 'cima', 'volta', 'botao-lido', 'botao-rejeitar']) {
     const r = await puxar(dir);
     const onde = `card no ar/${dir}`;
     if (r.repouso.classe || r.repouso.ex !== 0 || r.repouso.ey !== 0) dizer(`${onde}: a fixture já nasce com a página rolável`, JSON.stringify(r.repouso));
@@ -748,9 +760,9 @@ console.log('\n7. CARD NO AR — arrastando, saindo ou voltando, a página não 
     // nos DOIS eixos a 393×740 (senão "sem barra" seria vácuo), e a pra ESQUERDA não (o lado que não rola).
     const picoX = Math.max(0, ...r.quadros.map((q) => q.ex));
     const picoY = Math.max(0, ...r.quadros.map((q) => q.ey));
-    if (dir === 'direita' && (picoX <= 0 || picoY <= 0)) dizer('card no ar/direita: CONTROLE — a saída não gerou excesso nos DOIS eixos: o instrumento está cego', `x=${picoX} y=${picoY}`);
+    if ((dir === 'direita' || dir === 'botao-lido') && (picoX <= 0 || picoY <= 0)) dizer('card no ar/direita: CONTROLE — a saída não gerou excesso nos DOIS eixos: o instrumento está cego', `x=${picoX} y=${picoY}`);
     if (dir === 'volta' && picoX > 60) dizer('card no ar/volta: o arraste curto virou SAÍDA (flick) — o cenário não mede a volta', String(picoX));
-    if (dir === 'esquerda' && picoX > 0) dizer('card no ar/esquerda: CONTROLE — a saída pra esquerda gerou excesso de largura (esperado: zero, o lado que não rola)', String(picoX));
+    if ((dir === 'esquerda' || dir === 'botao-rejeitar') && picoX > 0) dizer(`card no ar/${dir}: CONTROLE — a saída pra esquerda gerou excesso de largura (esperado: zero, o lado que não rola)`, String(picoX));
     console.log(`  ok ${dir.padEnd(8)} ${resumo(r)}`);
   }
 

@@ -4,8 +4,8 @@
 // cai do lado que rola e o canto de baixo desce, então a página ganhava
 // rolagem nos dois eixos pelos ~350 ms da saída, e o app pinta as barras
 // (finas, claras) nas bordas direita e de baixo: as "linhas brancas" do vídeo.
-// MEDIDO a 393×740: +689 px de largura e +36 de altura pra direita, ZERO pra
-// esquerda e em repouso. O conserto liga `html.card-em-voo` (overflow: hidden)
+// MEDIDO a 393×740: +689 px de largura e +36 de altura pra direita; pra esquerda
+// ZERO de largura e ~35 de altura (o canto girado desce dos dois lados); em repouso zero. O conserto liga `html.card-em-voo` (overflow: hidden)
 // só durante o gesto — `sincronizarCorteDaPagina`, no swipe.js.
 //
 // O que o navegador faz com isso mora no `tools/smoke-fluxo.mjs` (seção 7, com
