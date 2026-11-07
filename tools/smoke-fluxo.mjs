@@ -26,7 +26,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as dormir } from 'node:timers/promises';
-import { carregarPlaywright, abrirNavegador, motorPedido, resumoDosPulos, ruidoDoMotor } from './navegador.mjs';
+import { carregarPlaywright, abrirNavegador, motorPedido, pularForaDoChromium, resumoDosPulos, ruidoDoMotor } from './navegador.mjs';
 import { subirServidorLocal } from './servidor-local.mjs';
 import { esperarNaPagina } from './esperar-saida.mjs';
 
@@ -326,8 +326,8 @@ const dizer = (msg, det) => { falhas++; console.log(`  ✗ ${msg}${det ? ' — '
 const MOTOR = motorPedido();
 const browser = await abrirNavegador(pw);
 
-async function novaPagina({ viewport = { width: 412, height: 915 } } = {}) {
-  const ctx = await browser.newContext({ viewport, serviceWorkers: 'block', locale: 'pt-BR' });
+async function novaPagina({ viewport = { width: 412, height: 915 }, navegador = browser } = {}) {
+  const ctx = await navegador.newContext({ viewport, serviceWorkers: 'block', locale: 'pt-BR' });
   const page = await ctx.newPage();
   const errosJs = [];
   const escritas = [];
@@ -678,7 +678,7 @@ console.log('\n7. CARD NO AR — arrastando, saindo ou voltando, a página não 
     const rolaY = cs.overflowY !== 'hidden' && cs.overflowY !== 'clip';
     const ex = e.scrollWidth - e.clientWidth, ey = e.scrollHeight - e.clientHeight;
     const r = (sel) => { const el = document.querySelector(sel); if (!el) return null; const b = el.getBoundingClientRect(); return [Math.round(b.x), Math.round(b.y), Math.round(b.width), Math.round(b.height)]; };
-    return { classe: h.classList.contains('card-em-voo'), ex, ey, barra: (ex > 0 && rolaX) || (ey > 0 && rolaY),
+    return { classe: h.classList.contains('card-em-voo'), ex, ey, barraX: ex > 0 && rolaX, barraY: ey > 0 && rolaY, barra: (ex > 0 && rolaX) || (ey > 0 && rolaY),
       scrollY: Math.round(window.scrollY), clientW: e.clientWidth, header: r('header'), placar: r('#placar'), pilha: r('#cardStack') };
   };
   const GRAVAR = (extra) => {
@@ -690,6 +690,7 @@ console.log('\n7. CARD NO AR — arrastando, saindo ou voltando, a página não 
       const ex = e.scrollWidth - e.clientWidth, ey = e.scrollHeight - e.clientHeight;
       window.__quadros.push({
         classe: h.classList.contains('card-em-voo'), ex, ey,
+        barraX: ex > 0 && cs.overflowX !== 'hidden' && cs.overflowX !== 'clip',
         barra: (ex > 0 && cs.overflowX !== 'hidden' && cs.overflowX !== 'clip') || (ey > 0 && cs.overflowY !== 'hidden' && cs.overflowY !== 'clip'),
         scrollY: Math.round(window.scrollY), clientW: e.clientWidth,
       });
@@ -699,9 +700,9 @@ console.log('\n7. CARD NO AR — arrastando, saindo ou voltando, a página não 
   const FIM_DO_GESTO = () => !document.documentElement.classList.contains('card-em-voo') && !window.isSwipeAnimating();
   const TELA = { width: 393, height: 740 };   // onde o canto girado também passa da borda de BAIXO (+36 px medidos)
 
-  // dir: direita | esquerda | cima | volta (arraste curto, solto sem decidir)
-  async function puxar(dir, { semConserto = false, corteVerticalSempre = false, viewport = TELA, css = '', rolarAteOFim = false } = {}) {
-    const { ctx, page, errosJs } = await novaPagina({ viewport });
+  // dir: direita | esquerda | cima | volta (arraste de 30 px, abaixo do flick de 40: solto, o card VOLTA e nada decide)
+  async function puxar(dir, { semConserto = false, corteVerticalSempre = false, viewport = TELA, css = '', rolarAteOFim = false, navegador } = {}) {
+    const { ctx, page, errosJs } = await novaPagina({ viewport, navegador });
     if (css) { await page.addStyleTag({ content: css }); await page.waitForTimeout(350); }
     if (semConserto) await page.addStyleTag({ content: 'html.card-em-voo { overflow: visible !important; }' });
     // O conserto de ANTES (corte vertical incondicional), pra provar que o guard vê o deslocamento.
@@ -710,7 +711,7 @@ console.log('\n7. CARD NO AR — arrastando, saindo ou voltando, a página não 
     const repouso = await page.evaluate(AMOSTRA);
     // Começa no TOPO do card: com texto grande o centro cai na área que rola (`.card-content-rola`), que não inicia arraste.
     const a = await page.evaluate(() => { const r = cardDaFrente().getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + Math.min(60, r.height / 4) }; });
-    const alvo = { direita: [160, 8], esquerda: [-160, 8], cima: [0, -200], volta: [60, 4] }[dir];
+    const alvo = { direita: [160, 8], esquerda: [-160, 8], cima: [0, -200], volta: [30, 2] }[dir];
     await page.mouse.move(a.x, a.y);
     await page.mouse.down();
     await page.mouse.move(a.x + alvo[0], a.y + alvo[1], { steps: 6 });
@@ -748,6 +749,7 @@ console.log('\n7. CARD NO AR — arrastando, saindo ou voltando, a página não 
     const picoX = Math.max(0, ...r.quadros.map((q) => q.ex));
     const picoY = Math.max(0, ...r.quadros.map((q) => q.ey));
     if (dir === 'direita' && (picoX <= 0 || picoY <= 0)) dizer('card no ar/direita: CONTROLE — a saída não gerou excesso nos DOIS eixos: o instrumento está cego', `x=${picoX} y=${picoY}`);
+    if (dir === 'volta' && picoX > 60) dizer('card no ar/volta: o arraste curto virou SAÍDA (flick) — o cenário não mede a volta', String(picoX));
     if (dir === 'esquerda' && picoX > 0) dizer('card no ar/esquerda: CONTROLE — a saída pra esquerda gerou excesso de largura (esperado: zero, o lado que não rola)', String(picoX));
     console.log(`  ok ${dir.padEnd(8)} ${resumo(r)}`);
   }
@@ -758,20 +760,35 @@ console.log('\n7. CARD NO AR — arrastando, saindo ou voltando, a página não 
   if (barrasSem === 0) dizer('card no ar: CONTROLE — com o conserto neutralizado o guard NÃO viu a barra; ele está cego', resumo(c));
   else console.log(`  ok controle: sem o corte o guard vê a barra (${barrasSem} amostras) — ${resumo(c)}`);
 
-  // ── C. A página que JÁ ROLA na vertical (texto 1,5×: barra clássica de 10 px, rolagem em 19): ──
-  // o corte vertical tirava a barra e levava a rolagem pro topo no meio do arraste. Nada pode MEXER.
-  const JA_ROLA = { viewport: { width: 360, height: 740 }, css: 'html { font-size: 150%; }', rolarAteOFim: true };
-  const j = await puxar('direita', JA_ROLA);
-  if (!(j.repouso.ey > 0 && j.repouso.scrollY > 0)) dizer('card no ar/página que já rola: a fixture NÃO rola em repouso — o cenário não prova nada', JSON.stringify(j.repouso));
-  const moveu = deslocou(j);
-  if (moveu.length) dizer('card no ar/página que já rola: segurar o card DESLOCOU a página', moveu.map((k) => `${k}: ${JSON.stringify(j.repouso[k])} → ${JSON.stringify(j.segurando[k])}`).join(' · '));
-  if (j.quadros.some((q) => q.barra && q.ex > 0)) dizer('card no ar/página que já rola: a saída pra direita deu barra HORIZONTAL');
-  if (j.depois.scrollY !== j.repouso.scrollY) dizer('card no ar/página que já rola: depois do gesto a rolagem não voltou onde estava', `${j.repouso.scrollY} → ${j.depois.scrollY}`);
-  else console.log(`  ok página que já rola: nada se mexeu (scrollY ${j.repouso.scrollY}, largura útil ${j.repouso.clientW}) — ${resumo(j)}`);
-  // CONTROLE: o corte vertical INCONDICIONAL (o erro de antes) tem que ser visto pelo guard.
-  const k = await puxar('direita', { ...JA_ROLA, corteVerticalSempre: true });
-  if (deslocou(k).length === 0) dizer('card no ar/página que já rola: CONTROLE — com o corte vertical incondicional o guard NÃO viu o deslocamento; ele está cego');
-  else console.log(`  ok controle: o corte vertical incondicional desloca (${deslocou(k).map((n) => `${n}: ${JSON.stringify(k.repouso[n])} → ${JSON.stringify(k.segurando[n])}`).join(' · ')})`);
+  // ── C. A página que JÁ ROLA na vertical (texto 1,5× a 360×740, rolada até o fim) ──
+  // `overflow: hidden` na raiz de uma página que já rola leva a rolagem de volta pro topo e tira a
+  // barra CLÁSSICA (a que ocupa largura): a coluna alarga e o placar desce no meio do arraste. Só
+  // existe com a barra clássica — o Playwright esconde as barras (`--hide-scrollbars`) e só o
+  // Chromium deixa religá-las; o celular tem barra de sobreposição, mas o computador não.
+  if (!pularForaDoChromium(MOTOR, 'card no ar/página que já rola: o deslocamento da barra clássica',
+      'o Playwright esconde as barras (--hide-scrollbars) e só o Chromium deixa religá-las; sem a barra com largura não há deslocamento pra medir')) {
+    const comBarras = await abrirNavegador(pw, { ignoreDefaultArgs: ['--hide-scrollbars'] });
+    const JA_ROLA = { viewport: { width: 360, height: 740 }, css: 'html { font-size: 150%; }', rolarAteOFim: true, navegador: comBarras };
+    for (const dir of ['direita', 'volta']) {
+      const j = await puxar(dir, JA_ROLA);
+      const onde = `card no ar/página que já rola/${dir}`;
+      if (!(j.repouso.ey > 0 && j.repouso.scrollY > 0)) dizer(`${onde}: a fixture NÃO rola em repouso — o cenário não prova nada`, JSON.stringify(j.repouso));
+      if (!(j.repouso.clientW < JA_ROLA.viewport.width)) dizer(`${onde}: a fixture não tem barra CLÁSSICA (largura útil ${j.repouso.clientW}) — o controle ficaria cego`);
+      if (!j.segurando.classe) dizer(`${onde}: arrastando, a classe do corte não ligou`);
+      const moveu = deslocou(j);
+      if (moveu.length) dizer(`${onde}: segurar o card DESLOCOU a página`, moveu.map((k) => `${k}: ${JSON.stringify(j.repouso[k])} → ${JSON.stringify(j.segurando[k])}`).join(' · '));
+      if (j.quadros.some((q) => q.barraX)) dizer(`${onde}: a saída deu barra HORIZONTAL`);
+      if (!j.fim.ok) dizer(`${onde}: o gesto não terminou`);
+      // A rolagem só se compara depois da VOLTA: a saída troca o card e o layout muda por outro motivo.
+      if (dir === 'volta' && j.depois.scrollY !== j.repouso.scrollY) dizer(`${onde}: depois da volta a rolagem não voltou onde estava`, `${j.repouso.scrollY} → ${j.depois.scrollY}`);
+      if (!moveu.length) console.log(`  ok página que já rola/${dir}: nada se mexeu (scrollY ${j.repouso.scrollY}, largura útil ${j.repouso.clientW}) — ${resumo(j)}`);
+    }
+    // CONTROLE: o corte vertical INCONDICIONAL (o erro de antes) tem que ser visto pelo guard.
+    const k = await puxar('direita', { ...JA_ROLA, corteVerticalSempre: true });
+    if (deslocou(k).length === 0) dizer('card no ar/página que já rola: CONTROLE — com o corte vertical incondicional o guard NÃO viu o deslocamento; ele está cego');
+    else console.log(`  ok controle: o corte vertical incondicional desloca (${deslocou(k).map((n) => `${n}: ${JSON.stringify(k.repouso[n])} → ${JSON.stringify(k.segurando[n])}`).join(' · ')})`);
+    await comBarras.close();
+  } // fim do bloco só do Chromium: a página que já rola
 }
 
 await browser.close();
