@@ -111,6 +111,18 @@ function sincronizarCorteDaPagina() {
 // parte do gesto até terminar; terminada, avisa. Só a volta MAIS NOVA avisa: a
 // pessoa pode pegar o card de novo no meio desta, e é a volta DAQUELE arraste
 // que encerra o gesto.
+// O WebKit guarda o overflow rolável que o card girado deixou (medido: o arraste de
+// 30 px que VOLTA fica com `scrollWidth - clientWidth = 29` pra sempre, com o card já
+// parado e com ou sem o corte da página). Reler o layout, transformar ou mexer em
+// `will-change` não limpa; esconder o card limpa, mas leva o foco; ligar e desligar
+// `contain: layout` no mesmo tique limpa e não toca no foco nem pinta nada.
+function refazerOverflowDoCard(card) {
+    if (!card || !card.isConnected) return;
+    card.style.contain = 'layout';
+    void card.offsetWidth;
+    card.style.contain = '';
+}
+
 function voltarProLugar(card) {
     card.style.transition = 'transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)';
     card.style.transform = 'translate(0, 0) rotate(0deg)';
@@ -120,6 +132,7 @@ function voltarProLugar(card) {
     setTimeout(() => {
         card.style.transition = '';
         if (vez !== voltaVez) return;
+        refazerOverflowDoCard(card);
         cardVoltando = null;
         sincronizarCorteDaPagina();
         avisarFimDoGesto(card);

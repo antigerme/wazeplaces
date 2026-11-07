@@ -13,6 +13,7 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 - **O conserto:** enquanto o card está sendo arrastado, saindo ou voltando pro lugar, a página não ganha barra de rolagem (só nesse intervalo). O lado de **largura** é cortado sempre; o de **altura** só se a página não rolava antes, porque em tela baixa ou com texto grande ela rola de propósito, e cortar aí fazia a rolagem pular pro topo e a coluna alargar no meio do arraste (medido a 360×740 com texto 1,5×: a rolagem ia de 19 px a 0). Vale também pro ✕ e ✓ por botão e pelas setas do teclado, que fazem o mesmo gesto de saída.
 - **Barra da página no tema escuro:** ela saía com as cores do tema claro (quase branca sobre o fundo escuro), porque a regra do tema escuro não alcançava o próprio `<html>`. Agora segue o tema, em qualquer barra que um dia apareça.
+- **No Safari/WebKit, o card que volta pro lugar deixava a página 29 px mais larga, calado:** o navegador guardava o overflow do card girado depois da volta (medido, com ou sem o corte). O fim da volta agora manda o card recalcular o overflow, sem esconder nada nem tirar o foco.
 - **Pra quem usa o modo dev:** o diagnóstico passa a registrar o excesso de rolagem da página e acusa o alerta `paginaRolaComCardNoAr` se, com o card no ar, a página ainda tiver barra. A captura do arraste cai exatamente nesse instante.
 
 ## v2026.10.26-03

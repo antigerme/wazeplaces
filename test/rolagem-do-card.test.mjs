@@ -113,6 +113,18 @@ test('rolagem do card: a função é chamada em TODA mudança de estado do gesto
   }
 });
 
+test('rolagem do card: o fim da volta refaz o overflow do card (o WebKit guarda o do card girado), sem esconder o card', () => {
+  const swipe = semComentarioJs(SWIPE);
+  const fim = fatiar(swipe, 'voltarProLugar');
+  // a chamada vem DEPOIS da guarda da volta superada e ANTES de soltar o corte da página
+  assert.match(fim, /if \(vez !== voltaVez\) return;\s*refazerOverflowDoCard\(card\);\s*cardVoltando = null;/,
+    'o timer da volta tem de refazer o overflow antes de soltar a classe do corte');
+  const ref = fatiar(swipe, 'refazerOverflowDoCard');
+  assert.match(ref, /card\.style\.contain = 'layout';\s*void card\.offsetWidth;\s*card\.style\.contain = '';/);
+  // esconder o card (display/visibility) levaria o foco embora: não pode ser o empurrão
+  assert.doesNotMatch(ref, /display|visibility|removeChild|insertBefore/);
+});
+
 test('rolagem do card: o diagnóstico leva a rolagem da página e a sentinela existe', () => {
   const app = ler('js/app.js');
   assert.match(app, /fora\.paginaRola = \{[\s\S]*?excessoX:[\s\S]*?cardEmVoo:/, 'o computado não traz a rolagem da página');
