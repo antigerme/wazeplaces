@@ -198,7 +198,9 @@ test('todo pulo fora do Chromium é NOMEADO, com motivo, e está na lista', () =
   // zerada, 0 no Chromium) — defeito do app que ficou pra decisão.
   // E os dois do lote 27 (R23): os marcadores do mapa em `forcedColors: 'active'` (o WebKit não emula) e a escala do mapa ampliado com o recorte de baixo
   // (o override de `env(safe-area-inset-*)` é do protocolo do Chromium).
-  const ESPERADOS = { 'smoke-browser.mjs': 9, 'smoke-offline.mjs': 9 };
+  // E o do smoke-fluxo (v2026.11.07-01): a página que JÁ rola na vertical com o card no ar só se
+  // mede com a barra clássica, que o Playwright esconde (`--hide-scrollbars`) e só o Chromium religa.
+  const ESPERADOS = { 'smoke-browser.mjs': 9, 'smoke-fluxo.mjs': 1, 'smoke-offline.mjs': 9 };
   const achados = {};
   for (const f of readdirSync(new URL('../tools/', import.meta.url)).filter((x) => x.endsWith('.mjs') && x !== 'navegador.mjs')) {
     const codigo = semComentario(ler(`tools/${f}`));

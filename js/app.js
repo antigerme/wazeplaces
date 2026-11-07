@@ -8852,6 +8852,22 @@ function diagComputado() {
 
         fora.camadasAbertas = diagCamadasAbertas().map((e) => e.id || e.className.slice(0, 40));
         fora.geometria = diagGeometria();
+        // A ROLAGEM DA PÁGINA: o excesso (o `scrollWidth` segue maior com o corte
+        // ligado: `overflow: hidden` tira a BARRA, não o excesso) e se o viewport
+        // rola nele agora. É o que o relato das "linhas brancas" da borda direita
+        // e de baixo (2026-11-07) não tinha como dizer — ver a sentinela
+        // `paginaRolaComCardNoAr` e o `sincronizarCorteDaPagina` (swipe.js).
+        const se = document.scrollingElement || document.documentElement;
+        fora.paginaRola = {
+            excessoX: se.scrollWidth - se.clientWidth, excessoY: se.scrollHeight - se.clientHeight,
+            rolaX: cs.overflowX !== 'hidden' && cs.overflowX !== 'clip',
+            rolaY: cs.overflowY !== 'hidden' && cs.overflowY !== 'clip',
+            cardEmVoo: document.documentElement.classList.contains('card-em-voo'),
+            // A página JÁ rolava na vertical quando o gesto começou (tela baixa,
+            // texto grande): aí o corte só vale no horizontal, e o excesso
+            // vertical que aparece é legítimo (ver `sincronizarCorteDaPagina`).
+            jaRolavaNaVertical: document.documentElement.classList.contains('card-pagina-rola'),
+        };
         // A foto do card da FRENTE: o aviso de "precisa de sinal" está lá, e a
         // foto carregou? Os dois juntos são o defeito do relato de 2026-09-22
         // (ver a sentinela `fotoEscondidaComAviso`). Só o da frente: o de fundo
@@ -10031,6 +10047,27 @@ function diagSentinelas(comp) {
                           cortadaPor: [fimDosBotoes > innerH + 2 ? 'janela' : '', fimDosBotoes > fimDoCartao + 2 ? 'cartão' : ''].filter(Boolean) });
                 }
             }
+        }
+        // 11. A página com barra de rolagem COM O CARD NO AR.
+        //
+        // INVARIANTE desde v2026.11.07-01: o card que arrasta, sai ou volta gira e
+        // passa da janela, e o excesso dava rolagem à página — as barras finas e
+        // claras nas bordas direita e de baixo, só no puxão pra direita. O
+        // `sincronizarCorteDaPagina` liga `html.card-em-voo` (overflow: hidden)
+        // durante o gesto, então com a classe ligada o viewport NÃO rola. Excesso
+        // sozinho não vale (o `hidden` o deixa), nem rolagem fora do gesto (a
+        // página rola na vertical de propósito em tela baixa): o alerta é o
+        // card no ar E o viewport rolável no excesso — a captura do arraste
+        // (`dlogCapturarAuto('arraste')`) cai exatamente aqui.
+        // O vertical só conta se a página NÃO rolava quando o gesto começou: a que
+        // já rola tem barra legítima, e o card só alonga o excesso dela.
+        const pr = comp.paginaRola;
+        if (pr && pr.cardEmVoo && ((pr.excessoX > 1 && pr.rolaX)
+            || (!pr.jaRolavaNaVertical && pr.excessoY > 1 && pr.rolaY))) {
+            diga('paginaRolaComCardNoAr',
+                'com o card no ar a página tem barra de rolagem — o card que sai desenha linhas finas '
+                + 'nas bordas direita e de baixo',
+                { excessoX: pr.excessoX, excessoY: pr.excessoY });
         }
         // NÃO existe sentinela de "modal achatado" por ALTURA, e a ausência é
         // deliberada. Eu escrevi uma (< 25% da janela) e ela não disparou no

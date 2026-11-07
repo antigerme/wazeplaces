@@ -22,6 +22,9 @@ function montar({ largura = 400 } = {}) {
   const doc = {
     addEventListener: (t, fn) => { (ouvintes[t] ||= new Set()).add(fn); },
     removeEventListener: (t, fn) => { if (ouvintes[t]) ouvintes[t].delete(fn); },
+    // O `sincronizarCorteDaPagina` do swipe.js liga `html.card-em-voo` no <html>;
+    // o navegador sempre tem a raiz, o documento de mentira precisa dela.
+    documentElement: { classList: { toggle() {}, contains: () => false, remove() {} } },
   };
   const decidiu = [];
   const relogio = { agora: 1000 };

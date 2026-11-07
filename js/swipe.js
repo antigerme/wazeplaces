@@ -74,19 +74,67 @@ function avisarFimDoGesto(card) {
     try { if (window.aoFimDoGesto) window.aoFimDoGesto(card); } catch (e) { /* nunca derruba o gesto */ }
 }
 
+// A PÁGINA NÃO ROLA enquanto o card voa. O card gira (até 30°) e sai a 1,5× a
+// largura da janela: pra DIREITA o excesso cai do lado que rola, e o canto de
+// baixo desce, então a página ganhava rolagem nos dois eixos pelos ~350 ms da
+// saída — e o app pinta as barras (finas, claras) nas bordas direita e de
+// baixo. MEDIDO no Chromium a 393×740: +689 px de largura e +36 de altura na
+// saída pra direita; pra esquerda ZERO de largura e ~35 de altura (o canto
+// desce dos dois lados), e em repouso zero; o ✓/✕ por botão faz a mesma saída; e no vídeo do
+// celular do dono, a barra horizontal a 40% da largura no quadro seguinte ao
+// do puxão. A classe liga o corte (`html.card-em-voo`, no styles.css) só
+// enquanto há gesto NO CARD — a página rola na vertical de propósito em tela
+// baixa, então nada de cortar a raiz o tempo todo. Exige o card no DOM: o
+// arraste ÓRFÃO (ver o `handleDragStart`) deixa o `isDragging` preso, e uma
+// classe presa travaria a rolagem da página inteira.
+function sincronizarCorteDaPagina() {
+    const vivo = (card) => !!card && card.isConnected;
+    const emVoo = (isDragging && vivo(currentCard)) || vivo(cardVoltando) || vivo(cardSaindo);
+    const raiz = document.documentElement;
+    // O eixo VERTICAL só se corta se a página NÃO rolava quando o gesto começou:
+    // em tela baixa, texto grande ou janela de computador ela já rola (e tem a
+    // barra clássica, que ocupa largura) — cortar aí fazia a rolagem pular pro
+    // topo, o placar descer e a coluna alargar no meio do arraste (MEDIDO a
+    // 360×740 com texto 1,5×: scrollY 19→0, placar +19 px, coluna +10 px). A
+    // medida é do instante em que a classe LIGA, com o card ainda parado: depois
+    // o excesso é do card. O horizontal nunca é legítimo e corta sempre.
+    if (emVoo && !raiz.classList.contains('card-em-voo')) {
+        const e = document.scrollingElement || raiz;
+        raiz.classList.toggle('card-pagina-rola', e.scrollHeight > e.clientHeight + 1);
+    }
+    raiz.classList.toggle('card-em-voo', emVoo);
+    if (!emVoo) raiz.classList.remove('card-pagina-rola');
+}
+
+
 // O card volta pro lugar: o arraste solto sem decidir, ou cancelado. A volta é
 // parte do gesto até terminar; terminada, avisa. Só a volta MAIS NOVA avisa: a
 // pessoa pode pegar o card de novo no meio desta, e é a volta DAQUELE arraste
 // que encerra o gesto.
+// O WebKit guarda o overflow rolável que o card girado deixou (medido: o arraste de
+// 30 px que VOLTA fica com `scrollWidth - clientWidth = 29` pra sempre, com o card já
+// parado e com ou sem o corte da página). Reler o layout, transformar ou mexer em
+// `will-change` não limpa; esconder o card limpa, mas leva o foco; ligar e desligar
+// `contain: layout` no mesmo tique limpa e não toca no foco nem pinta nada.
+function refazerOverflowDoCard(card) {
+    if (!card || !card.isConnected) return;
+    card.style.contain = 'layout';
+    void card.offsetWidth;
+    card.style.contain = '';
+}
+
 function voltarProLugar(card) {
     card.style.transition = 'transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)';
     card.style.transform = 'translate(0, 0) rotate(0deg)';
     cardVoltando = card;
+    sincronizarCorteDaPagina();
     const vez = ++voltaVez;
     setTimeout(() => {
         card.style.transition = '';
         if (vez !== voltaVez) return;
+        refazerOverflowDoCard(card);
         cardVoltando = null;
+        sincronizarCorteDaPagina();
         avisarFimDoGesto(card);
     }, 400);
 }
@@ -118,6 +166,9 @@ function enableSwipeOnCard(card) {
     // correção de verdade é `draggable="false"` na foto e nos tiles; isto
     // aqui é pro próximo elemento arrastável que alguém puser no card.
     card.addEventListener('dragstart', impedirArrasteNativo);
+    // Card novo na tela: reavalia o corte da página. É o que desfaz o corte de
+    // um arraste ÓRFÃO (o card do gesto saiu do DOM e o `isDragging` ficou).
+    sincronizarCorteDaPagina();
 }
 
 // Com o NOSSO arraste em curso, o nativo não começa — assim os eventos do
@@ -248,6 +299,7 @@ function handleDragStart(e) {
     isDragging = true;
     capturouNesteGesto = false;
     currentCard = e.currentTarget;
+    sincronizarCorteDaPagina();
     if (e.type === 'mousedown') {
         dragTouchId = null;
         startX = e.clientX;
@@ -401,6 +453,7 @@ function handleDragCancel() {
     updateSwipeIndicator(0, 0, 0);
     voltarProLugar(currentCard);
     currentCard = null;
+    sincronizarCorteDaPagina();
 }
 
 function handleDragEnd(e) {
@@ -477,6 +530,7 @@ function animateSwipeOut(direction, callback) {
     currentCard = null;
     animating = true;
     cardSaindo = card;
+    sincronizarCorteDaPagina();
 
     // Feedback tátil no commit (Android; iOS ignora silenciosamente)
     if (navigator.vibrate) navigator.vibrate(VIBRACAO_COMMIT_MS);
@@ -498,6 +552,7 @@ function animateSwipeOut(direction, callback) {
     const concluir = (soltarAEntrada) => {
         if (soltarAEntrada) animating = false;
         if (cardSaindo === card) cardSaindo = null;
+        sincronizarCorteDaPagina();
         updateSwipeIndicator(0, 0);
         try { if (callback) callback(card); }
         finally { avisarFimDoGesto(card); }

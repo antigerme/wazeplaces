@@ -151,6 +151,27 @@ body.dark {
   transition: none;
 }
 
+/* Com o card no ar (arrastando, saindo ou voltando) a página não ganha barra de
+   rolagem: o card gira e sai a 1,5× a largura da janela, e o excesso dava
+   rolagem nos dois eixos — as barras finas e claras na borda direita e de
+   baixo, só no puxão pra direita. A classe é do `sincronizarCorteDaPagina`
+   (swipe.js) e dura só o gesto; o corte NÃO mora na raiz o tempo todo. O
+   horizontal nunca é legítimo e corta sempre. `hidden` e não `clip`: na raiz o
+   `clip` vira `hidden` do mesmo jeito. ATENÇÃO: `overflow: hidden` na raiz de
+   uma página que JÁ rola leva a rolagem de volta pro topo e tira a barra
+   clássica (largura!) — medido: scrollY 19→0, coluna +10 px —, por isso o
+   vertical é condicional abaixo. */
+html.card-em-voo {
+  overflow-x: hidden;
+}
+/* O vertical só se a página NÃO rolava quando o gesto começou (a classe
+   `card-pagina-rola` é medida no instante em que `card-em-voo` liga): a que já
+   rola tem barra clássica e posição de rolagem, e cortar tirava as duas no meio
+   do arraste. */
+html.card-em-voo:not(.card-pagina-rola) {
+  overflow-y: hidden;
+}
+
 /* As classes `.swipe-out-*` e seus três keyframes viviam aqui e eram CÓDIGO
    MORTO — nenhum arquivo de `js/` as usava. Quem anima a saída é o
    `animateSwipeOut` do swipe.js, escrevendo `style.transition`/`style.transform`
@@ -1599,10 +1620,14 @@ input.ui-switch:disabled {
   scrollbar-color: #cbd5e1 #f1f5f9;
 }
 
-.dark ::-webkit-scrollbar-track { background: #1e293b; }
-.dark ::-webkit-scrollbar-thumb { background: #475569; }
-.dark ::-webkit-scrollbar-thumb:hover { background: #64748b; }
-.dark * { scrollbar-color: #475569 #1e293b; }
+/* O `dark` mora no <html> E no <body>. `.dark *` e `.dark ::-webkit-…` só pegam
+   DESCENDENTES, nunca o próprio <html> — e a barra da PÁGINA é dele: no tema
+   escuro ela saía com as cores do claro (#cbd5e1 sobre o fundo #0f172a), a
+   linha branca do vídeo do dono. Por isso o `.dark,` e o `.dark::` em cada uma. */
+.dark ::-webkit-scrollbar-track, .dark::-webkit-scrollbar-track { background: #1e293b; }
+.dark ::-webkit-scrollbar-thumb, .dark::-webkit-scrollbar-thumb { background: #475569; }
+.dark ::-webkit-scrollbar-thumb:hover, .dark::-webkit-scrollbar-thumb:hover { background: #64748b; }
+.dark, .dark * { scrollbar-color: #475569 #1e293b; }
 
 /* ── A PILHA: o próximo pedido por baixo do atual ───────────────────────────
    Substitui três regras MORTAS que estavam aqui (`:nth-child(2)`, `(3)` e
