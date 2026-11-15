@@ -22380,10 +22380,15 @@ const AUTORES_VISIVEIS = 10;
 // países, o rosa passaria de 6 para 17 autores — de 1.967, ou seja menos de 1%
 // nos dois casos. Não é a diferença entre "discreto" e "gritante".
 //
+// Baixado de 6 pra 4 em 2026-11-15, também decisão do owner. É o número que
+// libera a folha do autor (o interruptor da recusa automática) pelo selo do
+// card: quem já foi rejeitado 4 vezes passa a poder ser armado sem esperar a
+// 6ª. A lista de autores do Histórico nunca dependeu dele (lá o interruptor
+// existe pra todo autor listado, a partir de 2 rejeições).
 // Se um dia alguém quiser um limiar que signifique de novo "voltou em outro
 // dia", o caminho não é o número: é comparar a DATA da primeira rejeição com a
 // da última, que o registro já guarda.
-const AUTOR_LIMIAR_DESTAQUE = 6;
+const AUTOR_LIMIAR_DESTAQUE = 4;
 
 // O dia de HOJE no calendário de quem usa, contado em dias desde 1970 — é o
 // número que o registro guarda (`e[2]`) e o que a poda e o "rejeitado há N

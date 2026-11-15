@@ -452,7 +452,7 @@ function montarPainelComFoco({ autores }) {
       + '<button type="button" class="conq-cel off" data-conq="coruja"></button>',
     dadosDoResumo: () => ({ total: 0 }), loadHistory: () => ({}), i18nLocale: () => 'pt-BR', ligarConquistas() {},
     escapeHtml: (s) => String(s), t: (k) => k,
-    listaDeAutores: () => estado.autores, AUTORES_VISIVEIS: 10, AUTORES_MAX_DIAS: 30, AUTOR_LIMIAR_DESTAQUE: 6,
+    listaDeAutores: () => estado.autores, AUTORES_VISIVEIS: 10, AUTORES_MAX_DIAS: 30, AUTOR_LIMIAR_DESTAQUE: 4,
     ICONE_LIXO: '', podeRecusarAutomaticoAqui: () => true, autoLigado: () => false, rejeitadoQuando: () => '',
     esquecerAutor() {}, alternarAutoDoAutor() {},
     esquecerAutorDaLista: (id) => { estado.esquecidos.push(id); },
@@ -670,7 +670,7 @@ test('H19: o interruptor e a lixeira de cada autor dizem DE QUEM são', () => {
   I18N_T.setLang('pt');
   const r = montar(['chaveDoFoco', 'devolverFocoAoPainel', 'renderAutores'], {
     document: m.dom.document, listaDeAutores: () => m.estado.autores, AUTORES_VISIVEIS: 10, AUTORES_MAX_DIAS: 30,
-    AUTOR_LIMIAR_DESTAQUE: 6, ICONE_LIXO: '', podeRecusarAutomaticoAqui: () => true, autoLigado: () => false,
+    AUTOR_LIMIAR_DESTAQUE: 4, ICONE_LIXO: '', podeRecusarAutomaticoAqui: () => true, autoLigado: () => false,
     rejeitadoQuando: () => '', escapeHtml: (s) => String(s), t: I18N_T.t,
     esquecerAutorDaLista() {}, alternarAutoDoAutor() {},
   }, ['renderAutores'], 'let autoresExpandido = false;');

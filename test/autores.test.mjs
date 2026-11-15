@@ -888,3 +888,11 @@ test('L27: CONTROLE — sem camada aberta, a folha do resultado abre como sempre
   assert.equal(m.toasts.length, 0);
   assert.equal(m.els.autorTitle.textContent, 'autor.lote.titulo#2');
 });
+
+test('limiar do selo rosa e da folha da recusa automática: 4 rejeições (decisão do owner, 2026-11-15; era 6)', () => {
+  const fonte = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8')
+    .split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  assert.match(fonte, /^const AUTOR_LIMIAR_DESTAQUE = 4;$/m, 'o limiar voltou a ser outro número');
+  // o selo cinza (2–3) segue sendo só contagem: a folha só abre a partir do limiar
+  assert.match(fonte, /if \(reincidente >= 2\) \{/, 'a contagem cinza começa em 2');
+});

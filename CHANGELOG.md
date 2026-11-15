@@ -8,6 +8,9 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.11.15-01
+**O selo `✕ N` de autor reincidente vira rosa, e abre a folha da recusa automática, a partir de 4 rejeições (era 6).** Entre 2 e 3 o selo segue cinza, só contando. Quem já tem o interruptor "Recusar sozinho" liberado (L6+AM) chega a ele duas rejeições antes, pelo card. A lista de autores do Histórico não muda: lá o interruptor já existe pra todo autor listado.
+
 ## v2026.11.07-01
 **As linhas brancas finas na lateral direita e embaixo, ao puxar o card rápido pra direita, eram barras de rolagem da página.** O card que sai gira e passa da borda da tela; pra direita esse excesso fazia a página ganhar rolagem pelos ~350 ms da saída, e o app desenhava as barras. A da direita e a de baixo aparecem juntas, por isso a impressão de duas linhas. Medido num celular de 393×740: a página ganhava até 689 px de largura e 36 de altura pra direita; pra esquerda, **nenhuma** largura mas ainda ~35 px de altura (o canto girado desce dos dois lados, então o ✕ também mostrava a barra vertical); parada, nada. **O mesmo acontece pelos botões ✓ e ✕**, que fazem a mesma saída. O vídeo do dono mostra a barra de baixo ocupando 40% da largura no quadro logo depois do puxão.
 
