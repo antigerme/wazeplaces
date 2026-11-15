@@ -16396,6 +16396,50 @@ function montarCardDeFundo() {
 // disso, ele é montado na hora dele, lendo a fila de agora — e só se mudou.
 let aquecimentoDaFrenteFeito = false;
 
+// O selo "✕ N" do autor é desenhado com a contagem de QUANDO o card entra na tela,
+// e a rejeição só entra nela quando o Waze CONFIRMA (`registrarRejeicaoDeAutor`,
+// no pouso). O card seguinte ao ✕ já está na tela por então — o ✕ avança a fila
+// no gesto, sem esperar a resposta —, e ninguém o redesenhava: mostrava SEMPRE
+// uma rejeição a menos que o Histórico (MEDIDO no navegador, com o Desfazer
+// desligado: card e fundo "✕ 5", contagem do aparelho 6 depois da resposta;
+// relato do dono, 2026-11-15). A contagem confirmada continua sendo a regra
+// (o Histórico não conta o que o Waze não confirmou); o que se refaz é o DESENHO,
+// no card da frente e no de fundo, quando um deles é do autor que acabou de contar.
+//
+// UM redesenho por tarefa, por autor: o "Rejeitar os N" registra N rejeições do
+// mesmo autor seguidas, e refazer o fundo (card, mapa) N vezes seria trabalho
+// jogado fora. Sem rede, sem espera: é só o DOM.
+const autoresComContagemNova = new Set();
+
+function agendarSelosDoAutor(id) {
+    if (id === null || id === undefined || id === '') return;
+    autoresComContagemNova.add(String(id));
+    // Cada registro agenda uma microtarefa, e a PRIMEIRA leva todos os autores
+    // anotados até ali (esvazia o conjunto): as outras acham o conjunto vazio.
+    queueMicrotask(() => {
+        if (!autoresComContagemNova.size) return;
+        const chaves = [...autoresComContagemNova];
+        autoresComContagemNova.clear();
+        // Um defeito aqui nunca pode derrubar o que registrou a rejeição.
+        try { refazerSelosDosAutores(chaves); } catch (err) { console.error('Erro ao refazer os selos do autor:', err); }
+    });
+}
+
+function refazerSelosDosAutores(chaves) {
+    if (!cardDaFrente() || !AppState.currentPlace) return;
+    const doAutor = (p) => !!p && p.creatorId !== null && p.creatorId !== undefined
+        && chaves.includes(String(p.creatorId));
+    const naFrente = doAutor(AppState.currentPlace);
+    const noFundo = doAutor(AppState.queue[1]);
+    if (!naFrente && !noFundo) return;
+    // Os selos da frente (e a barra do foco, e o foco do teclado no selo): o mesmo
+    // caminho da fila que muda por baixo.
+    if (naFrente) aoMudarAFilaPorBaixo();
+    // O de fundo é um clone do que foi desenhado antes: só se reconstrói ele, e só
+    // se já existe (antes disso ele nasce na hora dele, lendo a contagem de agora).
+    if (noFundo && aquecimentoDaFrenteFeito && document.querySelector('#cardStack .card-fundo')) montarCardDeFundo();
+}
+
 // Os selos são refeitos a cada página que chega, recusa automática, devolução
 // ou fim de lote, e o foco que estava no "Ver +N" ou no "✕ N" caía no <body>
 // (R5-2-06, MEDIDO nos dois motores; o CONTROLE, sem a fila mudar, mantém o
@@ -22743,6 +22787,9 @@ function registrarRejeicaoDeAutor(place) {
         }
     }
     salvarAutores(a);
+    // O card (e o de fundo) que já está na tela com este autor foi desenhado com a
+    // contagem de antes (ver `agendarSelosDoAutor`).
+    if (typeof agendarSelosDoAutor === 'function') agendarSelosDoAutor(chave);
 }
 
 // Quantas rejeições SUAS este autor acumulou. 0 ou 1 devolve 0: o anel não
