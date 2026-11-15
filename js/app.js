@@ -2458,6 +2458,10 @@ function aplicarPassagem() {
     }
     if (!ativa) {
         limparPassagem();
+        // Escondida também fala o idioma de agora: o texto do corpo é do JS (não `data-i18n`), e sem
+        // isto a página aberta direto em francês guardava o português da reserva do HTML (a troca de
+        // idioma, que redesenha, e a página aberta já em francês divergiam: smoke de layout).
+        desenharPassagem();
         // O card voltou à tela: o "Como funciona" que esperava a tela livre.
         if (estavaAtiva) pedirComoFuncionaAdiado();
         return;

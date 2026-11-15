@@ -230,6 +230,16 @@ test('"Continuar neste computador" grava a escolha, devolve o card e tira o QR d
   assert.ok(m.log.includes('paroutick'), 'a contagem do QR seguiu correndo');
 });
 
+test('escondida, a passagem também fala o idioma de agora (o corpo é texto do JS, não data-i18n)', () => {
+  // Janela estreita: a passagem não aparece, mas o texto do DOM tem de sair do dicionário, não da reserva em português.
+  const m = mundo({ largura: 600 });
+  m.els.passagemCorpo.textContent = 'RESERVA EM PORTUGUÊS';
+  m.app.aplicarPassagem();
+  assert.equal(m.AppState.passagemNaTela, false, 'PRÉ-CONDIÇÃO: a passagem apareceu numa janela estreita');
+  assert.equal(m.els.passagemCorpo.textContent, 'passagem.corpoClique',
+    'DEFEITO: a passagem escondida guardou a reserva do HTML (a página aberta em outro idioma divergia da trocada)');
+});
+
 test('a janela que estreita desliga a passagem (o card volta) e alargar a religa', () => {
   const m = mundo();
   m.app.aplicarPassagem();

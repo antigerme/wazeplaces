@@ -15144,7 +15144,9 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
       await esperarOuExplodir(page, () => !document.getElementById('authScreen').classList.contains('hidden') && !AppState.authenticated, 'a tela de entrada depois do "Sair"');
     };
     const entrarPorCookies = async () => {
-      await page.evaluate((c) => { authenticateWithCookies(c); }, COOKIES);
+      // O "Sair" devolve as preferências ao de fábrica, e um login NOVO num computador de janela larga mostra a
+      // passagem (v2026.11.15-04), que esconde o card e trava as ações: o roteiro quer o card.
+      await page.evaluate((c) => { (AppState.preferences.passagemDispensada = true, authenticateWithCookies(c)); }, COOKIES);
       await esperarOuExplodir(page, () => AppState.authenticated === true && !!AppState.profile && AppState.queue.length > 0 && !AppState.fetching, 'o login por cookies chegar à fila');
     };
     const estado = () => page.evaluate(() => {
@@ -16002,7 +16004,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     await esperarOuExplodir(o.A, naEntrada, 'a aba A voltar à entrada depois da queda');
   };
   const logarNaA = async (conta) => {
-    await o.A.evaluate((c) => authenticateWithCookies(c), cookiesDa(conta));
+    await o.A.evaluate((c) => (AppState.preferences.passagemDispensada = true, authenticateWithCookies(c)), cookiesDa(conta));
     await esperarOuExplodir(o.A, () => AppState.authenticated && !!AppState.profile
       && String(AppState.profile.id) === String(JSON.parse(localStorage.getItem('waze_places_conta') || '{}').id),
       `a aba A entrar com a conta ${conta}`);
@@ -16101,7 +16103,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
       C.on('pageerror', (e) => erros4b.push(String(e.message || e).slice(0, 120)));
       await C.goto(BASE, { waitUntil: 'domcontentloaded' });
       await esperarOuExplodir(C, naEntrada, 'a aba C abrir na entrada');
-      await C.evaluate((c) => authenticateWithCookies(c), cookiesDa(conta));
+      await C.evaluate((c) => (AppState.preferences.passagemDispensada = true, authenticateWithCookies(c)), cookiesDa(conta));
       await esperarOuExplodir(C, () => AppState.authenticated && !!AppState.profile, `a aba C entrar com a conta ${conta}`);
       await dormir(600);
       const depois = await medir();
@@ -16270,7 +16272,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     await esperarOuExplodir(A, () => extPerguntando && !document.getElementById('extLoginState').classList.contains('hidden'),
       'a aba A perguntar à extensão ("Entrando pelo WME…")');
     if (outraEntra) {
-      await B.evaluate((c) => authenticateWithCookies(c), cookiesDa(4242));
+      await B.evaluate((c) => (AppState.preferences.passagemDispensada = true, authenticateWithCookies(c)), cookiesDa(4242));
       await esperarOuExplodir(A, () => !!localStorage.getItem('waze_session_token'), 'a sessão da aba B chegar ao aparelho');
     }
     if (puxar) await A.evaluate(() => { API.getSession(); });   // o que a guarda antiga fazia
@@ -16332,7 +16334,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     await A.evaluate((t) => { document.getElementById('cookiesTextarea').value = t; }, COLANDO);
     const B = await s.abrir();
     await esperarOuExplodir(B, paradaNaEntrada, 'a aba B (sem sessão) chegar à tela de entrada');
-    await B.evaluate((c) => authenticateWithCookies(c), cookiesDa(4242));
+    await B.evaluate((c) => (AppState.preferences.passagemDispensada = true, authenticateWithCookies(c)), cookiesDa(4242));
     await esperarOuExplodir(B, naFilaComCard, 'a aba B entrar pelos cookies');
     const p1 = await A.evaluate(() => window.__perguntas);
     await A.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
@@ -16426,7 +16428,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     await porOFoco(A, foco);
     const B = await s.abrir();
     await esperarOuExplodir(B, paradaNaEntrada, 'a aba B (sem sessão) chegar à tela de entrada');
-    await B.evaluate((c) => authenticateWithCookies(c), cookiesDa(4242));
+    await B.evaluate((c) => (AppState.preferences.passagemDispensada = true, authenticateWithCookies(c)), cookiesDa(4242));
     await esperarOuExplodir(B, naFilaComCard, 'a aba B entrar pelos cookies');
     const antesDaVolta = await telaDaAba(A);
     const focoAntes = await ondeEstaOFoco(A);
@@ -16578,7 +16580,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     if (outraEntra) {
       await esperarOuExplodir(A, () => !document.getElementById('authScreen').classList.contains('hidden'),
         'a aba A mostrar a tela de entrada durante o resgate');
-      await B.evaluate((c) => authenticateWithCookies(c), cookiesDa(4242));
+      await B.evaluate((c) => (AppState.preferences.passagemDispensada = true, authenticateWithCookies(c)), cookiesDa(4242));
       await esperarOuExplodir(B, naFilaComCard, 'a aba B entrar pelos cookies durante o resgate da A');
       soltar();
     }
@@ -17639,7 +17641,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     await page.goto(BASE, { waitUntil: 'domcontentloaded' });
     await esperarOuExplodir(page, () => !document.getElementById('authScreen').classList.contains('hidden'), 'a tela de entrada');
     const COOKIES = (n) => `# Netscape HTTP Cookie File\n.waze.com\tTRUE\t/\tTRUE\t0\t_web_session\tconta-${n}\n`;
-    page.evaluate((c) => authenticateWithCookies(c), COOKIES(77)).catch(() => {});
+    page.evaluate((c) => (AppState.preferences.passagemDispensada = true, authenticateWithCookies(c)), COOKIES(77)).catch(() => {});
     await esperarOuExplodir(page, () => AppState.authenticated && !!AppState.profile && AppState.profile.id === 77, 'o login da 77');
     await page.evaluate(() => {
       AppState.stats = { read: 3, rejected: 0, skipped: 0 };
@@ -17649,7 +17651,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     // A sessão cai e OUTRA conta entra na mesma aba.
     await page.evaluate(() => derrubarSessao('srv.err.sessionExpired'));
     quem = 88;
-    page.evaluate((c) => authenticateWithCookies(c), COOKIES(88)).catch(() => {});
+    page.evaluate((c) => (AppState.preferences.passagemDispensada = true, authenticateWithCookies(c)), COOKIES(88)).catch(() => {});
     await esperarOuExplodir(page, () => AppState.authenticated && !!AppState.profile && AppState.profile.id === 88, 'o login da 88');
     const r = await page.evaluate(() => ({ stats: { ...AppState.stats }, pularGuarda: AppState.preferences.pularGuarda === true, undoEnabled: AppState.preferences.undoEnabled !== false,
       contaDaAba: contaConfirmadaNestaAba && contaConfirmadaNestaAba.id }));
