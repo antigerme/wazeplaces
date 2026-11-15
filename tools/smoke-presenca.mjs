@@ -393,7 +393,7 @@ async function editor(id, { lang = 'pt' } = {}) {
     try {
       localStorage.setItem('waze_places_lang', l);
       localStorage.setItem('waze_session_token', tk);
-      localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true, undoGateSeen: true, dicaDesfazerVista: true }));
+      localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true, passagemDispensada: true, undoGateSeen: true, dicaDesfazerVista: true }));
     } catch (e) {}
   }, { l: lang, tk: 'token-da-sessao-' + p.nome });
   naApp.add(id);
@@ -724,7 +724,7 @@ try {
         try {
           localStorage.setItem('waze_places_lang', 'pt');
           localStorage.setItem('waze_session_token', 'token-da-sessao-6c');
-          localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true, undoGateSeen: true, dicaDesfazerVista: true }));
+          localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true, passagemDispensada: true, undoGateSeen: true, dicaDesfazerVista: true }));
         } catch (e) {}
       });
       await p6.goto(`http://127.0.0.1:${PORTA}/`, { waitUntil: 'domcontentloaded' });

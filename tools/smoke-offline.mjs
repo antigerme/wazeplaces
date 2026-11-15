@@ -184,7 +184,7 @@ diz('o service worker ASSUMIU (sem isto nada abaixo mede o que promete)', contro
 
 const montarNa = (pg, pls) => pg.evaluate((ps) => {
   AppState.authenticated = true;
-  AppState.preferences.comoFuncionaVisto = true;
+  AppState.preferences.comoFuncionaVisto = true; AppState.preferences.passagemDispensada = true;
   AppState.profile = { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false };
   document.getElementById('authScreen').classList.add('hidden');
   document.getElementById('appScreen').classList.remove('hidden');
@@ -410,7 +410,7 @@ aviao = false; await ctx.setOffline(false);
 await montar([SO_MAPA(81), SO_MAPA(82), SO_MAPA(83)]);
 await page.evaluate(() => {
   AppState.preferences.offlineDisponivel = true;
-  AppState.preferences.comoFuncionaVisto = true;
+  AppState.preferences.comoFuncionaVisto = true; AppState.preferences.passagemDispensada = true;
   savePreferences();
   API.setSession('tok-reabrir');
   offlineJanelaServida = null; offlineUltimoResultado = null; offlineMarcarGesto(); offlineVarrer();
@@ -1964,7 +1964,7 @@ const contexto8g = async () => {
   await prep.evaluate(async (ps) => {
     API.setSession('tok-8g');
     localStorage.setItem('waze_places_conta', JSON.stringify({ id: '1', s: marcaDaSessao('tok-8g') }));
-    localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoEnabled: true, presenca: false, offlineDisponivel: true }));
+    localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, passagemDispensada: true, undoEnabled: true, presenca: false, offlineDisponivel: true }));
     AppState.authenticated = true; AppState.preferences.offlineDisponivel = true;
     AppState.profile = { id: 1, userName: 'e', rank: 5, isAreaManager: true, isStaff: false };
     await offlineEsquecer(); await new Promise((r) => setTimeout(r, 200));
@@ -2379,7 +2379,7 @@ await page.evaluate(() => {
   saveStats();
   AppState.preferences.undoEnabled = false;
   AppState.preferences.offlineDisponivel = true;
-  AppState.preferences.comoFuncionaVisto = true;
+  AppState.preferences.comoFuncionaVisto = true; AppState.preferences.passagemDispensada = true;
   savePreferences();
 });
 const historico9b = (pg) => pg.evaluate(() => { try {
@@ -2893,7 +2893,7 @@ await esperarNaPagina(prep9c, () => typeof API !== 'undefined', 20000, 100);
 await prep9c.evaluate(() => {
   API.setSession('tok-9c');
   localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: false }));
-  localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoEnabled: true }));
+  localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, passagemDispensada: true, undoEnabled: true }));
 });
 await fecharComoOUsuario(prep9c);
 const semDev = await abrir9c('modo dev desligado');
@@ -3174,7 +3174,7 @@ await ctx9d.addInitScript(() => { try { if (!localStorage.getItem('__9d')) {
   localStorage.setItem('__9d', '1');
   localStorage.setItem('waze_session_token', 'tok-9d');
   localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: true }));
-  localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoEnabled: true }));
+  localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, passagemDispensada: true, undoEnabled: true }));
 } } catch (e) {} });
 const p9d = await ctx9d.newPage();
 p9d.on('pageerror', (e) => errosJs.push({ secao: secaoAtual, txt: String(e.message) }));
@@ -3259,7 +3259,7 @@ const prep9e = await abrir9e('preparo');
 await esperarNaPagina(prep9e, () => typeof API !== 'undefined', 20000, 100);
 await prep9e.evaluate(() => {
   API.setSession('tok-9e');
-  localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoEnabled: true }));
+  localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, passagemDispensada: true, undoEnabled: true }));
 });
 await devLigado9e(prep9e, true);
 await fecharComoOUsuario(prep9e);
@@ -3408,7 +3408,7 @@ const prep9f = await abrir9f('preparo');
 await esperarNaPagina(prep9f, () => typeof API !== 'undefined', 20000, 100);
 await prep9f.evaluate(() => {
   API.setSession('tok-9f');
-  localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoEnabled: true }));
+  localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, passagemDispensada: true, undoEnabled: true }));
   localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: true }));
 });
 await fecharComoOUsuario(prep9f);
@@ -3452,7 +3452,7 @@ const prep9f2 = await abrir9f('preparo 2');
 await esperarNaPagina(prep9f2, () => typeof API !== 'undefined', 20000, 100);
 await prep9f2.evaluate(() => {
   API.setSession('tok-9f');
-  localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoEnabled: true }));
+  localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, passagemDispensada: true, undoEnabled: true }));
   localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: false }));
 });
 await fecharComoOUsuario(prep9f2);
@@ -3544,7 +3544,7 @@ await esperarNaPagina(prep9h, () => !!(navigator.serviceWorker && navigator.serv
 await prep9h.evaluate(() => {
   API.setSession('tok-9h');
   localStorage.setItem('waze_places_conta', JSON.stringify({ id: '1', s: marcaDaSessao('tok-9h') }));
-  AppState.preferences.offlineDisponivel = true; AppState.preferences.comoFuncionaVisto = true; savePreferences();
+  AppState.preferences.offlineDisponivel = true; AppState.preferences.comoFuncionaVisto = true; AppState.preferences.passagemDispensada = true; savePreferences();
 });
 await prep9h.reload({ waitUntil: 'domcontentloaded' });
 const guardou9h = await esperarNaPagina(prep9h, async () => typeof offlineLerFila === 'function'
@@ -3678,7 +3678,7 @@ const cenario9i = async (nome, abas, semTravas) => {
   await pags[0].evaluate(() => {
     API.setSession('tok-9i');
     localStorage.setItem('waze_places_conta', JSON.stringify({ id: '1', s: marcaDaSessao('tok-9i') }));
-    AppState.preferences.comoFuncionaVisto = true; savePreferences();
+    AppState.preferences.comoFuncionaVisto = true; AppState.preferences.passagemDispensada = true; savePreferences();
     localStorage.removeItem('waze_places_history'); localStorage.removeItem('waze_places_saida');
   });
   for (const pg of pags) await pg.reload({ waitUntil: 'domcontentloaded' });
@@ -3766,7 +3766,7 @@ const entrar9j = async (pg, tok) => {
   await pg.evaluate((t) => {
     API.setSession(t);
     localStorage.setItem('waze_places_conta', JSON.stringify({ id: '1', s: marcaDaSessao(t) }));
-    AppState.preferences.offlineDisponivel = true; AppState.preferences.comoFuncionaVisto = true; savePreferences();
+    AppState.preferences.offlineDisponivel = true; AppState.preferences.comoFuncionaVisto = true; AppState.preferences.passagemDispensada = true; savePreferences();
   }, tok);
   await pg.reload({ waitUntil: 'domcontentloaded' });
 };
@@ -4123,7 +4123,7 @@ const prepararDev = async (contexto, token) => {
   await prep.evaluate((tk) => {
     API.setSession(tk);
     localStorage.setItem('waze_places_conta', JSON.stringify({ id: '1', s: marcaDaSessao(tk) }));
-    localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoEnabled: true, presenca: false }));
+    localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, passagemDispensada: true, undoEnabled: true, presenca: false }));
     localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: true }));
   }, token);
   await fecharComoOUsuario(prep);
@@ -4415,7 +4415,7 @@ await esperarNaPagina(prep9n, () => typeof API !== 'undefined', 20000, 100);
 await prep9n.evaluate(() => {
   API.setSession('tok-9n');
   localStorage.setItem('waze_places_conta', JSON.stringify({ id: '9', s: marcaDaSessao('tok-9n') }));
-  localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoEnabled: true, presenca: false }));
+  localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, passagemDispensada: true, undoEnabled: true, presenca: false }));
   localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: true }));
 });
 await fecharComoOUsuario(prep9n);
@@ -4494,7 +4494,7 @@ await esperarNaPagina(prepL9n, () => typeof API !== 'undefined', 20000, 100);
 await prepL9n.evaluate(() => {
   API.setSession('tok-9n-largo');
   localStorage.setItem('waze_places_conta', JSON.stringify({ id: '1', s: marcaDaSessao('tok-9n-largo') }));
-  localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoEnabled: true, presenca: false,
+  localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, passagemDispensada: true, undoEnabled: true, presenca: false,
     consequenciaVista: { reject: true, read: true } }));
   localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: true }));
 });
@@ -4642,7 +4642,7 @@ const margem9n = async (topo) => {
   await prep.evaluate(() => {
     API.setSession('tok-9n-margem');
     localStorage.setItem('waze_places_conta', JSON.stringify({ id: '1', s: marcaDaSessao('tok-9n-margem') }));
-    localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false,
+    localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, passagemDispensada: true, presenca: false,
       consequenciaVista: { reject: true, read: true } }));
   });
   // A margem é emulada pelo protocolo do DevTools, que só o Chromium tem: fora
@@ -4703,7 +4703,7 @@ const arraste9n = async () => {
   await pg.evaluate(() => {
     API.setSession('tok-9n-arraste');
     localStorage.setItem('waze_places_conta', JSON.stringify({ id: '1', s: marcaDaSessao('tok-9n-arraste') }));
-    localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false, undoEnabled: false,
+    localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, passagemDispensada: true, presenca: false, undoEnabled: false,
       consequenciaVista: { reject: true, read: true } }));
     localStorage.setItem('waze_places_devmode', JSON.stringify({ unlocked: true, active: true }));
   });
@@ -4796,7 +4796,7 @@ const cenario9o = async (nome, listas) => {
   await prep.evaluate(() => {
     API.setSession('tok-9o');
     localStorage.setItem('waze_places_conta', JSON.stringify({ id: '1', s: marcaDaSessao('tok-9o') }));
-    localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false,
+    localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, passagemDispensada: true, presenca: false,
       offlineDisponivel: true, consequenciaVista: { reject: true, read: true, skip: true } }));
   });
   await fecharComoOUsuario(prep);
@@ -4922,7 +4922,7 @@ const cenario9p = async (nome, { modo }) => {
   await prep.evaluate(() => {
     API.setSession('tok-9p');
     localStorage.setItem('waze_places_conta', JSON.stringify({ id: '1', s: marcaDaSessao('tok-9p') }));
-    localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false,
+    localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, passagemDispensada: true, presenca: false,
       offlineDisponivel: true, consequenciaVista: { reject: true, read: true, skip: true } }));
   });
   await fecharComoOUsuario(prep);
@@ -5065,7 +5065,7 @@ const cenario9q = async (nome, { abrirAntes, sair, segurarLeitura = false }) => 
   await prep.evaluate(() => {
     API.setSession('tok-9q');
     localStorage.setItem('waze_places_conta', JSON.stringify({ id: '1', s: marcaDaSessao('tok-9q') }));
-    localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false,
+    localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, passagemDispensada: true, presenca: false,
       offlineDisponivel: true, consequenciaVista: { reject: true, read: true, skip: true } }));
   });
   await fecharComoOUsuario(prep);

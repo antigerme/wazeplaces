@@ -8,6 +8,14 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.11.15-04
+**No computador, o app vira a ponte para o celular.** Quase todo mundo que abre o app no computador só quer chegar ao celular (a extensão só existe lá, e colar o `cookies.txt` num celular é inviável). Agora, num computador com mouse e a janela de 900 px ou mais, o app mostra uma tela de passagem no lugar do placar e do card: «Este app é feito para o celular», com o QR para conectar o celular, três passos (apontar a câmera, tocar no link, adicionar o app à tela inicial) e o aviso de que depois disso o celular fica conectado e não precisa voltar ao computador.
+
+- **Logo depois de entrar** (pela extensão ou pelo `cookies.txt`), o QR já aparece pronto, sem nenhum toque. Nas aberturas seguintes, o QR sai com um toque em «Mostrar QR para o celular», para não gastar uma gravação à toa. O QR vale 5 minutos; vencido, ele apaga e aparece «Gerar outro código». «Sem câmera? Mostrar um código» abre o diálogo de sempre.
+- **«Continuar neste computador»** devolve o card e lembra a escolha neste aparelho, então quem tria no computador não vê a passagem de novo. O «Sair» desfaz a escolha, como o resto das preferências.
+- **Enquanto a passagem está na tela, o card não recebe decisão.** As setas do teclado não rejeitam, marcam nem pulam um pedido que ninguém está vendo.
+- **Não muda nada** no celular, no tablet nem no notebook com tela de toque. Em janela estreita (menos de 900 px) o card volta sozinho, e ao alargar a passagem volta.
+
 ## v2026.11.15-03
 **O selo «✕ N» do autor mostrava sempre uma rejeição a menos no card seguinte.** Você rejeitava um pedido de um autor que já tinha ✕ 5, o card seguinte do mesmo autor entrava com ✕ 5, e a lista do Histórico já dizia 6. O card seguinte entra na tela no mesmo instante do gesto, e a rejeição só entra na contagem quando o Waze confirma; ninguém redesenhava o selo depois. Valia também com o Desfazer desligado, só que por menos tempo (a demora da resposta do Waze). Agora, quando a rejeição é confirmada, o selo do card da frente e o do card de baixo, se forem do mesmo autor, são refeitos com o número certo (✕ 5 vira ✕ 6 na hora em que o Waze responde). Nada fica mais lento: o ✕ continua passando para o próximo card sem esperar, e a contagem segue sendo a das rejeições confirmadas. Efeito colateral bom: o selo vira rosa e passa a abrir a folha da recusa automática (a partir de 4) uma rejeição antes do que fazia.
 

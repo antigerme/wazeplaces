@@ -358,11 +358,14 @@ const MANTER_CONECTADO_PADRAO = true;
 // AQUI (e a leitura dela, em `lerPreferenciasGuardadas`).
 function preferenciasDeFabrica() {
     return { undoEnabled: true, semUndoSeguidas: 0, presenca: true, pularGuarda: false,
-             manterConectado: MANTER_CONECTADO_PADRAO };
+             manterConectado: MANTER_CONECTADO_PADRAO, passagemDispensada: false };
 }
 
 const AppState = {
     authenticated: false,
+    // A passagem do computador está na tela (escrito só por `aplicarPassagem`; a trava das ações o LÊ,
+    // sem chamar função: os testes que fatiam `acoesTravadas` não a conhecem).
+    passagemNaTela: false,
     currentPlace: null,
     queue: [],
     hasMore: true,
@@ -1165,6 +1168,9 @@ function entrarPelaExtensao({ silencioso = false, manterFila = false } = {}) {
             }
             API.setSession(String(d.token), 'extensao');
             aoEntrarNestaPagina();
+            // Um login NOVO (não a renovação da queda, que mantém a fila): a passagem
+            // do computador oferece o QR já pronto (`aplicarPassagem`).
+            if (!manterFila) loginNestaPagina = true;
             // O foco que estava NA tela de entrada (no "Colar cookies", no campo
             // dele) vai ao ✕ do primeiro card: ela some agora, sem gesto, e ele
             // caía no <body> (R10-1-05; ver a função). Lido antes de fechar.
@@ -1983,6 +1989,8 @@ function aplicarIdioma(valor) {
     // O `applyI18n` acima reescreveu o texto das opções de data (elas têm
     // `data-i18n`), levando o ícone junto — redecora.
     popularOrdenacoes();
+    // O texto da passagem do computador muda com o estado dela (JS, não `data-i18n`).
+    if (typeof desenharPassagem === 'function') desenharPassagem();
     // A dica sob o "Ordenar por" é texto do JS com valor interpolado: o
     // `applyI18n` não a alcança, e ela ficava em português na aba Filtros depois
     // de trocar o idioma nas Preferências do MESMO modal (auditoria de
@@ -2293,8 +2301,8 @@ function carregarQr() {
     return _qrCarregando;
 }
 
-async function desenharQrPareamento(url) {
-    const canvas = document.getElementById('pairQr');
+async function desenharQrPareamento(url, idDoCanvas = 'pairQr') {
+    const canvas = document.getElementById(idDoCanvas);
     if (!canvas) return;
     if (!(await carregarQr())) { canvas.classList.add('hidden'); return; }
     const qr = gerarQR(url);
@@ -2326,6 +2334,158 @@ async function desenharQrPareamento(url) {
             }
         }
     }
+}
+
+// ── A passagem: no computador, o app é a ponte pro celular (v2026.11.15-04) ──
+// Relato do dono: quase todo uso no computador é só pra chegar ao celular (a
+// extensão só existe lá, e o `cookies.txt` num celular é inviável). Então, onde
+// o app abre num computador de tela larga, ele mostra a tela de PASSAGEM no
+// lugar do placar e do card: o QR do pareamento (o mesmo do "Conectar outro
+// aparelho"), três passos e o "Continuar neste computador" pra quem triaria ali.
+// Mockup aprovado: opção A (na coluna), QR pronto logo depois de um login NOVO e
+// no clique nas aberturas seguintes (cada QR não escaneado custa uma gravação).
+//
+// - "Computador": janela larga (>= 900 px), mouse (hover e ponteiro fino) e NENHUM
+//   ponteiro de toque. Notebook com tela de toque e iPad com teclado ficam de
+//   fora: o convite é pra quem não tem outro caminho, e errar pra "não mostrar"
+//   é barato. A largura também deixa de fora a janela estreita de quem já está
+//   triando num canto da tela.
+// - Enquanto ela está na tela o card NÃO recebe decisão (`acoesTravadas`): ele está
+//   escondido, e uma seta decidindo um pedido invisível seria irrecuperável.
+// - O QR é CREDENCIAL: sai da tela no vencimento, no "Continuar", na janela que
+//   estreita e no "Sair"/queda (`limparPassagem`); o código emitido entra no
+//   `pareamentosEmitidos`, que o "Sair" cancela no servidor.
+let passagemEstado = 'clique';     // 'clique' | 'carregando' | 'qr' | 'vencido'
+let aberturaDaPassagem = 0;         // sobe a cada QR pedido e a cada limpeza
+let loginNestaPagina = false;       // um login NOVO deu certo nesta página (extensão ou cookies)
+const PASSAGEM_LARGURA_MIN_PX = 900;
+
+function computadorDeTelaLarga() {
+    if (typeof matchMedia !== 'function') return false;
+    const dados = navigator.userAgentData;
+    if (dados && dados.mobile === true) return false;
+    return matchMedia('(min-width: ' + PASSAGEM_LARGURA_MIN_PX + 'px) and (hover: hover) and (pointer: fine)').matches
+        && !matchMedia('(any-pointer: coarse)').matches;
+}
+
+function passagemAtiva() {
+    return !!(AppState.authenticated && AppState.preferences.passagemDispensada !== true
+        && !(typeof Treino !== 'undefined' && Treino.ativo) && computadorDeTelaLarga());
+}
+
+function limparPassagem() {
+    aberturaDaPassagem++;
+    const expiry = document.getElementById('passagemExpiry');
+    if (expiry) { pararTickerPareamento(expiry); expiry.textContent = ''; }
+    const canvas = document.getElementById('passagemQr');
+    const ctx = canvas && canvas.getContext ? canvas.getContext('2d') : null;
+    if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+    passagemEstado = 'clique';
+    const anuncio = document.getElementById('passagemAnuncio');
+    if (anuncio) anuncio.textContent = '';
+}
+
+// O que cada estado mostra. Um lugar só: o idioma que muda e o redimensionar
+// chamam de novo.
+function desenharPassagem() {
+    const $ = (id) => document.getElementById(id);
+    if (!$('passagemScreen')) return;
+    const e = passagemEstado;
+    const clique = e === 'clique', carregando = e === 'carregando', comQr = e === 'qr', vencido = e === 'vencido';
+    $('passagemCorpo').textContent = t(clique ? 'passagem.corpoClique' : 'passagem.corpo');
+    $('passagemQr').classList.toggle('hidden', !(comQr || vencido));
+    $('passagemQrArea').classList.toggle('passagem-vencida', vencido);
+    $('passagemExpiry').classList.toggle('hidden', clique);
+    if (carregando) $('passagemExpiry').textContent = t('passagem.gerando');
+    else if (vencido) $('passagemExpiry').textContent = t('passagem.vencido');
+    $('passagemMostrar').classList.toggle('hidden', !clique);
+    $('passagemGerar').classList.toggle('hidden', !vencido);
+    $('passagemSemCamera').classList.toggle('hidden', !comQr);
+    $('passagemPassos').classList.toggle('hidden', clique);
+    $('passagemGarantia').classList.toggle('hidden', clique);
+}
+
+// Pede um QR novo. Não renova sozinho (nada de polling): vencido, vira "Gerar outro".
+async function gerarQrDaPassagem() {
+    if (passagemEstado === 'carregando' || !passagemAtiva()) return;
+    passagemEstado = 'carregando';
+    desenharPassagem();
+    const epoca = epocaDaSessao;
+    const abertura = ++aberturaDaPassagem;
+    const r = await API.criarPareamento({ conta: contaAgora() });
+    // A resposta de uma sessão que já foi, ou de um pedido que outra limpeza
+    // superou: não escreve nada, e o código que ela traz é CANCELADO no servidor.
+    if (epoca !== epocaDaSessao || abertura !== aberturaDaPassagem) {
+        if (r && r.success && r.code) API.cancelarPareamento(r.code).catch(() => {});
+        return;
+    }
+    if (!r || !r.success) {
+        passagemEstado = 'clique';
+        desenharPassagem();
+        avisarFalhaDoPareamento(r, false);
+        return;
+    }
+    pareamentosEmitidos.add(r.code);
+    passagemEstado = 'qr';
+    desenharPassagem();
+    desenharQrPareamento(location.origin + '/#pair=' + r.code, 'passagemQr');
+    iniciarTickerPareamento(document.getElementById('passagemExpiry'), r.expiresIn, aoVencerQrDaPassagem);
+}
+
+function aoVencerQrDaPassagem() {
+    const canvas = document.getElementById('passagemQr');
+    const ctx = canvas && canvas.getContext ? canvas.getContext('2d') : null;
+    if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+    passagemEstado = 'vencido';
+    desenharPassagem();
+    const anuncio = document.getElementById('passagemAnuncio');
+    if (anuncio) anuncio.textContent = t('passagem.vencido');
+}
+
+// Liga ou desliga a tela conforme o estado de agora (sessão, preferência, treino,
+// janela). Idempotente: o redimensionar, o idioma e o login chamam à vontade.
+function aplicarPassagem() {
+    const tela = document.getElementById('passagemScreen');
+    if (!tela) return;
+    const ativa = passagemAtiva();
+    const estavaAtiva = !tela.classList.contains('hidden');
+    AppState.passagemNaTela = ativa;
+    document.documentElement.classList.toggle('passagem-ativa', ativa);
+    tela.classList.toggle('hidden', !ativa);
+    if (ativa !== estavaAtiva) {
+        // O card some ou volta: os botões dele acompanham a trava.
+        aplicarTravaDeAcao();
+    }
+    if (!ativa) {
+        limparPassagem();
+        // O card voltou à tela: o "Como funciona" que esperava a tela livre.
+        if (estavaAtiva) pedirComoFuncionaAdiado();
+        return;
+    }
+    if (!estavaAtiva && loginNestaPagina && passagemEstado === 'clique') {
+        loginNestaPagina = false;
+        gerarQrDaPassagem();
+        return;
+    }
+    desenharPassagem();
+    // Sem foco em lugar nenhum (a tela de entrada acabou de sair), o foco vai ao
+    // controle principal: o card, que o recebia, está escondido.
+    if (!estavaAtiva) {
+        const ativo = document.activeElement;
+        if (!ativo || ativo === document.body) {
+            const alvo = document.getElementById('passagemMostrar');
+            const foco = alvo && !alvo.classList.contains('hidden') ? alvo : document.getElementById('passagemContinuar');
+            if (foco) foco.focus({ preventScroll: true });
+        }
+    }
+}
+
+// "Continuar neste computador": lembra a escolha no aparelho (quem tria aqui não
+// quer a passagem a cada abertura) e devolve o card.
+function dispensarPassagem() {
+    AppState.preferences.passagemDispensada = true;
+    savePreferences();
+    aplicarPassagem();
 }
 
 async function abrirPareamento() {
@@ -2727,6 +2887,17 @@ function setupModalListeners() {
 
     // Pareamento
     $('pairCreateBtn')?.addEventListener('click', abrirPareamento);
+    // A passagem do computador (ver `aplicarPassagem`). "Sem câmera?" abre o
+    // diálogo de sempre, que sabe pedir o código digitável.
+    $('passagemMostrar')?.addEventListener('click', () => gerarQrDaPassagem());
+    $('passagemGerar')?.addEventListener('click', () => gerarQrDaPassagem());
+    $('passagemSemCamera')?.addEventListener('click', abrirPareamento);
+    $('passagemContinuar')?.addEventListener('click', dispensarPassagem);
+    // A janela que alarga ou estreita, ou o ponteiro de toque que aparece (um
+    // celular ligado a um monitor), liga e desliga a passagem.
+    for (const consulta of ['(min-width: ' + PASSAGEM_LARGURA_MIN_PX + 'px)', '(any-pointer: coarse)']) {
+        try { matchMedia(consulta).addEventListener('change', aplicarPassagem); } catch (e) { /* sem matchMedia: a passagem não existe */ }
+    }
     $('pairCopyLinkBtn')?.addEventListener('click', copiarLinkPareamento);
     $('pairShowCodeBtn')?.addEventListener('click', revelarCodigoPareamento);
     $('pairShowClose')?.addEventListener('click', () => { pararTickerPareamento(); closeModal('pairShowModal'); });
@@ -7200,6 +7371,9 @@ function handleKeyDown(e) {
     }
 
     if (!AppState.currentPlace) return;
+    // Com a passagem do computador na tela, a seta é da página (rolar) e NÃO
+    // responde com o aviso da trava: não há card à vista pra travar.
+    if (AppState.passagemNaTela === true) return;
     // Tecla SEGURADA não decide em série (R19-2-01). O sistema repete o `keydown`
     // com `repeat` verdadeiro a ~30 Hz, e `triggerSwipe` só ignora a repetição
     // durante a animação de 350 ms e a janela do Desfazer: sem o Desfazer, três
@@ -7298,6 +7472,13 @@ function showAuthScreen() {
     // partir do JS são a única fonte de verdade.
     document.documentElement.classList.remove('tem-sessao');
     mostrarControlesDeSessao(false);
+    // O QR da passagem é credencial de uma sessão que acabou: sai com ela (o
+    // código emitido é cancelado pelo "Sair", `pareamentosEmitidos`).
+    document.documentElement.classList.remove('passagem-ativa');
+    document.getElementById('passagemScreen')?.classList.add('hidden');
+    AppState.passagemNaTela = false;
+    limparPassagem();
+    loginNestaPagina = false;
     document.getElementById('authScreen').classList.remove('hidden');
     document.getElementById('appScreen').classList.add('hidden');
     document.getElementById('filtersBtn').classList.add('hidden');
@@ -7354,6 +7535,9 @@ function showMainScreen() {
     // Com a sessão de volta (a renovação pela extensão, com o card na tela), o
     // card destrava: sem sessão ele fica travado (ver `acoesTravadas`).
     aplicarTravaDeAcao();
+    // No computador de tela larga, a passagem toma o lugar do placar e do card
+    // (ver `aplicarPassagem`): depois de `authenticated` e da trava.
+    aplicarPassagem();
     // E o que esperava a sessão na fila de saída volta a aparecer — a queda o
     // tirou da tela (`derrubarSessao`, R14-8-09) —, até o esvaziamento mandá-lo.
     updateInFlightIndicator();
@@ -7442,6 +7626,7 @@ async function authenticateWithCookies(cookies, { peloTeclado = false } = {}) {
         if (result.success) {
             guardarPrazoDaSessao(result);
             aoEntrarNestaPagina();
+            loginNestaPagina = true;   // login NOVO: a passagem do computador oferece o QR já pronto
             // O que a tela de entrada tinha aberto sai COM a limpeza, e o foco que
             // estava nela vai ao ✕ do primeiro card — como no resgate do código e
             // na entrada pela extensão (R10-1-05). O "Entrar com um código" aberto
@@ -15682,6 +15867,9 @@ let comoFuncionaEsperaGesto = false;
 function mostrarComoFuncionaSePrimeiraVez() {
     if (AppState.preferences.comoFuncionaVisto) return;
     if (Treino.ativo) return;   // o treino É o "como funciona"; ver `Treino.entrar`
+    // Com a passagem do computador na tela o card está escondido: o aviso fala dos
+    // botões DELE. Quem o pede de novo é o `aplicarPassagem`, quando o card volta.
+    if (AppState.passagemNaTela === true) return;
     // Só quando existe card na tela: o aviso fala dos botões DELE, e aparecer
     // sobre "Tudo limpo!" ou sobre o esqueleto de carregamento explicaria algo
     // que a pessoa não está vendo.
@@ -17990,10 +18178,13 @@ function acoesTravadas() {
     // aba a acender (`AppState.contaEmDuvida`); a dúvida mesma é lida na hora.
     // E o card que é ALVO de um "Marcar todos" ainda no ar, mesmo depois de a
     // queda ou a conta em dúvida desligarem o `loteDeLidosEmVoo` (R17-2-05).
+    // E a PASSAGEM do computador na tela: o card está escondido, e decidir um
+    // pedido que ninguém vê não tem volta.
     return !!(!AppState.authenticated || AppState.pendingAction || aprovacaoPendente || exclusaoPendente
         || renomeacaoPendente || loteDeLidosEmVoo || escritasConferindo > 0 || aprovacaoDaTelaNoAr()
         || loteDeLidosDaTelaNoAr()
-        || (AppState.contaEmDuvida === true && contaDestaAbaEmDuvida()));
+        || (AppState.contaEmDuvida === true && contaDestaAbaEmDuvida())
+        || AppState.passagemNaTela === true);
 }
 
 // A trava do card MENOS as janelas do Desfazer (a do card e as do lightbox),
@@ -27965,6 +28156,8 @@ const Treino = {
             recusaPedida: false, abrirGuardada: false, filaGuardadaLida: null, refazerFila: false, avisoDoPais: null };
         AppState.autorEmFoco = null;
         this.ativo = true;
+        // O treino mostra o card: a passagem do computador sai da frente.
+        if (typeof aplicarPassagem === 'function') aplicarPassagem();
         this.passo = 0;
         // Os avisos de UMA vez que JÁ estavam na tela (a consequência do 1º ✕, o
         // desbloqueio do Desfazer, a dica) saem com a fila real e VOLTAM a
@@ -28196,6 +28389,8 @@ const Treino = {
     encerrar() {
         if (!this.ativo) return;
         this.ativo = false;
+        // Sem o treino, a passagem do computador (se vale) volta a tomar o lugar do card.
+        if (typeof aplicarPassagem === 'function') aplicarPassagem();
         // O aviso que o treino pôs no último gesto ("No modo real, isto
         // enviaria…") sai com ele: ficava até 5 s sobre os ✕ ↑ ✓ do card REAL,
         // falando de um gesto que não existe mais (auditoria da rodada 10, R10-7).
@@ -31077,6 +31272,9 @@ function lerPreferenciasGuardadas() {
                 ? parsed.manterConectado : MANTER_CONECTADO_PADRAO;
             // Opt-IN estrito tambem: quem nunca marcou nao paga byte nenhum.
             AppState.preferences.offlineDisponivel = parsed.offlineDisponivel === true;
+            // O "Continuar neste computador" da passagem: só vale quem DISSE (estrito). Sem esta
+            // linha a escolha era gravada e nunca relida, e a passagem voltava a cada abertura.
+            AppState.preferences.passagemDispensada = parsed.passagemDispensada === true;
             // undefined = nunca decidido (user antigo ou primeira visita).
             // Só copia se for boolean, pra initUndoGateSeen poder decidir depois.
             if (typeof parsed.undoGateSeen === 'boolean') {

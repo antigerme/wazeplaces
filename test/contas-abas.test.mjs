@@ -1519,7 +1519,8 @@ test('A11: a frase mora no diálogo do "Sair", nas 4 línguas, com o número de 
 
 test('preferências de fábrica: o app recém-aberto, o "Sair" e a releitura usam a MESMA função', () => {
   const { preferenciasDeFabrica } = montar(['preferenciasDeFabrica'], { MANTER_CONECTADO_PADRAO: true });
-  assert.deepEqual(preferenciasDeFabrica(), { undoEnabled: true, semUndoSeguidas: 0, presenca: true, pularGuarda: false, manterConectado: true });
+  assert.deepEqual(preferenciasDeFabrica(), { undoEnabled: true, semUndoSeguidas: 0, presenca: true, pularGuarda: false, manterConectado: true,
+    passagemDispensada: false });   // a passagem do computador (v2026.11.15-04): volta ao de fábrica no "Sair"
   assert.notEqual(preferenciasDeFabrica(), preferenciasDeFabrica(), 'um objeto só pra todos: mexer num mexeria no outro');
   const estado = APP_SEM.slice(APP_SEM.indexOf('const AppState = {'), APP_SEM.indexOf('\n};', APP_SEM.indexOf('const AppState = {')));
   assert.match(estado, /^\s+preferences: preferenciasDeFabrica\(\),$/m, 'o app recém-aberto voltou a ter um literal próprio');
