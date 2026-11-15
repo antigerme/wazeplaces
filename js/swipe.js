@@ -87,6 +87,18 @@ function avisarFimDoGesto(card) {
 // baixa, então nada de cortar a raiz o tempo todo. Exige o card no DOM: o
 // arraste ÓRFÃO (ver o `handleDragStart`) deixa o `isDragging` preso, e uma
 // classe presa travaria a rolagem da página inteira.
+// De onde veio o gesto e pra onde ele sai: o gravador do modo dev (`diagGestoAoMudar`,
+// no app.js) lê isto a cada mudança de estado, e o `swipe.js` não grava nada. `origem`
+// é o que COMEÇOU o gesto ('arraste' ou 'botao', que também é a seta do teclado);
+// `direcao`, a da saída (left, right, up), e só existe quando o card sai.
+let gestoOrigem = null;
+let gestoDirecao = null;
+window.gestoAtual = () => {
+    const vivo = (card) => !!card && card.isConnected;
+    const fase = vivo(cardSaindo) ? 'saindo' : vivo(cardVoltando) ? 'voltando'
+        : (isDragging && vivo(currentCard)) ? 'arrastando' : null;
+    return { origem: gestoOrigem, direcao: gestoDirecao, fase };
+};
 function sincronizarCorteDaPagina() {
     const vivo = (card) => !!card && card.isConnected;
     const emVoo = (isDragging && vivo(currentCard)) || vivo(cardVoltando) || vivo(cardSaindo);
@@ -104,6 +116,10 @@ function sincronizarCorteDaPagina() {
     }
     raiz.classList.toggle('card-em-voo', emVoo);
     if (!emVoo) raiz.classList.remove('card-pagina-rola');
+    // O gravador do modo dev vê CADA mudança, inclusive de fase (arrastando → saindo),
+    // e nunca derruba o gesto. A origem e a direção saem DEPOIS do aviso.
+    try { if (window.diagGestoAoMudar) window.diagGestoAoMudar(emVoo); } catch (err) { /* nunca derruba o gesto */ }
+    if (!emVoo) { gestoOrigem = null; gestoDirecao = null; }
 }
 
 
@@ -299,6 +315,7 @@ function handleDragStart(e) {
     isDragging = true;
     capturouNesteGesto = false;
     currentCard = e.currentTarget;
+    gestoOrigem = 'arraste';
     sincronizarCorteDaPagina();
     if (e.type === 'mousedown') {
         dragTouchId = null;
@@ -530,6 +547,8 @@ function animateSwipeOut(direction, callback) {
     currentCard = null;
     animating = true;
     cardSaindo = card;
+    gestoDirecao = direction;
+    if (!gestoOrigem) gestoOrigem = 'botao';
     sincronizarCorteDaPagina();
 
     // Feedback tátil no commit (Android; iOS ignora silenciosamente)

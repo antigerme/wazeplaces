@@ -703,13 +703,15 @@ console.log('\n7. CARD NO AR — arrastando, saindo ou voltando, a página não 
   const TELA = { width: 393, height: 740 };   // onde o canto girado também passa da borda de BAIXO (+36 px medidos)
 
   // dir: direita | esquerda | cima | volta (arraste de 30 px, abaixo do flick de 40: solto, o card VOLTA e nada decide)
-  async function puxar(dir, { semConserto = false, semRecorteDoBody = false, corteVerticalSempre = false, viewport = TELA, css = '', rolarAteOFim = false, navegador } = {}) {
+  async function puxar(dir, { semConserto = false, semRecorteDoBody = false, gravador = false, corteVerticalSempre = false, viewport = TELA, css = '', rolarAteOFim = false, navegador } = {}) {
     const { ctx, page, errosJs } = await novaPagina({ viewport, navegador });
     if (css) { await page.addStyleTag({ content: css }); await page.waitForTimeout(350); }
     // O conserto são DUAS regras (o corte da raiz e o recorte do body): o controle desliga as duas.
     if (semConserto) await page.addStyleTag({ content: 'html.card-em-voo { overflow: visible !important; } html.card-em-voo body { overflow: visible !important; }' });
     // E só o recorte do body: prova que ele é o que segura o crescimento do tamanho rolável.
     if (semRecorteDoBody) await page.addStyleTag({ content: 'html.card-em-voo body { overflow: visible !important; }' });
+    // O gravador de gestos do modo dev (v2026.11.15-03) só roda com ele ligado.
+    if (gravador) await page.evaluate(() => { AppState.devMode = { unlocked: true, active: true }; });
     // O conserto de ANTES (corte vertical incondicional), pra provar que o guard vê o deslocamento.
     if (corteVerticalSempre) await page.addStyleTag({ content: 'html.card-em-voo { overflow: hidden !important; }' });
     if (rolarAteOFim) { await page.evaluate(() => window.scrollTo(0, 1e6)); await page.waitForTimeout(200); }
@@ -735,10 +737,16 @@ console.log('\n7. CARD NO AR — arrastando, saindo ou voltando, a página não 
       await page.mouse.up();
     }
     const fim = await esperarNaPagina(page, FIM_DO_GESTO, 8000, 100);
+    // O gesto só FECHA 300 ms depois do fim (a folga): espere o sinal positivo de que ele entrou no anel.
+    let gestos = null;
+    if (gravador) {
+      await esperarNaPagina(page, () => diagGestosRecentes(1).length >= 1, 8000, 100);
+      gestos = await page.evaluate(() => ({ lista: diagGestosRecentes(20, true), alertas: diagAlertasDeGestos(dlogGestos), barras: diagBarras() }));
+    }
     const quadros = await page.evaluate(() => window.__quadros);
     const depois = await page.evaluate(AMOSTRA);
     await ctx.close();
-    return { dir, repouso, segurando, quadros, fim, depois, errosJs };
+    return { dir, repouso, segurando, quadros, fim, depois, errosJs, gestos };
   }
   const resumo = (r) => `arrastando ex=${r.segurando.ex} ey=${r.segurando.ey} | voo: pico ex=${Math.max(0, ...r.quadros.map((q) => q.ex))} ey=${Math.max(0, ...r.quadros.map((q) => q.ey))}, quadros com barra=${r.quadros.filter((q) => q.barra).length}`;
   // O que a pessoa NOTARIA mexer: a posição de rolagem, a largura útil (a barra clássica ocupa) e o layout.
@@ -785,6 +793,33 @@ console.log('\n7. CARD NO AR — arrastando, saindo ou voltando, a página não 
   const sbX = Math.max(0, ...sb.quadros.map((q) => q.ex));
   if (sbX <= 0) dizer('card no ar: CONTROLE — sem o recorte do body o tamanho rolável NÃO cresceu: o recorte não é o que segura (ou o guard está cego)', `x=${sbX}`);
   else console.log(`  ok controle: só o corte da raiz (sem o recorte do body) deixa o tamanho rolável crescer — pico ex=${sbX} — ${resumo(sb)}`);
+
+  // ── B2. O GRAVADOR DE GESTOS DO MODO DEV, em gesto de verdade: o arraste e o ✓ viram UM gesto cada, com a
+  // origem e a direção certas, e o pico é ZERO com o conserto e POSITIVO sem ele (o CONTROLE: o gravador
+  // enxerga o crescimento que o diagnóstico antigo só via em foto de instante). O alerta acompanha. ──
+  for (const dir of ['direita', 'botao-lido']) {
+    const r = await puxar(dir, { gravador: true });
+    const onde = `gravador de gestos/${dir}`;
+    const gs = r.gestos && r.gestos.lista;
+    if (!gs || gs.length !== 1) { dizer(`${onde}: esperava UM gesto gravado`, JSON.stringify(gs && gs.map((g) => g.origem))); continue; }
+    const g = gs[0];
+    if (g.origem !== (dir === 'direita' ? 'arraste' : 'botao')) dizer(`${onde}: origem errada`, String(g.origem));
+    if (g.direcao !== 'right') dizer(`${onde}: direção errada`, String(g.direcao));
+    if (!g.fases.some((f) => f[0] === 'saindo')) dizer(`${onde}: o gesto não passou pela fase "saindo"`, JSON.stringify(g.fases));
+    if (g.quadros < 8) dizer(`${onde}: poucos quadros gravados (o laço não rodou?)`, String(g.quadros));
+    if (g.picoEx > 0 || g.picoEy > 0) dizer(`${onde}: com o conserto o pico do gravador deveria ser ZERO`, `ex=${g.picoEx} ey=${g.picoEy}`);
+    if (r.gestos.alertas.length) dizer(`${onde}: o alerta do gesto disparou com o conserto`, JSON.stringify(r.gestos.alertas.map((a) => a.chave)));
+    if (!r.gestos.barras || typeof r.gestos.barras.sobreposicao !== 'boolean') dizer(`${onde}: a sonda de barras não respondeu`, JSON.stringify(r.gestos.barras));
+    console.log(`  ok gravador ${dir.padEnd(10)} ${g.origem} ${g.direcao}: ${g.quadros} quadros em ${g.durMs} ms, pico +${g.picoEx} × +${g.picoEy} · barras ${r.gestos.barras.sobreposicao ? 'de sobreposição' : `clássicas (${r.gestos.barras.padraoDaPlataforma.larguraPx} px)`}`);
+  }
+  {
+    const r = await puxar('direita', { gravador: true, semConserto: true });
+    const g = r.gestos && r.gestos.lista && r.gestos.lista[0];
+    if (!g || !(g.picoEx > 0 && g.picoEy > 0)) dizer('gravador de gestos: CONTROLE — sem o conserto o gravador NÃO viu o tamanho rolável crescer nos dois eixos; ele está cego', JSON.stringify(g && { ex: g.picoEx, ey: g.picoEy }));
+    else if (r.gestos.alertas.length !== 1 || r.gestos.alertas[0].chave !== 'gestoCresceuTamanhoRolavel') dizer('gravador de gestos: CONTROLE — o gesto que cresceu não gerou o alerta', JSON.stringify(r.gestos.alertas.map((a) => a.chave)));
+    else if (!g.serie.some((p) => p[1] === g.picoEx)) dizer('gravador de gestos: a série não carrega o pico');
+    else console.log(`  ok controle: sem o conserto o gravador vê o pico (+${g.picoEx} × +${g.picoEy} px, aos ${g.picoEm} ms, em ${g.quadros} quadros) e o alerta dispara`);
+  }
 
   // ── C. A página que JÁ ROLA na vertical (texto 1,5× a 360×740, rolada até o fim) ──
   // `overflow: hidden` na raiz de uma página que já rola leva a rolagem de volta pro topo e tira a

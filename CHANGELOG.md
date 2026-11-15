@@ -8,6 +8,13 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.11.15-03
+**O modo dev ficou capaz de dizer, sozinho, o que a página fez durante um gesto.** Até aqui o diagnóstico tirava uma foto do estado no instante em que o arraste cruzava o limiar, e o problema das faixas finas do Android aconteceu depois, na saída do card, e também pelo ✓ e ✕. Só o vídeo dizia quando e quanto. Só com o modo dev ligado (quem não liga não paga nada):
+
+- **Gravador de gestos.** Cada arraste, ✓, ✕ e volta é gravado quadro a quadro, até 300 ms depois do fim: o tamanho rolável da página nos dois eixos, o pico e quando veio, se a rolagem ou o zoom se mexeram e o `overflow` no pico. O relatório leva os últimos 20, e cada captura (inclusive a do botão do modo dev) leva os 8 últimos. Ao ver o problema, toque no botão e o ZIP já traz o que aconteceu naqueles segundos.
+- **Sonda de barras de rolagem.** O relatório diz se o aparelho usa barras clássicas (que ocupam largura) ou de sobreposição, e a espessura. A emulação de celular não desenha as de sobreposição; o aparelho de verdade desenha.
+- **Alerta do gesto.** Um gesto que faz o tamanho rolável da página crescer vira o alerta `gestoCresceuTamanhoRolavel` no relatório, e o triador (`diag-resumo`) ganhou a seção GESTOS, que marca esses gestos.
+
 ## v2026.11.15-02
 **A faixa clara na direita e embaixo, ao arrastar rápido (ou tocar no ✓), tinha outra causa além da que a v2026.11.07-01 tratou.** O vídeo e o diagnóstico do dono, na versão anterior, mostraram duas barras de rolagem retas de 10 px, na cor do polegar do tema escuro: uma à direita e uma embaixo, pelos ~0,35 s da saída do card. A página já estava com a rolagem cortada, mas o conteúdo continuava crescendo (82 × 167 px na captura): no Android o Chrome desenha as barras pelo **tamanho rolável**, não pela rolagem permitida.
 

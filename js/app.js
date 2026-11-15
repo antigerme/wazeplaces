@@ -8793,6 +8793,43 @@ function diagOfflineAgora() {
 // `getBoundingClientRect()`, 40 bytes de JSON.
 //
 // Nada aqui é dado de terceiro: são números da janela e do layout.
+// A SONDA DE BARRAS DE ROLAGEM: este aparelho desenha barra clássica (que ocupa
+// largura) ou de sobreposição (que não ocupa e some)? Medida com um elemento fora da
+// tela com `overflow: scroll` — a diferença entre a largura da caixa e a da área útil
+// É a espessura da barra, e zero é sobreposição. Duas leituras: a COM o estilo do app
+// (`scrollbar-width: thin` e as cores, que o `*` do styles.css põe em todo elemento)
+// e a do PADRÃO da plataforma (`auto`). O relato das faixas finas do Android
+// (2026-11-15) era de barra de sobreposição, que a emulação do Playwright não
+// desenha: sem esta sonda o arquivo não dizia em que mundo o aparelho estava.
+function diagBarras() {
+    const r = {};
+    const h = document.documentElement;
+    const cs = getComputedStyle(h);
+    r.html = { overflowX: cs.overflowX, overflowY: cs.overflowY,
+               scrollbarWidth: cs.scrollbarWidth || null, scrollbarColor: cs.scrollbarColor || null };
+    const cb = getComputedStyle(document.body);
+    r.body = { overflowX: cb.overflowX, overflowY: cb.overflowY };
+    // A largura que a barra DA PÁGINA toma da janela agora (zero com sobreposição ou sem barra).
+    r.larguraTomadaDaJanela = window.innerWidth - h.clientWidth;
+    r.alturaTomadaDaJanela = window.innerHeight - h.clientHeight;
+    const medir = (estilo) => {
+        const sonda = document.createElement('div');
+        sonda.setAttribute('aria-hidden', 'true');
+        sonda.style.cssText = 'position:fixed;left:-300px;top:0;width:100px;height:100px;overflow:scroll;'
+            + 'visibility:hidden;pointer-events:none;' + estilo;
+        const dentro = document.createElement('div');
+        dentro.style.cssText = 'width:300px;height:300px';
+        sonda.appendChild(dentro);
+        document.body.appendChild(sonda);
+        try { return { larguraPx: sonda.offsetWidth - sonda.clientWidth, alturaPx: sonda.offsetHeight - sonda.clientHeight }; }
+        finally { sonda.remove(); }
+    };
+    r.comOEstiloDoApp = medir('');
+    r.padraoDaPlataforma = medir('scrollbar-width:auto;');
+    r.sobreposicao = r.padraoDaPlataforma.larguraPx === 0 && r.padraoDaPlataforma.alturaPx === 0;
+    return r;
+}
+
 function diagComputado() {
     const fora = {};
     try {
@@ -8868,6 +8905,8 @@ function diagComputado() {
             // vertical que aparece é legítimo (ver `sincronizarCorteDaPagina`).
             jaRolavaNaVertical: document.documentElement.classList.contains('card-pagina-rola'),
         };
+        // Barra clássica ou de sobreposição, e a espessura dela (ver `diagBarras`).
+        fora.barras = (() => { try { return diagBarras(); } catch (e) { return { erro: String((e && e.message) || e).slice(0, 120) }; } })();
         // A foto do card da FRENTE: o aviso de "precisa de sinal" está lá, e a
         // foto carregou? Os dois juntos são o defeito do relato de 2026-09-22
         // (ver a sentinela `fotoEscondidaComAviso`). Só o da frente: o de fundo
@@ -10099,6 +10138,214 @@ function diagSentinelas(comp) {
 // sentinelas leem — sentinela que nascer depois ainda pode ser conferida contra
 // a captura velha. Custa ~1,5 KB por captura, contra os ~147 KB do `dom`, e
 // nunca derruba a captura: o que falhar vira alerta, como no relatório.
+// ── O GRAVADOR DE GESTOS (modo dev) ───────────────────────────────────────
+//
+// POR QUE EXISTE: o diagnóstico tirava UMA foto do estado, no instante em que o
+// arraste cruzava o limiar — e o defeito das barras finas à direita e embaixo
+// (2026-11-15) acontecia DEPOIS, nos ~21 quadros da SAÍDA do card, e também pelo
+// ✓/✕ (que nem passam pelo arraste). O ZIP dizia o estado de um instante e só o
+// vídeo dizia quando e quanto. Aqui o app grava o que a PÁGINA fez durante cada
+// gesto, quadro a quadro, e o relatório leva os últimos 20: ao ver o problema, a
+// pessoa toca no botão do modo dev e o ZIP já traz o que aconteceu naqueles
+// segundos, sem vídeo.
+//
+// O QUE É UM GESTO: o intervalo em que `html.card-em-voo` está ligado (arrastando,
+// saindo ou voltando; ver `sincronizarCorteDaPagina` no swipe.js, que AVISA aqui
+// por `diagGestoAoMudar` e não grava nada), MAIS 300 ms de folga (o fim da
+// animação e o que o navegador faz depois). Voltar a pegar o card na folga
+// continua o MESMO gesto. A origem é 'arraste' ou 'botao' (a seta do teclado
+// também), e a direção é a da saída.
+//
+// O QUE SE GRAVA POR GESTO: o tamanho rolável da página (`scrollWidth -
+// clientWidth` e o vertical) a cada quadro — o que o Chrome do Android desenha
+// como barra —, o pico e quando ele veio, quantos quadros passaram de 1 px
+// (rolável, não rolável pelo `overflow`), se algum teve excesso SEM a classe do
+// corte, se a rolagem se mexeu, se o `visualViewport` mudou de escala ou posição,
+// o `overflow` computado do `html` e do `body` no pico, e uma série ≤ 40 pontos.
+// Sem texto, id nem nome: só números.
+//
+// SÓ COM O MODO DEV LIGADO. O laço de quadros lê o layout a cada quadro, e isso
+// é custo que o app não paga com ele desligado (regra do projeto: nada novo é
+// coletado sem o modo dev). Fica em memória, sai no "Sair" (`dlogApagar`) e as
+// capturas levam os 8 últimos sem a série (é o que vai pro aparelho com elas).
+const DIAG_GESTOS_MAX = 20;
+const DIAG_GESTO_FOLGA_MS = 300;
+const DIAG_GESTO_QUADROS_MAX = 240;   // 4 s a 60 quadros: o teto de um arraste segurado
+const DIAG_GESTO_SERIE_MAX = 40;
+let dlogGestos = [];
+let diagGestoAtual = null;
+
+function diagTamanhoRolavel() {
+    const e = document.scrollingElement || document.documentElement;
+    return { ex: e.scrollWidth - e.clientWidth, ey: e.scrollHeight - e.clientHeight,
+             sx: window.scrollX || 0, sy: window.scrollY || 0 };
+}
+
+// O `overflow` COMPUTADO do html e do body, e as classes do gesto: o que o navegador
+// decidiu, não o que o CSS pediu. Só no PICO (lê o estilo, que custa).
+function diagOverflowDaPagina() {
+    const h = document.documentElement, b = document.body;
+    const o = (el) => { const c = getComputedStyle(el); return c.overflowX + '/' + c.overflowY; };
+    return { html: o(h), body: o(b), classes: [...h.classList].filter((c) => c.startsWith('card-')) };
+}
+
+function diagGestoComecar() {
+    const h = document.documentElement, vv = window.visualViewport;
+    return {
+        t0: Date.now(), p0: performance.now(),
+        origem: null, direcao: null, fases: [],
+        // A página JÁ rolava na vertical quando o gesto começou (`card-pagina-rola`): o excesso
+        // vertical dela é legítimo (ver `sincronizarCorteDaPagina`).
+        jaRolava: h.classList.contains('card-pagina-rola'),
+        quadros: 0, comExcessoX: 0, comExcessoY: 0, semClasseComExcesso: 0,
+        picoEx: 0, picoEy: 0, picoEm: 0, overflowNoPico: null,
+        rolouX: 0, rolouY: 0, vvMudou: false, truncado: false,
+        inicio: diagTamanhoRolavel(),
+        vv0: vv ? [vv.scale, vv.offsetLeft, vv.offsetTop, vv.pageLeft] : null,
+        serie: [], fimDoGesto: null, fechado: false, timer: null,
+    };
+}
+
+function diagGestoAmostrar(g) {
+    if (g.fechado) return;
+    if (g.quadros >= DIAG_GESTO_QUADROS_MAX) { g.truncado = true; return; }
+    const m = diagTamanhoRolavel();
+    const ms = Math.round(performance.now() - g.p0);
+    g.quadros++;
+    if (m.ex > 1) g.comExcessoX++;
+    if (m.ey > 1) g.comExcessoY++;
+    if ((m.ex > 1 || m.ey > 1) && !document.documentElement.classList.contains('card-em-voo')) g.semClasseComExcesso++;
+    if (m.ex > g.picoEx || m.ey > g.picoEy) {
+        g.picoEx = Math.max(g.picoEx, m.ex);
+        g.picoEy = Math.max(g.picoEy, m.ey);
+        g.picoEm = ms;
+        g.overflowNoPico = diagOverflowDaPagina();
+    }
+    g.rolouX = Math.max(g.rolouX, Math.abs(m.sx - g.inicio.sx));
+    g.rolouY = Math.max(g.rolouY, Math.abs(m.sy - g.inicio.sy));
+    const vv = window.visualViewport;
+    if (vv && g.vv0 && (Math.abs(vv.scale - g.vv0[0]) > 0.001 || Math.abs(vv.offsetLeft - g.vv0[1]) > 0.5
+        || Math.abs(vv.offsetTop - g.vv0[2]) > 0.5 || Math.abs(vv.pageLeft - g.vv0[3]) > 0.5)) g.vvMudou = true;
+    g.serie.push([ms, m.ex, m.ey]);
+}
+
+// O laço: um quadro a cada `requestAnimationFrame` até o gesto fechar. Se a página
+// for pro fundo o laço para, mas o gesto fecha pelo temporizador da folga.
+function diagGestoLaco(g) {
+    const passo = () => {
+        if (g.fechado || diagGestoAtual !== g) return;
+        diagGestoAmostrar(g);
+        requestAnimationFrame(passo);
+    };
+    requestAnimationFrame(passo);
+}
+
+// No máximo `DIAG_GESTO_SERIE_MAX` pontos, igualmente espaçados, com o primeiro, o
+// último e o PICO sempre dentro (sem ele a série esconderia o que se procura).
+function diagReduzirSerie(serie) {
+    if (serie.length <= DIAG_GESTO_SERIE_MAX) return serie;
+    let pico = 0;
+    for (let i = 1; i < serie.length; i++) if (serie[i][1] + serie[i][2] > serie[pico][1] + serie[pico][2]) pico = i;
+    const quer = new Set([0, serie.length - 1, pico]);
+    const passo = (serie.length - 1) / (DIAG_GESTO_SERIE_MAX - 1);
+    for (let k = 0; quer.size < DIAG_GESTO_SERIE_MAX; k++) quer.add(Math.round(k * passo));
+    return [...quer].sort((a, b) => a - b).slice(0, DIAG_GESTO_SERIE_MAX).map((i) => serie[i]);
+}
+
+function diagGestoFechar(g) {
+    if (g.fechado) return;
+    g.fechado = true;
+    g.timer = null;
+    if (diagGestoAtual === g) diagGestoAtual = null;
+    if (!dlogLigado()) return;
+    const arredonda = (x) => Math.round(x * 10) / 10;
+    dlogGestos.push({
+        t: new Date(g.t0).toISOString(), origem: g.origem, direcao: g.direcao, fases: g.fases,
+        durMs: g.fimDoGesto !== null ? g.fimDoGesto : Math.round(performance.now() - g.p0),
+        folgaMs: DIAG_GESTO_FOLGA_MS, quadros: g.quadros, jaRolava: g.jaRolava,
+        picoEx: g.picoEx, picoEy: g.picoEy, picoEm: g.picoEm,
+        quadrosComExcesso: { x: g.comExcessoX, y: g.comExcessoY },
+        semClasseComExcesso: g.semClasseComExcesso,
+        rolou: { x: arredonda(g.rolouX), y: arredonda(g.rolouY) }, vvMudou: g.vvMudou,
+        overflowNoPico: g.overflowNoPico,
+        ...(g.truncado ? { truncado: true } : {}),
+        serie: diagReduzirSerie(g.serie),
+    });
+    while (dlogGestos.length > DIAG_GESTOS_MAX) dlogGestos.shift();
+}
+
+// O aviso do `swipe.js`: chamado a CADA mudança de estado do gesto (liga, muda de
+// fase, desliga). Nunca lança: o gesto é do app, o gravador é só testemunha.
+//
+// ELE NÃO AMOSTRA AQUI, só nos quadros (`diagGestoLaco`): o aviso roda no MEIO de uma
+// tarefa de JS — o `concluir` da saída desliga a classe com o card ainda fora da tela e
+// só DEPOIS o remove —, e ler o layout nesse ponto mede um estado que nunca é pintado
+// (a 1ª versão registrou 692 px de excesso com o conserto ligado, que o contador de
+// quadros do smoke via como zero). Quadro é o que a tela desenha.
+function diagGestoAoMudar(emVoo) {
+    if (!dlogLigado()) { diagGestoAtual = null; return; }
+    const info = typeof window.gestoAtual === 'function' ? window.gestoAtual() : {};
+    const agora = performance.now();
+    let g = diagGestoAtual;
+    if (emVoo) {
+        if (!g || g.fechado) { g = diagGestoComecar(); diagGestoAtual = g; diagGestoLaco(g); }
+        // Voltar a pegar o card dentro da folga continua o MESMO gesto.
+        if (g.timer) { clearTimeout(g.timer); g.timer = null; g.fimDoGesto = null; }
+        if (info.origem && !g.origem) g.origem = info.origem;
+        if (info.direcao) g.direcao = info.direcao;
+        const ultima = g.fases[g.fases.length - 1];
+        if (info.fase && (!ultima || ultima[0] !== info.fase)) g.fases.push([info.fase, Math.round(agora - g.p0)]);
+    } else if (g && !g.fechado) {
+        g.fimDoGesto = Math.round(agora - g.p0);
+        g.timer = setTimeout(() => diagGestoFechar(g), DIAG_GESTO_FOLGA_MS);
+    }
+}
+
+// Os últimos `n` gestos FECHADOS. Sem a série (que é o que pesa) na captura, com ela
+// no relatório.
+function diagGestosRecentes(n, comSerie = false) {
+    return dlogGestos.slice(-n).map((g) => {
+        if (comSerie) return g;
+        const { serie, ...resto } = g;
+        return resto;
+    });
+}
+
+// O gesto que ainda está no ar (a captura do arraste cai no MEIO dele).
+function diagGestoEmCurso() {
+    const g = diagGestoAtual;
+    if (!g || g.fechado) return null;
+    return { origem: g.origem, direcao: g.direcao, fases: g.fases, ateAgoraMs: Math.round(performance.now() - g.p0),
+             quadros: g.quadros, jaRolava: g.jaRolava, picoEx: g.picoEx, picoEy: g.picoEy,
+             quadrosComExcesso: { x: g.comExcessoX, y: g.comExcessoY } };
+}
+
+// O gesto FEZ a página crescer? Horizontal nunca é legítimo; o vertical só se a página
+// NÃO rolava quando o gesto começou. É a mesma régua da sentinela `paginaRolaComCardNoAr`
+// e a do triador (`tools/diag-resumo.mjs`): as três concordam, `test/gravador-de-gestos.test.mjs`.
+function diagGestoCresceu(g) {
+    return !!g && (g.picoEx > 1 || (!g.jaRolava && g.picoEy > 1));
+}
+
+function diagAlertasDeGestos(lista) {
+    const ruins = (lista || []).filter(diagGestoCresceu);
+    if (!ruins.length) return [];
+    const pior = ruins.reduce((a, b) => (b.picoEx + b.picoEy > a.picoEx + a.picoEy ? b : a));
+    return [{
+        chave: 'gestoCresceuTamanhoRolavel',
+        msg: `${ruins.length} de ${lista.length} gesto(s) fizeram o tamanho rolável da página crescer com o card no ar — `
+            + 'o navegador desenha barras finas nas bordas direita e de baixo '
+            + `(o pior: ${pior.origem || '?'}${pior.direcao ? ' ' + pior.direcao : ''}, +${pior.picoEx} × +${pior.picoEy} px)`,
+        gestos: ruins.length, picoEx: pior.picoEx, picoEy: pior.picoEy,
+    }];
+}
+
+function diagResumoDosGestos() {
+    const lista = dlogGestos;
+    return { n: lista.length, comCrescimento: lista.filter(diagGestoCresceu).length,
+             picoEx: Math.max(0, ...lista.map((g) => g.picoEx)), picoEy: Math.max(0, ...lista.map((g) => g.picoEy)) };
+}
+
 function diagNoInstante() {
     try {
         const computado = diagComputado();
@@ -10126,6 +10373,10 @@ function dlogCapturar(motivo) {
             // sumiram; este campo diz quais estavam visíveis no instante.
             // Pelo MESMO filtro do `dom`: o toast copiável do pareamento traz o
             // link com o segredo (D1).
+            // O que a PÁGINA fez nos últimos gestos (sem a série) e no que ainda está no ar:
+            // é o que a foto de um instante não tinha (ver o `GRAVADOR DE GESTOS`).
+            gestos: diagGestosRecentes(8),
+            gestoEmCurso: diagGestoEmCurso(),
             toastsNaTela: [...document.querySelectorAll('#toastContainer > *, #bannerContainer > *')]
                 .map((e) => diagSemSegredoDePareamento((e.textContent || '').trim()).slice(0, 120)),
             estado: {
@@ -10250,6 +10501,8 @@ function dlogCapturarAuto(motivo) {
 function dlogApagar({ soMemoria = false } = {}) {
     dlogAnel = [];
     dlogMomentos = [];
+    dlogGestos = [];
+    diagGestoAtual = null;
     // E o que ficou GUARDADO de aberturas anteriores, no aparelho e na memória:
     // desligado é desligado, e ali há o DOM das capturas, com dado de terceiro.
     diagAberturasAnteriores = [];
@@ -12458,7 +12711,8 @@ async function diagCorpo() {
     // fotos de instantes diferentes — que é como um alerta some do relatório
     // onde ele acabou de aparecer.
     const computado = diagComputado();
-    const alertas = diagSentinelas(computado);
+    // As sentinelas do INSTANTE e a do GESTO (o tamanho rolável que cresceu com o card no ar).
+    const alertas = diagSentinelas(computado).concat(diagAlertasDeGestos(dlogGestos));
     diagTilesLidosAte = Date.now();   // o relatório também LÊ (ver `diagTilesLidosAte`)
     // O RETRATO: o instante em que o diário, as capturas, as chamadas e os erros
     // entram no arquivo. Tudo daqui pra frente é síncrono até a leitura do
@@ -12521,6 +12775,7 @@ async function diagCorpo() {
             // contado no servidor (`contagem`). É o RESUMO: a conversa em si vai
             // pelo registro de chamadas e pelo DOM.
             presencaApp: (() => { try { return window.Presenca?.diag?.() || null; } catch (e) { return { erro: String(e && e.message) }; } })(),
+            gestos: diagResumoDosGestos(),
             // PRIMEIRA coisa a olhar. Vazio = nenhuma invariante conhecida
             // quebrada; não significa "está tudo bem", significa "não é nenhum
             // dos defeitos que já vimos".
@@ -12553,6 +12808,8 @@ async function diagCorpo() {
                                    simultaneas: aberturasMarcadas.filter((a) => a && a.simultanea).length },
         },
         computado,
+        // O que a página fez em cada um dos últimos gestos, quadro a quadro (ver o `GRAVADOR DE GESTOS`).
+        gestos: { max: DIAG_GESTOS_MAX, folgaMs: DIAG_GESTO_FOLGA_MS, lista: diagGestosRecentes(DIAG_GESTOS_MAX, true) },
         // Os DOIS anéis numa linha do tempo só: o sempre-ligado (`dfato`) e o do
         // modo dev (`dlog`). Cada call site escolhe UM dos dois, então não há
         // duplicata — e o `diario` deixa de nascer vazio, que era o buraco que

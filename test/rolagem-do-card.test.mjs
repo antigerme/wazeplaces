@@ -110,11 +110,11 @@ test('rolagem do card: arraste ÓRFÃO (isDragging preso, card fora do DOM) NÃO
 
 test('rolagem do card: a função é chamada em TODA mudança de estado do gesto', () => {
   const quando = [
-    ['começo do arraste', fatiar(SWIPE, 'handleDragStart'), /isDragging = true;\s*capturouNesteGesto = false;\s*currentCard = e\.currentTarget;\s*sincronizarCorteDaPagina\(\);/],
+    ['começo do arraste', fatiar(SWIPE, 'handleDragStart'), /isDragging = true;\s*capturouNesteGesto = false;\s*currentCard = e\.currentTarget;\s*gestoOrigem = 'arraste';\s*sincronizarCorteDaPagina\(\);/],
     ['o cancelamento do arraste', fatiar(SWIPE, 'handleDragCancel'), /voltarProLugar\(currentCard\);\s*currentCard = null;\s*sincronizarCorteDaPagina\(\);/],
     ['a volta pro lugar começa', fatiar(SWIPE, 'voltarProLugar'), /cardVoltando = card;\s*sincronizarCorteDaPagina\(\);/],
     ['a volta pro lugar termina', fatiar(SWIPE, 'voltarProLugar'), /cardVoltando = null;\s*sincronizarCorteDaPagina\(\);/],
-    ['a saída começa', fatiar(SWIPE, 'animateSwipeOut'), /cardSaindo = card;\s*sincronizarCorteDaPagina\(\);/],
+    ['a saída começa', fatiar(SWIPE, 'animateSwipeOut'), /cardSaindo = card;\s*gestoDirecao = direction;\s*if \(!gestoOrigem\) gestoOrigem = 'botao';\s*sincronizarCorteDaPagina\(\);/],
     ['a saída termina', fatiar(SWIPE, 'animateSwipeOut'), /if \(cardSaindo === card\) cardSaindo = null;\s*sincronizarCorteDaPagina\(\);/],
     ['card novo na tela (desfaz o órfão)', fatiar(SWIPE, 'enableSwipeOnCard'), /sincronizarCorteDaPagina\(\);\s*\}$/],
   ];
