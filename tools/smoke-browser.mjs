@@ -359,7 +359,7 @@ browser.newContext = async (opts = {}) => {
       try {
         const k = 'waze_places_preferences';
         const p = JSON.parse(localStorage.getItem(k) || '{}');
-        p.comoFuncionaVisto = true;
+        p.comoFuncionaVisto = true; p.passagemDispensada = true;
         localStorage.setItem(k, JSON.stringify(p));
       } catch (e) { /* armazenamento bloqueado: o teste segue */ }
     });
@@ -1297,7 +1297,7 @@ for (const [nomeA, viewport] of APARELHOS_FONTE) {
       setLang(lang); applyI18n();
       AppState.authenticated = true;
       AppState.profile = { userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
-      AppState.preferences.comoFuncionaVisto = true;
+      AppState.preferences.comoFuncionaVisto = true; AppState.preferences.passagemDispensada = true;
       document.getElementById('authScreen').classList.add('hidden');
       document.getElementById('appScreen').classList.remove('hidden');
       // O que o `showMainScreen` e o `aplicarIdioma` fazem com o texto novo na
@@ -1696,7 +1696,7 @@ for (const [nomeA, viewport] of APARELHOS_FONTE) {
     setLang(lang); applyI18n();
     AppState.authenticated = true;
     AppState.profile = { userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
-    AppState.preferences.comoFuncionaVisto = true;
+    AppState.preferences.comoFuncionaVisto = true; AppState.preferences.passagemDispensada = true;
     document.getElementById('authScreen').classList.add('hidden');
     document.getElementById('appScreen').classList.remove('hidden');
   }, lang);
@@ -4098,7 +4098,7 @@ for (const status of [404, 403]) {
     window.showToast = (m, t, d) => { window.__toasts.push(String(m)); return window.__origToast(m, t, d); };
     API.setSession('token-de-teste');
     AppState.authenticated = true;
-    AppState.preferences.comoFuncionaVisto = true;
+    AppState.preferences.comoFuncionaVisto = true; AppState.preferences.passagemDispensada = true;
     AppState.profile = { userName: 'antigerme', rank: 5, isAreaManager: true, isStaff: false, areas: [] };
     document.getElementById('authScreen').classList.add('hidden');
     document.getElementById('appScreen').classList.remove('hidden');
@@ -4360,7 +4360,7 @@ for (const status of [404, 403]) {
   const r = await page.evaluate(async () => {
     API.setSession('token-de-teste');
     AppState.authenticated = true;
-    AppState.preferences.comoFuncionaVisto = true;
+    AppState.preferences.comoFuncionaVisto = true; AppState.preferences.passagemDispensada = true;
     AppState.profile = { userName: 'antigerme', rank: 5, isAreaManager: true, isStaff: false, areas: [] };
     resetQueue();
     await fetchNextPage();
@@ -4440,7 +4440,7 @@ for (const status of [404, 403]) {
     AppState.authenticated = true;
     AppState.devMode = { unlocked: true, active: true };
     AppState.preferences.undoEnabled = false;
-    AppState.preferences.comoFuncionaVisto = true;
+    AppState.preferences.comoFuncionaVisto = true; AppState.preferences.passagemDispensada = true;
     AppState.profile = { id: 1, userName: 'antigerme', rank: 5, isAreaManager: true, isStaff: false, areas: [] };
     document.getElementById('authScreen').classList.add('hidden');
     document.getElementById('appScreen').classList.remove('hidden');
@@ -4937,7 +4937,7 @@ for (const status of [404, 403]) {
     await page.evaluate(async (d) => {
       API.setSession('tok'); AppState.authenticated = true;
       AppState.profile = { id: 1, userName: 'a', rank: 1, isAreaManager: true, isStaff: false };
-      AppState.preferences.comoFuncionaVisto = true;
+      AppState.preferences.comoFuncionaVisto = true; AppState.preferences.passagemDispensada = true;
       AppState.devMode = { unlocked: d, active: d };
       document.getElementById('authScreen').classList.add('hidden');
       document.getElementById('appScreen').classList.remove('hidden');
@@ -5006,7 +5006,7 @@ for (const status of [404, 403]) {
         sessionStorage.setItem('__cfAdiado', '1');
         localStorage.setItem('waze_session_token', 'token-smoke');
         localStorage.setItem('waze_places_lang', 'pt');
-        localStorage.setItem('waze_places_preferences', JSON.stringify(visto ? { undoEnabled: true, comoFuncionaVisto: true } : { undoEnabled: true }));
+        localStorage.setItem('waze_places_preferences', JSON.stringify(visto ? { undoEnabled: true, comoFuncionaVisto: true, passagemDispensada: true } : { undoEnabled: true }));
       } catch (e) { /* armazenamento bloqueado: o teste segue */ }
     }, visto);
     const places = [1, 2, 3].map((n) => pedido(n, fotos));
@@ -5465,7 +5465,7 @@ for (const [aparelho, viewport] of APARELHOS_TREINO) {
     const page = await ctx.newPage();
     await page.addInitScript((l) => {
       localStorage.setItem('waze_places_lang', l);
-      localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true }));
+      localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true, passagemDispensada: true }));
     }, lg);
     await page.goto(BASE, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(450);
@@ -5582,7 +5582,7 @@ for (const [aparelho, viewport] of APARELHOS_TREINO) {
     });
     await page.addInitScript((l) => {
       localStorage.setItem('waze_places_lang', l);
-      localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true }));
+      localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true, passagemDispensada: true }));
     }, lg);
     await page.goto(BASE, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(450);
@@ -5718,7 +5718,7 @@ for (const como of ['teclado', 'mouse']) {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' });
   const page = await ctx.newPage();
   await page.addInitScript(() => localStorage.setItem('waze_places_preferences',
-    JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true })));
+    JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true, passagemDispensada: true })));
   await page.goto(BASE, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(400);
   await page.evaluate(() => {
@@ -5796,7 +5796,7 @@ for (const como of ['teclado', 'mouse']) {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' });
     const page = await ctx.newPage();
     await page.addInitScript(() => localStorage.setItem('waze_places_preferences',
-      JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true })));
+      JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true, passagemDispensada: true })));
     await page.goto(BASE, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(400);
     await page.evaluate(() => {
@@ -6001,7 +6001,7 @@ for (const como of ['teclado', 'mouse']) {
   const erros = [];
   page.on('pageerror', (e) => erros.push(e.message));
   await page.addInitScript(() => localStorage.setItem('waze_places_preferences',
-    JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true })));
+    JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true, passagemDispensada: true })));
   await page.route('**/api/buscar-places', (r) => r.fulfill({ status: 200, contentType: 'application/json',
     body: JSON.stringify({ success: true, places: [], hasMore: false, page: 1, total: 0 }) }));
   await page.route('**/api/perfil', (r) => r.fulfill({ status: 200, contentType: 'application/json',
@@ -6059,7 +6059,7 @@ for (const suporte of [true, false]) {
   const erros = [];
   page.on('pageerror', (e) => erros.push(e.message));
   await page.addInitScript((sup) => {
-    localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true, undoGateSeen: true, dicaDesfazerVista: true }));
+    localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true, passagemDispensada: true, undoGateSeen: true, dicaDesfazerVista: true }));
     window.__badge = []; window.__permPedida = false;
     if (sup) {
       navigator.setAppBadge = (...a) => { window.__badge.push(['set', a.length ? a[0] : 'ponto']); return Promise.resolve(); };
@@ -6148,7 +6148,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     page.on('pageerror', (e) => erros.push(e.message));
     await page.addInitScript((lg) => {
       localStorage.setItem('waze_places_lang', lg);
-      localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true, undoGateSeen: true, dicaDesfazerVista: true }));
+      localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true, passagemDispensada: true, undoGateSeen: true, dicaDesfazerVista: true }));
     }, lang);
     await page.goto(BASE, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(500);
@@ -6299,7 +6299,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   const erros = [];
   page.on('pageerror', (e) => erros.push(e.message));
   await page.addInitScript(() => localStorage.setItem('waze_places_preferences',
-    JSON.stringify({ undoEnabled: false, comoFuncionaVisto: true, undoGateSeen: true, dicaDesfazerVista: true })));
+    JSON.stringify({ undoEnabled: false, comoFuncionaVisto: true, passagemDispensada: true, undoGateSeen: true, dicaDesfazerVista: true })));
   await page.goto(BASE, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(500);
 
@@ -6391,7 +6391,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     const erros = [];
     page.on('pageerror', (e) => erros.push(e.message));
     await page.addInitScript(() => localStorage.setItem('waze_places_preferences',
-      JSON.stringify({ undoEnabled: false, comoFuncionaVisto: true, undoGateSeen: true, dicaDesfazerVista: true })));
+      JSON.stringify({ undoEnabled: false, comoFuncionaVisto: true, passagemDispensada: true, undoGateSeen: true, dicaDesfazerVista: true })));
     await page.goto(BASE, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(500);
     const onde = `avatar · ${cenario}`;
@@ -6569,7 +6569,7 @@ for (const sistema of ['dark', 'light']) {
     await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
   });
   await page.addInitScript(() => localStorage.setItem('waze_places_preferences',
-    JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true })));
+    JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true, passagemDispensada: true })));
   await page.goto(BASE, { waitUntil: 'domcontentloaded' });
   await esperarOuExplodir(page, () => typeof AppState !== 'undefined' && typeof showMainScreen === 'function', 'o app');
   await page.evaluate(() => {
@@ -6700,7 +6700,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   const erros = [];
   page.on('pageerror', (e) => erros.push(e.message));
   await page.addInitScript(() => localStorage.setItem('waze_places_preferences',
-    JSON.stringify({ undoEnabled: false, comoFuncionaVisto: true, undoGateSeen: true, dicaDesfazerVista: true })));
+    JSON.stringify({ undoEnabled: false, comoFuncionaVisto: true, passagemDispensada: true, undoGateSeen: true, dicaDesfazerVista: true })));
   await page.goto(BASE, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(500);
 
@@ -6775,7 +6775,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   const erros = [];
   page.on('pageerror', (e) => erros.push(e.message));
   await page.addInitScript(() => localStorage.setItem('waze_places_preferences',
-    JSON.stringify({ undoEnabled: false, comoFuncionaVisto: true, undoGateSeen: true, dicaDesfazerVista: true })));
+    JSON.stringify({ undoEnabled: false, comoFuncionaVisto: true, passagemDispensada: true, undoGateSeen: true, dicaDesfazerVista: true })));
   await page.goto(BASE, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(500);
 
@@ -6881,7 +6881,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
         const onde = `duplicado ${aparelho}/${lang}/${nome}`;
         await page.evaluate(({ pl, l }) => {
           setLang(l);
-          AppState.preferences.comoFuncionaVisto = true;
+          AppState.preferences.comoFuncionaVisto = true; AppState.preferences.passagemDispensada = true;
           try { closeModal('comoFuncionaModal'); } catch {}
           AppState.authenticated = true;
           AppState.profile = { id: 1, userName: 'editor', rank: 5, isAreaManager: true, isStaff: false };
@@ -7023,7 +7023,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       await page.goto(BASE, { waitUntil: 'domcontentloaded' });
       await page.waitForTimeout(200);
       await page.evaluate((pl) => {
-        AppState.preferences.comoFuncionaVisto = true;
+        AppState.preferences.comoFuncionaVisto = true; AppState.preferences.passagemDispensada = true;
         AppState.preferences.undoGateSeen = true;
         try { closeModal('comoFuncionaModal'); } catch {}
         AppState.authenticated = true;
@@ -7132,7 +7132,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   const CARD_REALCE_PLACE = PLACE_REN;
   const montarRen = (pl, rank, am, treino) => {
     API.setSession('tok-smoke');
-    AppState.preferences.comoFuncionaVisto = true;
+    AppState.preferences.comoFuncionaVisto = true; AppState.preferences.passagemDispensada = true;
     AppState.preferences.undoGateSeen = true;
     try { closeModal('comoFuncionaModal'); } catch {}
     AppState.authenticated = true;
@@ -8633,7 +8633,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     const ctx = await browser.newContext({ viewport, serviceWorkers: 'block', locale: 'pt-BR' });
     const page = await ctx.newPage();
     await page.addInitScript(() =>
-      localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true })));
+      localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true, passagemDispensada: true })));
     await page.goto(BASE, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(450);
     await page.evaluate((pl) => {
@@ -8698,7 +8698,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       const page = await ctx.newPage();
       await page.addInitScript((l) => {
         localStorage.setItem('waze_places_lang', l);
-        localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true }));
+        localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true, passagemDispensada: true }));
       }, lang);
       await page.goto(BASE, { waitUntil: 'domcontentloaded' });
       await page.waitForTimeout(450);
@@ -8800,7 +8800,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     const page = await ctx.newPage();
     await page.addInitScript((l) => {
       localStorage.setItem('waze_places_lang', l);
-      localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true }));
+      localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true, passagemDispensada: true }));
     }, lang);
     await page.goto(BASE, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(450);
@@ -8919,7 +8919,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
           sessionStorage.setItem('__seletores', '1');
           localStorage.setItem('waze_session_token', 'tok-smoke-seletores');
           localStorage.setItem('waze_places_lang', l);
-          localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true }));
+          localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true, passagemDispensada: true }));
         } catch (e) { /* armazenamento bloqueado: o teste segue */ }
       }, lang);
       await ctx.route('**/api/**', async (route) => {
@@ -9028,7 +9028,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       const page = await ctx.newPage();
       await page.addInitScript((l) => {
         localStorage.setItem('waze_places_lang', l);
-        localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true }));
+        localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true, passagemDispensada: true }));
       }, lang);
       await page.goto(BASE, { waitUntil: 'domcontentloaded' });
       await page.waitForTimeout(450);
@@ -9095,7 +9095,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   const errosR = [];
   page.on('pageerror', (e) => errosR.push(String(e).slice(0, 120)));
   await page.addInitScript(() => localStorage.setItem('waze_places_preferences',
-    JSON.stringify({ undoEnabled: false, comoFuncionaVisto: true, undoGateSeen: true })));
+    JSON.stringify({ undoEnabled: false, comoFuncionaVisto: true, passagemDispensada: true, undoGateSeen: true })));
   await page.goto(BASE, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(450);
   await page.evaluate((x) => {
@@ -9191,7 +9191,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
   const errosT = [];
   page.on('pageerror', (e) => errosT.push(String(e)));
   await page.addInitScript(() => localStorage.setItem('waze_places_preferences',
-    JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true })));
+    JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true, passagemDispensada: true })));
   await page.goto(BASE, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(450);
 
@@ -10147,7 +10147,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     const errosR = [];
     page.on('pageerror', (e) => errosR.push(String(e)));
     await page.addInitScript(() => {
-      localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true }));
+      localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true, passagemDispensada: true }));
       // Um mês com forma: dois dias ativos, o de hoje claramente o mais forte.
       // Só dias que JÁ existem (o 1º e o de hoje), pra não depender da data em
       // que o CI roda — e somando, porque no dia 1 os dois são o mesmo balde.
@@ -10381,7 +10381,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     // Hoje 12 · 1, ontem 5 · 3 (a semana e o mês somam 17 · 4) e o total 40 · 9: o 1 cai nos DOIS plurais.
     const h = { _total: { read: 40, rejected: 9 } }; h[k(d)] = { read: 12, rejected: 1 }; h[k(ontem)] = { read: 5, rejected: 3 };
     localStorage.setItem('waze_places_history', JSON.stringify(h));
-    localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true }));
+    localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true, passagemDispensada: true }));
   });
   await page.goto(BASE, { waitUntil: 'load' });
   await esperarOuExplodir(page, () => typeof AppState !== 'undefined', 'AppState');
@@ -10592,7 +10592,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       const d = new Date(), p = (n) => String(n).padStart(2, '0');
       const h = { _total: { read: 20, rejected: 5 } }; h[`${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`] = { read: 20, rejected: 5 };
       localStorage.setItem('waze_places_history', JSON.stringify(h));
-      localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true }));
+      localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true, passagemDispensada: true }));
     }, nomeAp === 'sem canShare' ? 'sem' : (compartilha ? 'sim' : 'nao'));
     await page.goto(BASE, { waitUntil: 'load' });
     await esperarOuExplodir(page, () => typeof AppState !== 'undefined', 'AppState');
@@ -10650,7 +10650,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     const errosA = [];
     page.on('pageerror', (e) => errosA.push(String(e)));
     await page.addInitScript(() => localStorage.setItem('waze_places_preferences',
-      JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true })));
+      JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true, passagemDispensada: true })));
     await page.goto(BASE, { waitUntil: 'load' });
     await page.waitForTimeout(600);
     await esperarOuExplodir(page, () => typeof AppState !== 'undefined', 'AppState');
@@ -10744,7 +10744,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
       const errosG = [];
       page.on('pageerror', (e) => errosG.push(String(e)));
       await page.addInitScript(() => localStorage.setItem('waze_places_preferences',
-        JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true })));
+        JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true, passagemDispensada: true })));
       await page.goto(BASE, { waitUntil: 'load' });
       await page.waitForTimeout(600);
       await esperarOuExplodir(page, () => typeof AppState !== 'undefined', 'AppState');
@@ -10978,7 +10978,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     const errosG = [];
     page.on('pageerror', (e) => errosG.push(String(e)));
     await page.addInitScript(() => localStorage.setItem('waze_places_preferences',
-      JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true })));
+      JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true, passagemDispensada: true })));
     await page.goto(BASE, { waitUntil: 'load' });
     await esperarOuExplodir(page, () => typeof AppState !== 'undefined', 'AppState');
     const r = await page.evaluate(async () => {
@@ -11438,7 +11438,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
         setLang(lang); applyTheme(tema);
         AppState.authenticated = true;
         AppState.profile = { id: 1, userName: 'a', rank, isAreaManager: true, isStaff: false };
-        AppState.preferences = AppState.preferences || {}; AppState.preferences.comoFuncionaVisto = true;
+        AppState.preferences = AppState.preferences || {}; AppState.preferences.comoFuncionaVisto = true; AppState.preferences.passagemDispensada = true;
         // 4 DÍGITOS de propósito: com 3 o separador nem aparece e a comparação
         // de formato entre placar e cartão passaria sem medir nada.
         AppState.stats = { read: 1430, rejected: 1610, skipped: 35 };
@@ -12226,7 +12226,7 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
         setLang(lang); applyI18n();
         AppState.authenticated = true;
         AppState.profile = { userName: 'a', rank: 5, isAreaManager: true, isStaff: false };
-        AppState.preferences.comoFuncionaVisto = true;
+        AppState.preferences.comoFuncionaVisto = true; AppState.preferences.passagemDispensada = true;
         document.getElementById('authScreen').classList.add('hidden');
         document.getElementById('appScreen').classList.remove('hidden');
         if (typeof medirOPlacarDeNovo === 'function') medirOPlacarDeNovo();
@@ -12479,10 +12479,10 @@ for (const [aparelho, viewport] of [['Galaxy Fold', { width: 280, height: 653 }]
     address: 'Rua ' + n + ', 1', updateTypeKey: 'VENUE', purType: 'NEW_PLACE', createdBy: 'fulano' + n, creatorId: 900 + n,
     creatorRank: 0, lat: -12.9, lon: -38.3, changes: [], mapa: null, localAprovado: true, dateAdded: Date.now() - 3600000 * n, imageUrls: [] });
   const PREFS = {
-    consequencia: { undoEnabled: true, comoFuncionaVisto: true, undoGateSeen: true, dicaDesfazerVista: true },
-    desbloqueio: { undoEnabled: true, comoFuncionaVisto: true, undoGateSeen: false, dicaDesfazerVista: false,
+    consequencia: { undoEnabled: true, comoFuncionaVisto: true, passagemDispensada: true, undoGateSeen: true, dicaDesfazerVista: true },
+    desbloqueio: { undoEnabled: true, comoFuncionaVisto: true, passagemDispensada: true, undoGateSeen: false, dicaDesfazerVista: false,
       consequenciaVista: { read: true, reject: true } },
-    dica: { undoEnabled: true, comoFuncionaVisto: true, undoGateSeen: true, dicaDesfazerVista: false, semUndoSeguidas: 19,
+    dica: { undoEnabled: true, comoFuncionaVisto: true, passagemDispensada: true, undoGateSeen: true, dicaDesfazerVista: false, semUndoSeguidas: 19,
       consequenciaVista: { read: true, reject: true } },
   };
   // `segurarLido`: o ✓ fica no ar até o teste soltar — a página vai pro fundo ANTES de ele pousar.
@@ -15103,7 +15103,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
         localStorage.setItem('waze_session_token', 'tok-a0');
         localStorage.setItem('waze_places_stats', JSON.stringify({ read: 0, rejected: sem ? 20 : 0, skipped: 0 }));
         localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: !sem, presenca: false, undoGateSeen: true,
-          dicaDesfazerVista: true, comoFuncionaVisto: true, consequenciaVista: { reject: true, read: true } }));
+          dicaDesfazerVista: true, comoFuncionaVisto: true, passagemDispensada: true, consequenciaVista: { reject: true, read: true } }));
       } catch (e) { /* armazenamento bloqueado: o teste segue */ }
     }, semJanela);
     await page.goto(BASE, { waitUntil: 'domcontentloaded' });
@@ -15144,7 +15144,9 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
       await esperarOuExplodir(page, () => !document.getElementById('authScreen').classList.contains('hidden') && !AppState.authenticated, 'a tela de entrada depois do "Sair"');
     };
     const entrarPorCookies = async () => {
-      await page.evaluate((c) => { authenticateWithCookies(c); }, COOKIES);
+      // O "Sair" devolve as preferências ao de fábrica, e um login NOVO num computador de janela larga mostra a
+      // passagem (v2026.11.15-04), que esconde o card e trava as ações: o roteiro quer o card.
+      await page.evaluate((c) => { (AppState.preferences.passagemDispensada = true, authenticateWithCookies(c)); }, COOKIES);
       await esperarOuExplodir(page, () => AppState.authenticated === true && !!AppState.profile && AppState.queue.length > 0 && !AppState.fetching, 'o login por cookies chegar à fila');
     };
     const estado = () => page.evaluate(() => {
@@ -15578,7 +15580,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
       localStorage.setItem('waze_session_token', 'tok-abas');
       localStorage.setItem('waze_places_stats', JSON.stringify({ read: 0, rejected: 20, skipped: 0 }));
       localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: false, presenca: true,
-        undoGateSeen: true, dicaDesfazerVista: true, comoFuncionaVisto: true, consequenciaVista: { reject: true, read: true } }));
+        undoGateSeen: true, dicaDesfazerVista: true, comoFuncionaVisto: true, passagemDispensada: true, consequenciaVista: { reject: true, read: true } }));
       for (const [k, v] of Object.entries(mais || {})) localStorage.setItem(k, v);
     }, guardado);
     await A.reload({ waitUntil: 'domcontentloaded' });
@@ -16002,7 +16004,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     await esperarOuExplodir(o.A, naEntrada, 'a aba A voltar à entrada depois da queda');
   };
   const logarNaA = async (conta) => {
-    await o.A.evaluate((c) => authenticateWithCookies(c), cookiesDa(conta));
+    await o.A.evaluate((c) => (AppState.preferences.passagemDispensada = true, authenticateWithCookies(c)), cookiesDa(conta));
     await esperarOuExplodir(o.A, () => AppState.authenticated && !!AppState.profile
       && String(AppState.profile.id) === String(JSON.parse(localStorage.getItem('waze_places_conta') || '{}').id),
       `a aba A entrar com a conta ${conta}`);
@@ -16101,7 +16103,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
       C.on('pageerror', (e) => erros4b.push(String(e.message || e).slice(0, 120)));
       await C.goto(BASE, { waitUntil: 'domcontentloaded' });
       await esperarOuExplodir(C, naEntrada, 'a aba C abrir na entrada');
-      await C.evaluate((c) => authenticateWithCookies(c), cookiesDa(conta));
+      await C.evaluate((c) => (AppState.preferences.passagemDispensada = true, authenticateWithCookies(c)), cookiesDa(conta));
       await esperarOuExplodir(C, () => AppState.authenticated && !!AppState.profile, `a aba C entrar com a conta ${conta}`);
       await dormir(600);
       const depois = await medir();
@@ -16270,7 +16272,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     await esperarOuExplodir(A, () => extPerguntando && !document.getElementById('extLoginState').classList.contains('hidden'),
       'a aba A perguntar à extensão ("Entrando pelo WME…")');
     if (outraEntra) {
-      await B.evaluate((c) => authenticateWithCookies(c), cookiesDa(4242));
+      await B.evaluate((c) => (AppState.preferences.passagemDispensada = true, authenticateWithCookies(c)), cookiesDa(4242));
       await esperarOuExplodir(A, () => !!localStorage.getItem('waze_session_token'), 'a sessão da aba B chegar ao aparelho');
     }
     if (puxar) await A.evaluate(() => { API.getSession(); });   // o que a guarda antiga fazia
@@ -16332,7 +16334,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     await A.evaluate((t) => { document.getElementById('cookiesTextarea').value = t; }, COLANDO);
     const B = await s.abrir();
     await esperarOuExplodir(B, paradaNaEntrada, 'a aba B (sem sessão) chegar à tela de entrada');
-    await B.evaluate((c) => authenticateWithCookies(c), cookiesDa(4242));
+    await B.evaluate((c) => (AppState.preferences.passagemDispensada = true, authenticateWithCookies(c)), cookiesDa(4242));
     await esperarOuExplodir(B, naFilaComCard, 'a aba B entrar pelos cookies');
     const p1 = await A.evaluate(() => window.__perguntas);
     await A.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
@@ -16426,7 +16428,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     await porOFoco(A, foco);
     const B = await s.abrir();
     await esperarOuExplodir(B, paradaNaEntrada, 'a aba B (sem sessão) chegar à tela de entrada');
-    await B.evaluate((c) => authenticateWithCookies(c), cookiesDa(4242));
+    await B.evaluate((c) => (AppState.preferences.passagemDispensada = true, authenticateWithCookies(c)), cookiesDa(4242));
     await esperarOuExplodir(B, naFilaComCard, 'a aba B entrar pelos cookies');
     const antesDaVolta = await telaDaAba(A);
     const focoAntes = await ondeEstaOFoco(A);
@@ -16578,7 +16580,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     if (outraEntra) {
       await esperarOuExplodir(A, () => !document.getElementById('authScreen').classList.contains('hidden'),
         'a aba A mostrar a tela de entrada durante o resgate');
-      await B.evaluate((c) => authenticateWithCookies(c), cookiesDa(4242));
+      await B.evaluate((c) => (AppState.preferences.passagemDispensada = true, authenticateWithCookies(c)), cookiesDa(4242));
       await esperarOuExplodir(B, naFilaComCard, 'a aba B entrar pelos cookies durante o resgate da A');
       soltar();
     }
@@ -16672,7 +16674,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     localStorage.setItem('waze_session_token', 'tok-sair');
     localStorage.setItem('waze_places_stats', JSON.stringify({ read: 0, rejected: 20, skipped: 0 }));
     localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: false, presenca: true, undoGateSeen: true,
-      dicaDesfazerVista: true, comoFuncionaVisto: true, consequenciaVista: { reject: true, read: true } }));
+      dicaDesfazerVista: true, comoFuncionaVisto: true, passagemDispensada: true, consequenciaVista: { reject: true, read: true } }));
   });
   await page.reload({ waitUntil: 'domcontentloaded' });
   await esperarOuExplodir(page, () => AppState.authenticated && !!AppState.profile && !!AppState.currentPlace
@@ -16885,7 +16887,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
       const hoje = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
       localStorage.setItem('waze_session_token', 'tok-r21');
       localStorage.setItem('waze_places_history', JSON.stringify({ _total: { read: 20, rejected: 5 }, [hoje]: { read: 20, rejected: 5 } }));
-      localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoGateSeen: true, dicaDesfazerVista: true }));
+      localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, passagemDispensada: true, undoGateSeen: true, dicaDesfazerVista: true }));
     });
     await page.reload({ waitUntil: 'domcontentloaded' });
     await esperarOuExplodir(page, () => AppState.authenticated && !!AppState.profile && !!AppState.currentPlace, 'o app abrir com a conta da marca');
@@ -17105,7 +17107,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     await page.goto(BASE, { waitUntil: 'domcontentloaded' });
     await page.evaluate(() => {
       localStorage.setItem('waze_session_token', 'token-do-smoke-do-qr');
-      localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false, undoGateSeen: true }));
+      localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, passagemDispensada: true, presenca: false, undoGateSeen: true }));
     });
     const aberta = () => esperarOuExplodir(page, () => AppState.authenticated && !!AppState.profile && !!AppState.currentPlace, 'o app abrir com a sessão salva');
     await page.reload({ waitUntil: 'domcontentloaded' });
@@ -17185,7 +17187,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   const A = await abrir();
   await A.evaluate(() => {
     localStorage.setItem('waze_session_token', 'token-do-smoke-do-bfcache');
-    localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false, undoGateSeen: true }));
+    localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, passagemDispensada: true, presenca: false, undoGateSeen: true }));
   });
   await A.reload({ waitUntil: 'domcontentloaded' });
   await esperarOuExplodir(A, () => AppState.authenticated && !!AppState.profile && !!AppState.currentPlace, 'a aba A abrir com a sessão salva');
@@ -17208,7 +17210,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   // CONTROLE 2: com a sessão ainda no aparelho, o pageshow persistido não derruba.
   await B.evaluate(() => localStorage.setItem('waze_session_token', 'token-do-smoke-do-bfcache'));
   const C = await abrir();
-  await C.evaluate(() => localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false, undoGateSeen: true })));
+  await C.evaluate(() => localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, passagemDispensada: true, presenca: false, undoGateSeen: true })));
   await C.reload({ waitUntil: 'domcontentloaded' });
   await esperarOuExplodir(C, () => AppState.authenticated && !!AppState.profile && !!AppState.currentPlace, 'a aba C abrir com a sessão salva');
   await C.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
@@ -17260,7 +17262,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
       try {
         if (localStorage.getItem('__seed')) return;
         localStorage.setItem('__seed', '1');
-        localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, undoGateSeen: true }));
+        localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, passagemDispensada: true, undoGateSeen: true }));
       } catch (e) { /* armazenamento bloqueado */ }
     }, bloqueado);
     const erros = [];
@@ -17631,7 +17633,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
         for (const nome of ['localStorage', 'indexedDB', 'caches']) {
           Object.defineProperty(window, nome, { get() { throw new DOMException('The operation is insecure.', 'SecurityError'); }, configurable: true });
         }
-      } else { try { localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true })); } catch (e) { /* bloqueado */ } }
+      } else { try { localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, passagemDispensada: true })); } catch (e) { /* bloqueado */ } }
     }, ilegivel);
     const erros = [];
     const page = await ctx.newPage();
@@ -17639,7 +17641,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     await page.goto(BASE, { waitUntil: 'domcontentloaded' });
     await esperarOuExplodir(page, () => !document.getElementById('authScreen').classList.contains('hidden'), 'a tela de entrada');
     const COOKIES = (n) => `# Netscape HTTP Cookie File\n.waze.com\tTRUE\t/\tTRUE\t0\t_web_session\tconta-${n}\n`;
-    page.evaluate((c) => authenticateWithCookies(c), COOKIES(77)).catch(() => {});
+    page.evaluate((c) => (AppState.preferences.passagemDispensada = true, authenticateWithCookies(c)), COOKIES(77)).catch(() => {});
     await esperarOuExplodir(page, () => AppState.authenticated && !!AppState.profile && AppState.profile.id === 77, 'o login da 77');
     await page.evaluate(() => {
       AppState.stats = { read: 3, rejected: 0, skipped: 0 };
@@ -17649,7 +17651,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     // A sessão cai e OUTRA conta entra na mesma aba.
     await page.evaluate(() => derrubarSessao('srv.err.sessionExpired'));
     quem = 88;
-    page.evaluate((c) => authenticateWithCookies(c), COOKIES(88)).catch(() => {});
+    page.evaluate((c) => (AppState.preferences.passagemDispensada = true, authenticateWithCookies(c)), COOKIES(88)).catch(() => {});
     await esperarOuExplodir(page, () => AppState.authenticated && !!AppState.profile && AppState.profile.id === 88, 'o login da 88');
     const r = await page.evaluate(() => ({ stats: { ...AppState.stats }, pularGuarda: AppState.preferences.pularGuarda === true, undoEnabled: AppState.preferences.undoEnabled !== false,
       contaDaAba: contaConfirmadaNestaAba && contaConfirmadaNestaAba.id }));
@@ -17700,7 +17702,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
         if (localStorage.getItem('__seed')) return;
         localStorage.setItem('__seed', '1');
         localStorage.setItem('waze_session_token', 'token-do-smoke-da-contagem');
-        localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false, undoGateSeen: true, undoEnabled: false }));
+        localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, passagemDispensada: true, presenca: false, undoGateSeen: true, undoEnabled: false }));
         localStorage.setItem('waze_places_history', JSON.stringify(h));
         localStorage.setItem('waze_places_stats', JSON.stringify(p));
       } catch (e) { /* armazenamento bloqueado */ }
@@ -17829,7 +17831,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
       try {
         if (sem) Object.defineProperty(navigator, 'locks', { value: undefined, configurable: true });
         localStorage.setItem('waze_session_token', 'token-do-smoke-da-recusa');
-        localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false, undoGateSeen: true, undoEnabled: false }));
+        localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, passagemDispensada: true, presenca: false, undoGateSeen: true, undoEnabled: false }));
         const d = new Date();
         const dia = Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000);
         localStorage.setItem('waze_places_autores', JSON.stringify({ v: [], r: { 9000: [3, 'repetente', dia, 1] } }));
@@ -17955,7 +17957,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
         if (localStorage.getItem('__seed')) return;
         localStorage.setItem('__seed', '1');
         localStorage.setItem('waze_session_token', 'token-do-smoke-da-espera');
-        localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false, undoGateSeen: true, undoEnabled: false }));
+        localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, passagemDispensada: true, presenca: false, undoGateSeen: true, undoEnabled: false }));
         const d = new Date();
         const dia = Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000);
         localStorage.setItem('waze_places_autores', JSON.stringify({ v: [], r: { 9000: [3, 'repetente', dia, 1] } }));
@@ -18119,7 +18121,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
           if (localStorage.getItem('__seed')) return;
           localStorage.setItem('__seed', '1');
           localStorage.setItem('waze_session_token', 'token-do-smoke-do-enter');
-          localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false, undoGateSeen: true }));
+          localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, passagemDispensada: true, presenca: false, undoGateSeen: true }));
           localStorage.setItem('waze_places_stats', JSON.stringify({ read: 500, rejected: 500, skipped: 0 }));
         } catch (e) { /* armazenamento bloqueado */ }
       });
@@ -18317,7 +18319,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     await ctx.addInitScript(() => {
       try {
         localStorage.setItem('waze_session_token', 'token-do-smoke-do-lote');
-        localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, presenca: false, undoGateSeen: true, consequenciaVista: { reject: true, read: true } }));
+        localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, passagemDispensada: true, presenca: false, undoGateSeen: true, consequenciaVista: { reject: true, read: true } }));
       } catch (e) { /* armazenamento bloqueado */ }
     });
     const erros = [];
@@ -18377,7 +18379,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   const portao = new Promise((r) => { soltar = r; });
   await ctx.route('**/js/min/qr.js', async (route) => { pedidosDoQr++; await portao; await route.continue().catch(() => {}); });
   await page.addInitScript(() => {
-    localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true }));
+    localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true, passagemDispensada: true }));
     const d = new Date(), p = (n) => String(n).padStart(2, '0');
     const k = (dia) => `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(dia)}`;
     const h = { _total: { read: 50, rejected: 35 } };
@@ -18449,7 +18451,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     // Lidos + rejeitados abaixo da cota do Desfazer do L6 (10): a mensagem "faltam N" da cota é montada em JS, e só
     // existe com o Desfazer ainda travado.
     waze_places_stats: JSON.stringify({ read: 2, rejected: 1, skipped: 2 }),
-    waze_places_preferences: JSON.stringify({ comoFuncionaVisto: true, presenca: false, undoGateSeen: true, offlineDisponivel: true }),
+    waze_places_preferences: JSON.stringify({ comoFuncionaVisto: true, passagemDispensada: true, presenca: false, undoGateSeen: true, offlineDisponivel: true }),
     // "Perto de casa": a dica sob a ordem é texto montado em JS (`atualizarDicaDeOrdem`), e só existe com ela escolhida.
     waze_places_filters: JSON.stringify({ sortOrder: 'casa' }),
     waze_session_token: 'token-do-smoke-da-troca-de-idioma',
@@ -18590,7 +18592,7 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
     const ctx = await browser.newContext({ viewport: { width: w, height: 740 }, serviceWorkers: 'block', locale: 'pt-BR' });
     await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
     await ctx.route('https://sms-profile-image.waze.com/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_PERFIL }));
-    await ctx.addInitScript(() => { try { localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true })); } catch (e) { /* segue */ } });
+    await ctx.addInitScript(() => { try { localStorage.setItem('waze_places_preferences', JSON.stringify({ comoFuncionaVisto: true, passagemDispensada: true })); } catch (e) { /* segue */ } });
     const page = await ctx.newPage();
     const erros = [];
     page.on('pageerror', (e) => erros.push(String(e.message || e)));
@@ -18653,6 +18655,130 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   const sem = await medirPerfil(280, { nome: 'world_12345678', pilula: true, estilo: SEM_AS_REGRAS });
   checa(com.nome - sem.nome >= 20, 'perfil/CONTROLE: com as regras desligadas o nome do Fold TEM que perder os ~24 px delas (a medida está cega)',
     `com as regras ${com.nome.toFixed(1)} px · sem ${sem.nome.toFixed(1)} px`);
+}
+
+// ── A PASSAGEM do computador (v2026.11.15-04) ──────────────────────────────────
+// Num computador de tela larga (mouse, janela >= 900 px, nenhum toque) a tela de passagem toma o
+// lugar do placar e do card: o QR do pareamento, três passos e o «Continuar neste computador».
+// Medido nos 4 idiomas × 3 larguras de computador: o QR sai PINTADO e cabe na caixa, nada estoura
+// pro lado, cada controle tem alvo >= 44 px e RECEBE o dedo (hit-test, gotcha #26), o card e o
+// placar somem e a trava segura as ações. CONTROLES: a 899 px ela NÃO aparece e o card fica; com
+// ponteiro de toque, nem a 1440 px; e o idioma não vaza português.
+{
+  const VPS_PASSAGEM = [{ width: 900, height: 700 }, { width: 1024, height: 768 }, { width: 1440, height: 900 }];
+  const abrirPassagem = async ({ vp, lg, toque = false, loginNovo = true }) => {
+    const ctx = await browser.newContext({ viewport: vp, hasTouch: toque, serviceWorkers: 'block',
+      locale: lg === 'en' ? 'en-US' : lg });
+    await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route(/venue-image\.waze\.com/, (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route('**/api/**', async (r) => {
+      const nome = r.request().url().split('/api/')[1].split('?')[0];
+      let corpo = {};
+      try { corpo = JSON.parse(r.request().postData() || '{}'); } catch (e) { /* sem corpo */ }
+      const resp = nome === 'parear' && corpo.action !== 'cancel'
+        ? { success: true, code: 'K7QXMWR2NTBZ4PHD9CVA', expiresIn: 300 } : { success: true, places: [], hasMore: false, total: 0 };
+      await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(resp) }).catch(() => {});
+    });
+    const page = await ctx.newPage();
+    const erros = [];
+    page.on('pageerror', (e) => erros.push(String(e.message || e)));
+    await page.addInitScript(() => localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true, undoGateSeen: true, presenca: false })));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(300);
+    await page.evaluate(({ lg, loginNovo }) => {
+      setLang(lg);
+      API.setSession('token-do-smoke-da-passagem');
+      AppState.profile = { userName: 'world_demo', username: 'world_demo', rank: 5, isAreaManager: true, isStaff: false, areas: [] };
+      AppState.stats = { read: 0, rejected: 0, skipped: 0 };
+      AppState.serverTotal = 2; AppState.hasMore = false;
+      const mk = (i) => ({ venueID: 'pv' + i, updateRequestID: 'pu' + i, name: 'Local ' + i, categories: ['OTHER'], address: 'Rua X', updateType: 'Novo local',
+        reqType: 'VENUE', createdBy: 'world_x' + i, creatorId: 700 + i, imageUrls: [], purType: 'NEW_PLACE', isRead: false });
+      AppState.queue = [mk(0), mk(1)]; AppState.currentPlace = AppState.queue[0];
+      if (loginNovo) loginNestaPagina = true;
+      showMainScreen(); showLoading(false); showCurrentPlace(); updateStats();
+    }, { lg, loginNovo });
+    return { ctx, page, erros };
+  };
+  const medirPassagem = (page) => page.evaluate(() => {
+    const vis = (id) => { const e = document.getElementById(id); return !!e && !e.classList.contains('hidden') && e.getClientRects().length > 0; };
+    const caixa = (id) => { const r = document.getElementById(id).getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height, r: r.right, b: r.bottom }; };
+    const alvo = (id) => {
+      const e = document.getElementById(id);
+      if (!vis(id)) return null;
+      e.scrollIntoView({ block: 'center' });
+      const r = e.getBoundingClientRect();
+      const topo = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      return { h: Math.round(r.height), recebe: !!topo && (topo === e || e.contains(topo)) };
+    };
+    const cartao = document.querySelector('.place-card');
+    const c = document.getElementById('passagemQr');
+    let pintado = false;
+    if (c && c.width) { const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; for (let i = 3; i < d.length; i += 4) if (d[i] !== 0) { pintado = true; break; } }
+    const tela = document.getElementById('passagemScreen');
+    return { tela: vis('passagemScreen'), qr: vis('passagemQr'), pintado, estado: passagemEstado,
+      cartaoNaTela: !!cartao && getComputedStyle(cartao).display !== 'none' && cartao.getClientRects().length > 0, placarNaTela: vis('placar'),
+      travadas: acoesTravadas(), titulo: document.getElementById('passagemTitulo').textContent,
+      estouroX: document.documentElement.scrollWidth - innerWidth, qrNoCartao: c && tela ? c.getBoundingClientRect().right <= tela.getBoundingClientRect().right + 1
+        && c.getBoundingClientRect().left >= tela.getBoundingClientRect().left - 1 : null,
+      continuar: alvo('passagemContinuar'), semCamera: alvo('passagemSemCamera'), mostrar: alvo('passagemMostrar'), gerar: alvo('passagemGerar'),
+      tituloDoDicionario: t('passagem.titulo') };
+  });
+  for (const lg of LINGUAS) {
+    for (const vp of VPS_PASSAGEM) {
+      const rotulo = `${lg} · ${vp.width}×${vp.height}`;
+      const { ctx, page, erros } = await abrirPassagem({ vp, lg });
+      const fim = await esperarNaPagina(page, () => passagemEstado === 'qr' && document.getElementById('passagemQr').width > 0, 10000, 50);
+      checa(fim.ok, `passagem (${rotulo}): o QR não chegou (o login novo pede o código sozinho)`, JSON.stringify(fim));
+      await assentar(page, 150);
+      const m = await medirPassagem(page);
+      checa(m.tela && m.qr && m.pintado, `passagem (${rotulo}): a tela não aparece com o QR pintado`, JSON.stringify({ tela: m.tela, qr: m.qr, pintado: m.pintado }));
+      checa(!m.cartaoNaTela && !m.placarNaTela, `passagem (${rotulo}): o card ou o placar seguem à vista por baixo da passagem`);
+      checa(m.travadas, `passagem (${rotulo}): as ações não estão travadas (o card escondido decidiria)`);
+      checa(m.estouroX <= 0, `passagem (${rotulo}): estouro horizontal de ${m.estouroX}px`);
+      checa(m.qrNoCartao === true, `passagem (${rotulo}): o QR passa da caixa`);
+      for (const id of ['continuar', 'semCamera']) {
+        checa(m[id] && m[id].h >= 44, `passagem (${rotulo}): alvo "${id}" abaixo de 44px`, JSON.stringify(m[id]));
+        checa(m[id] && m[id].recebe, `passagem (${rotulo}): "${id}" não recebe o dedo (outro elemento por cima)`, JSON.stringify(m[id]));
+      }
+      if (lg !== 'pt') checa(m.titulo !== 'Este app é feito para o celular', `passagem (${rotulo}): o título vazou em português`, m.titulo);
+      checa(m.titulo === m.tituloDoDicionario, `passagem (${rotulo}): o título não é o do dicionário do idioma`, m.titulo);
+      checa(erros.length === 0, `passagem (${rotulo}): erro de JS`, erros[0]);
+      // As setas, com a passagem na tela, não decidem pedido invisível.
+      if (vp.width === 1440) {
+        await page.keyboard.press('ArrowLeft'); await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowUp');
+        await assentar(page, 300);
+        const f = await page.evaluate(() => ({ fila: AppState.queue.length, rej: AppState.stats.rejected, lido: AppState.stats.read, pulo: AppState.stats.skipped }));
+        checa(f.fila === 2 && f.rej === 0 && f.lido === 0 && f.pulo === 0, `passagem (${rotulo}): uma seta decidiu um pedido que ninguém vê`, JSON.stringify(f));
+        // "Continuar neste computador": o card volta, destrava, e a escolha fica no aparelho.
+        await page.click('#passagemContinuar');
+        await assentar(page, 200);
+        const d = await medirPassagem(page);
+        const prefs = await page.evaluate(() => JSON.parse(localStorage.getItem('waze_places_preferences') || '{}'));
+        checa(!d.tela && d.cartaoNaTela && !d.travadas && !d.pintado, `passagem (${rotulo}): o "Continuar" não devolveu o card (ou deixou o QR no canvas)`, JSON.stringify({ tela: d.tela, card: d.cartaoNaTela, travadas: d.travadas, pintado: d.pintado }));
+        checa(prefs.passagemDispensada === true, `passagem (${rotulo}): a escolha do "Continuar" não foi gravada no aparelho`);
+      }
+      await ctx.close();
+    }
+  }
+  // Estado "clique" (reabertura): sem QR, com o botão, e NENHUM pedido de pareamento sem toque.
+  for (const lg of LINGUAS) {
+    const { ctx, page, erros } = await abrirPassagem({ vp: { width: 1280, height: 800 }, lg, loginNovo: false });
+    await assentar(page, 300);
+    const m = await medirPassagem(page);
+    checa(m.tela && !m.qr && m.estado === 'clique', `passagem clique (${lg}): o estado de reabertura não é o do botão`, JSON.stringify({ tela: m.tela, qr: m.qr, estado: m.estado }));
+    checa(m.mostrar && m.mostrar.h >= 44 && m.mostrar.recebe, `passagem clique (${lg}): o botão "Mostrar QR" não é alvo de 44px que recebe o dedo`, JSON.stringify(m.mostrar));
+    checa(m.estouroX <= 0, `passagem clique (${lg}): estouro horizontal de ${m.estouroX}px`);
+    checa(erros.length === 0, `passagem clique (${lg}): erro de JS`, erros[0]);
+    await ctx.close();
+  }
+  // CONTROLES: a 899 px e com ponteiro de toque a passagem NÃO existe, e o card segue à vista.
+  for (const [rotulo, opcoes] of [['899 px', { vp: { width: 899, height: 800 } }], ['toque a 1440 px', { vp: { width: 1440, height: 900 }, toque: true }]]) {
+    const { ctx, page } = await abrirPassagem({ ...opcoes, lg: 'pt' });
+    await assentar(page, 300);
+    const m = await medirPassagem(page);
+    checa(!m.tela && m.cartaoNaTela && !m.travadas, `passagem CONTROLE (${rotulo}): a passagem apareceu onde não devia (ou o card sumiu)`, JSON.stringify({ tela: m.tela, card: m.cartaoNaTela, travadas: m.travadas }));
+    await ctx.close();
+  }
 }
 
 // ── MAPA + SERVICE WORKER: mora em `tools/smoke-offline.mjs` ──────────────

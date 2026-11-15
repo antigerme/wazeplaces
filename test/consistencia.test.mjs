@@ -109,7 +109,9 @@ test('um conceito, um nome: sem sinônimos concorrentes na mesma língua', () =>
     fr: [['appareil', 'dispositif'], ['téléphone', 'portable']],
   };
   for (const [lang, pares] of Object.entries(PROIBIDOS)) {
-    const txt = blocos[lang] || '';
+    // O rótulo do CAMPO do local ("Telefone": o número do estabelecimento, `card.field.phone`) é outro
+    // conceito: ele não é o aparelho de quem usa o app, e o par proibido é sobre o aparelho.
+    const txt = (blocos[lang] || '').replace(/'card\.field\.phone': '[^']*',?/g, '');
     for (const [padrao, sinonimo] of pares) {
       if (!txt.includes(padrao)) continue;
       assert.ok(

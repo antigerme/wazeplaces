@@ -137,7 +137,7 @@ if (!COOKIES) {
       if (!localStorage.getItem('__smoke')) {
         localStorage.setItem('__smoke', '1');
         localStorage.setItem('waze_session_token', 'tok-smoke-diag-tela');
-        localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, presenca: false, comoFuncionaVisto: true }));
+        localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, presenca: false, comoFuncionaVisto: true, passagemDispensada: true }));
       }
     } catch (e) {}
   });

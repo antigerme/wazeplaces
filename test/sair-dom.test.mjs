@@ -111,7 +111,9 @@ const NOS = ['autoresBody', 'historyBody', 'autorTitle', 'autorCorpo', 'accessDe
   // entradas, a legenda, os tiles da área e o link do Street View.
   'mapaLbTiles', 'mapaLbMarks', 'mapaLbLegenda', 'mapaLbStreetView',
   // O seletor "Área gerenciada" dos Filtros, com o nome das áreas da conta (R11-1-05).
-  'filterManagedArea'];
+  'filterManagedArea',
+  // A passagem do computador (v2026.11.15-04): o QR é credencial de pareamento.
+  'passagemScreen', 'passagemExpiry', 'passagemQr', 'passagemAnuncio'];
 const MODAIS = ['filtersModal', 'autorModal', 'accessDeniedModal', 'helpModal', 'logoutModal'];
 
 function montar() {
@@ -149,6 +151,7 @@ function montar() {
     'let autoresExpandido = false, escadaAberta = false, conquistaTocada = null, novasDestaAbertura = null;',
     'let resumoAtual = null, lastFocusedBeforeModal = null, ultimoFocoForaDasCamadas = null;',
     'let pairQrVenceEm = 0, aberturaDoPareamento = 0;',
+    'let passagemEstado = "qr", aberturaDaPassagem = 3, loginNestaPagina = true;',
     `const MODAL_IDS = ${JSON.stringify(MODAL_IDS)};`,
     // A foto ampliada: o `close` DE VERDADE num objeto com o que ele lê.
     'const Lightbox = { aberto: true, _quemAbriu: null, isOpen() { return this.aberto; }, resetZoom() {},',
@@ -162,6 +165,7 @@ function montar() {
     '  ' + metodoDoLightbox('close', 'MapaLightbox') + ' };',
     fatiar('openModal'), fatiar('closeModal'), fatiar('topOpenModal'), fatiar('devolverFoco'),
     fatiar('focavelNaTela'), fatiar('dentroDeCamada'), fatiar('esvaziarListaDeAutores'), fatiar('esvaziarPainelDoHistorico'),
+    fatiar('limparPassagem'),
     fatiar('showAuthScreen'),
     // O seletor de áreas volta a "Nenhuma" (R11-1-05). Só se existir: no código de
     // antes do conserto o teste reprova pelo COMPORTAMENTO, não por não achá-la.
@@ -179,7 +183,7 @@ function montar() {
     fatiar('dizerNaRegiao'),
     fatiar('anunciarNoLightbox'),
     fatiarConst('LIMPEZA_AO_FECHAR'),
-    'return { openModal, closeModal, showAuthScreen, Lightbox, MapaLightbox };',
+    'return { openModal, closeModal, showAuthScreen, Lightbox, MapaLightbox, passagem: () => ({ passagemEstado, aberturaDaPassagem, loginNestaPagina }) };',
   ].join('\n');
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, corpo)(...chaves.map((k) => deps[k]));
@@ -357,4 +361,29 @@ test('R11-1-05: o seletor "Área gerenciada" volta a "Nenhuma" ao fechar os Filt
   // E a troca de conta (que não passa pela tela de entrada) chama a mesma limpeza.
   assert.match(fatiar('esquecerOutraConta'), /^\s+esvaziarSeletorDeAreas\(\);$/m,
     'a troca de conta deixou as áreas gerenciadas da conta anterior no seletor dos Filtros (R11-1-05)');
+});
+
+// ── v2026.11.15-04: o QR da passagem do computador é CREDENCIAL ──────────────────
+// O "Sair" (e a queda, que passa pela mesma tela de entrada) tem de tirá-lo da tela: o canvas
+// apagado, o vencimento e o anúncio esvaziados, a tela escondida, o estado de volta ao
+// começo, e um QR ainda a caminho SUPERADO (a época sobe: a resposta que chegar depois é
+// cancelada no servidor, `gerarQrDaPassagem`).
+test('o "Sair" tira o QR da passagem do computador da tela e supera o que estava a caminho', () => {
+  const m = montar();
+  const apagou = [];
+  m.els.passagemQr.getContext = () => ({ clearRect: (...a) => apagou.push(a) });
+  m.els.passagemQr.width = 244; m.els.passagemQr.height = 244;
+  m.els.passagemExpiry.textContent = 'Vale por mais 4:52';
+  m.els.passagemAnuncio.textContent = 'Código expirado';
+  const antes = m.app.passagem();
+  assert.equal(antes.passagemEstado, 'qr', 'PRÉ-CONDIÇÃO: o estado de partida não é o do QR na tela');
+  m.app.showAuthScreen();
+  const depois = m.app.passagem();
+  assert.equal(apagou.length, 1, 'DEFEITO: o canvas do QR não foi apagado no "Sair"');
+  assert.equal(m.els.passagemExpiry.textContent, '', 'o vencimento do QR ficou na tela de entrada');
+  assert.equal(m.els.passagemAnuncio.textContent, '', 'o anúncio da passagem ficou na tela de entrada');
+  assert.ok(m.els.passagemScreen.classList.contains('hidden'), 'a passagem ficou visível na tela de entrada');
+  assert.equal(depois.passagemEstado, 'clique', 'o estado da passagem não voltou ao começo');
+  assert.ok(depois.aberturaDaPassagem > antes.aberturaDaPassagem, 'o QR a caminho não foi superado (a resposta tardia o desenharia)');
+  assert.equal(depois.loginNestaPagina, false, 'o "login novo" ficou de pé: o próximo login herdaria o QR automático da conta que saiu');
 });

@@ -346,7 +346,7 @@ async function novaPagina({ viewport = { width: 412, height: 915 }, navegador = 
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, places: [], hasMore: false, total: 0 }) });
   });
   await page.addInitScript(() => localStorage.setItem('waze_places_preferences',
-    JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true, undoGateSeen: true, presenca: false })));
+    JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true, passagemDispensada: true, undoGateSeen: true, presenca: false })));
   await page.goto(BASE, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(450);
   await page.evaluate(FERRAMENTAS, JSON.stringify(PEDIDO));

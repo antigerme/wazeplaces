@@ -877,6 +877,10 @@ test('o "Sair" cancela os códigos de pareamento que o aparelho emitiu', () => {
   const sair = fatiar('handleLogout');
   assert.match(sair, /for \(const code of pareamentosEmitidos\) API\.cancelarPareamento\(code\)/,
     'o QR mostrado antes do "Sair" segue valendo 5 min');
-  assert.equal((APP_SEM.match(/pareamentosEmitidos\.add\(r\.code\);/g) || []).length, 2,
-    'os DOIS códigos (QR e o curto) têm que ser lembrados');
+  // Três lugares emitem código: o QR do diálogo, o curto (digitável) e o QR da PASSAGEM do computador
+  // (v2026.11.15-04). Cada um tem de ser lembrado, senão o "Sair" não o cancela e ele segue valendo 5 min.
+  assert.equal((APP_SEM.match(/pareamentosEmitidos\.add\(r\.code\);/g) || []).length, 3,
+    'os TRÊS códigos (QR do diálogo, o curto e o da passagem) têm que ser lembrados');
+  assert.match(fatiar('gerarQrDaPassagem'), /pareamentosEmitidos\.add\(r\.code\);/,
+    'o QR da passagem não é lembrado: o "Sair" não o cancela');
 });
