@@ -770,6 +770,8 @@ function anelDeCapturas() {
     // As capturas JÁ BAIXADAS, marcadas como o `dlogMarcarBaixados` marca (R8-4-01).
     dlogJaBaixados: new WeakSet(),
     dlog: (k, o) => diario.push([k, o]), diagGuardarAbertura: () => {},
+    // O gravador de gestos do modo dev (v2026.11.15-03): a captura leva os gestos recentes e o que está no ar.
+    diagGestosRecentes: () => [], diagGestoEmCurso: () => null,
   };
   const chaves = Object.keys(deps);
   const app = new Function(...chaves, 'selos', `let dlogMomentos = [];
@@ -1639,7 +1641,7 @@ test('tileGuardadoFalhou: acusa só o que falhou desde a captura anterior, e diz
   const nova = a.capturar();
   assert.ok(nova && nova.n === 1 && /17\/2\/2/.test(nova.exemplos[0]), 'a falha nova não acusou, ou veio junto da velha');
   // E o relatório também LÊ: ele marca, como a captura.
-  assert.match(fatiarFn(semCom, 'diagCorpo'), /const alertas = diagSentinelas\(computado\);\s*diagTilesLidosAte = Date\.now\(\);/,
+  assert.match(fatiarFn(semCom, 'diagCorpo'), /const alertas = diagSentinelas\(computado\)(?:\.concat\(diagAlertasDeGestos\(dlogGestos\)\))?;\s*diagTilesLidosAte = Date\.now\(\);/,
     'o relatório deixou de marcar o que leu — a captura seguinte repetiria a falha que ele já acusou');
 });
 

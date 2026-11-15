@@ -135,6 +135,44 @@ else {
   }
 }
 
+// OS GESTOS (v2026.11.15-03): o que a PÁGINA fez em cada arraste, ✓/✕ e volta, quadro a quadro (o gravador do
+// modo dev, `GRAVADOR DE GESTOS` no app.js), e a sonda de barras de rolagem do aparelho. O defeito das faixas
+// finas do Android (2026-11-15) acontecia na SAÍDA do card, onde a foto do instante nunca caía. A régua de
+// "a página cresceu" é a do app (`diagGestoCresceu`): horizontal nunca é legítimo, vertical só se a página NÃO
+// rolava quando o gesto começou. Os gestos das CAPTURAS (as de aberturas anteriores também) entram na lista,
+// sem repetir os do relatório: o que aconteceu antes de fechar e reabrir o app continua lá.
+secao('GESTOS (o que a página fez em cada gesto, quadro a quadro)');
+{
+  const cresceu = (g) => !!g && (g.picoEx > 1 || (!g.jaRolava && g.picoEy > 1));
+  const b = d.computado && d.computado.barras;
+  const px = (m) => (m && Number.isFinite(m.larguraPx) ? `${m.larguraPx}×${m.alturaPx} px` : '?');
+  if (b === undefined) out('barras de rolagem: ' + AUSENTE);
+  else if (!b || b.erro) out('barras de rolagem: a sonda falhou' + (b && b.erro ? ` (${b.erro})` : ''));
+  else out(`barras de rolagem: ${b.sobreposicao ? 'de SOBREPOSIÇÃO (não ocupam largura: a emulação não as desenha)' : 'CLÁSSICAS (ocupam largura)'} · padrão da plataforma ${px(b.padraoDaPlataforma)} · com o estilo do app ${px(b.comOEstiloDoApp)} · html ${v(b.html && `${b.html.overflowX}/${b.html.overflowY}`)} · body ${v(b.body && `${b.body.overflowX}/${b.body.overflowY}`)} · tomam da janela ${v(b.larguraTomadaDaJanela)}×${v(b.alturaTomadaDaJanela)} px`);
+  const gs = d.gestos;
+  if (gs === undefined) out('gestos: ' + AUSENTE);
+  else {
+    const todos = new Map();
+    for (const g of (Array.isArray(gs && gs.lista) ? gs.lista : [])) todos.set(g.t, g);
+    const deCapturas = [...(Array.isArray(d.momentos) ? d.momentos : []),
+      ...(Array.isArray(d.aberturasAnteriores) ? d.aberturasAnteriores : []).flatMap((a) => (a && a.momentos) || [])];
+    let soDeCaptura = 0;
+    for (const m of deCapturas) for (const g of (Array.isArray(m && m.gestos) ? m.gestos : [])) {
+      if (g && !todos.has(g.t)) { todos.set(g.t, { ...g, deCaptura: true }); soDeCaptura++; }
+    }
+    const lista = [...todos.values()].sort((x, y) => Date.parse(x.t) - Date.parse(y.t));
+    const ruins = lista.filter(cresceu);
+    out(`${lista.length} gesto(s) gravado(s) (o relatório guarda até ${v(gs.max)}, com folga de ${v(gs.folgaMs)} ms depois do fim${soDeCaptura ? `; ${soDeCaptura} vieram só das capturas, sem a série` : ''})`);
+    if (ruins.length) out(`ATENÇÃO: ${ruins.length} gesto(s) fizeram o tamanho rolável da página CRESCER com o card no ar — é o que o navegador desenha como barra fina nas bordas direita e de baixo.`);
+    else if (lista.length) out('nenhum gesto fez o tamanho rolável da página crescer.');
+    for (const g of lista.slice(-20)) {
+      const fases = Array.isArray(g.fases) ? g.fases.map((f) => `${f[0]}@${f[1]}`).join('→') : '?';
+      const ov = g.overflowNoPico ? ` · overflow no pico html ${g.overflowNoPico.html} body ${g.overflowNoPico.body}` : '';
+      out(`${cresceu(g) ? '!! ' : '   '}${hora(g.t)} ${v(g.origem)}${g.direcao ? ' ' + g.direcao : ''}: ${v(g.durMs)} ms, ${v(g.quadros)} quadros, pico +${v(g.picoEx)} × +${v(g.picoEy)} px${g.picoEm ? ' aos ' + g.picoEm + ' ms' : ''}, com excesso x${g.quadrosComExcesso ? g.quadrosComExcesso.x : '?'} y${g.quadrosComExcesso ? g.quadrosComExcesso.y : '?'}${g.semClasseComExcesso ? `, SEM a classe do corte em ${g.semClasseComExcesso}` : ''}, rolou ${g.rolou ? `${g.rolou.x}×${g.rolou.y}` : '?'}, visualViewport ${g.vvMudou ? 'MUDOU' : 'igual'}${g.jaRolava ? ', a página já rolava' : ''}${g.truncado ? ', TRUNCADO' : ''} [${fases}]${ov}${g.deCaptura ? ' (da captura)' : ''}`);
+    }
+  }
+}
+
 // O TREINO (R8-4-06): com ele aberto, a fila na tela — e no `appState` e no
 // `estado.fila` das capturas — é a de EXEMPLOS, não a real. O app passou a dizer
 // isso (`treino` na tela) e a levar a fila real que o treino guarda (`treino`,

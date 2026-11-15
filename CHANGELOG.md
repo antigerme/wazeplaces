@@ -8,6 +8,17 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.11.15-03
+**O selo «✕ N» do autor mostrava sempre uma rejeição a menos no card seguinte.** Você rejeitava um pedido de um autor que já tinha ✕ 5, o card seguinte do mesmo autor entrava com ✕ 5, e a lista do Histórico já dizia 6. O card seguinte entra na tela no mesmo instante do gesto, e a rejeição só entra na contagem quando o Waze confirma; ninguém redesenhava o selo depois. Valia também com o Desfazer desligado, só que por menos tempo (a demora da resposta do Waze). Agora, quando a rejeição é confirmada, o selo do card da frente e o do card de baixo, se forem do mesmo autor, são refeitos com o número certo (✕ 5 vira ✕ 6 na hora em que o Waze responde). Nada fica mais lento: o ✕ continua passando para o próximo card sem esperar, e a contagem segue sendo a das rejeições confirmadas. Efeito colateral bom: o selo vira rosa e passa a abrir a folha da recusa automática (a partir de 4) uma rejeição antes do que fazia.
+
+**O ✓ num pedido que já está lido deixa de ir ao Waze.** Com "Apenas pedidos não lidos" desmarcado, o card de um pedido que o Waze já diz lido mostra a faixa «Já marcado como lido»; o ✓ (botão, arraste ou tecla) mandava a marcação de novo e ainda somava em "Lidos", no Histórico e nas conquistas uma leitura que não aconteceu agora. Agora o ✓ ali só passa pro próximo card: nada vai ao Waze, o placar não conta, não abre a janela do Desfazer (não há o que desfazer) e não há aviso (a faixa do card já disse). O "Restam" não desce, porque o pedido segue pendente no Waze, como no Pular. O ✕ e o ↑ continuam valendo nesse card. É a mesma regra que o "Marcar todos" já seguia com os já lidos.
+
+**O modo dev ficou capaz de dizer, sozinho, o que a página fez durante um gesto.** Até aqui o diagnóstico tirava uma foto do estado no instante em que o arraste cruzava o limiar, e o problema das faixas finas do Android aconteceu depois, na saída do card, e também pelo ✓ e ✕. Só o vídeo dizia quando e quanto. Só com o modo dev ligado (quem não liga não paga nada):
+
+- **Gravador de gestos.** Cada arraste, ✓, ✕ e volta é gravado quadro a quadro, até 300 ms depois do fim: o tamanho rolável da página nos dois eixos, o pico e quando veio, se a rolagem ou o zoom se mexeram e o `overflow` no pico. O relatório leva os últimos 20, e cada captura (inclusive a do botão do modo dev) leva os 8 últimos. Ao ver o problema, toque no botão e o ZIP já traz o que aconteceu naqueles segundos.
+- **Sonda de barras de rolagem.** O relatório diz se o aparelho usa barras clássicas (que ocupam largura) ou de sobreposição, e a espessura. A emulação de celular não desenha as de sobreposição; o aparelho de verdade desenha.
+- **Alerta do gesto.** Um gesto que faz o tamanho rolável da página crescer vira o alerta `gestoCresceuTamanhoRolavel` no relatório, e o triador (`diag-resumo`) ganhou a seção GESTOS, que marca esses gestos.
+
 ## v2026.11.15-02
 **A faixa clara na direita e embaixo, ao arrastar rápido (ou tocar no ✓), tinha outra causa além da que a v2026.11.07-01 tratou.** O vídeo e o diagnóstico do dono, na versão anterior, mostraram duas barras de rolagem retas de 10 px, na cor do polegar do tema escuro: uma à direita e uma embaixo, pelos ~0,35 s da saída do card. A página já estava com a rolagem cortada, mas o conteúdo continuava crescendo (82 × 167 px na captura): no Android o Chrome desenha as barras pelo **tamanho rolável**, não pela rolagem permitida.
 
