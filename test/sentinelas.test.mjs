@@ -658,9 +658,21 @@ test('sentinelas: página com barra de rolagem COM o card no ar — dispara (os 
   assert.deepEqual(chaves(montar()(c)), ['paginaRolaComCardNoAr']);
 });
 
-test('sentinelas: página com o card no ar e o corte LIGADO cala — o excesso fica, a barra não (o controle)', () => {
+test('sentinelas: o corte ligado NÃO cala o excesso — no Android o `overflow` cortado não impediu as barras (captura do dono, 2026-11-15)', () => {
   const c = sao();
-  c.paginaRola = { excessoX: 689, excessoY: 36, rolaX: false, rolaY: false, cardEmVoo: true };
+  // Os números e as flags da captura 'auto:arraste' do dono: o html cortado e o conteúdo crescendo.
+  c.paginaRola = { excessoX: 82, excessoY: 167, rolaX: false, rolaY: false, cardEmVoo: true, jaRolavaNaVertical: false };
+  const r = montar()(c);
+  assert.deepEqual(chaves(r), ['paginaRolaComCardNoAr']);
+  assert.equal(r[0].excessoX, 82);
+});
+
+test('sentinelas: o card no ar sem crescer o tamanho rolável cala — o que o recorte do body garante (o controle)', () => {
+  const c = sao();
+  c.paginaRola = { excessoX: 0, excessoY: 0, rolaX: false, rolaY: false, cardEmVoo: true, jaRolavaNaVertical: false };
+  assert.deepEqual(montar()(c), []);
+  // 1 px de arredondamento não é defeito (scrollWidth é inteiro arredondado).
+  c.paginaRola = { excessoX: 1, excessoY: 1, rolaX: false, rolaY: false, cardEmVoo: true, jaRolavaNaVertical: false };
   assert.deepEqual(montar()(c), []);
 });
 

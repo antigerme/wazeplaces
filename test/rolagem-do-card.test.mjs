@@ -41,6 +41,16 @@ test('rolagem do card: a regra do CSS corta a página SÓ com a classe — o hor
   assert.ok(ler('css/app.css').includes('html.card-em-voo{overflow-x:hidden}'), 'css/app.css gerado está velho: npm run css');
 });
 
+test('rolagem do card: o body RECORTA o card no gesto — o tamanho rolável da página não cresce (o `overflow` da raiz não bastou no Android, 2026-11-15)', () => {
+  // `overflow: clip` e não `hidden` (o `hidden` faria do body um contêiner de rolagem: o sticky grudaria nele),
+  // atrás de @supports, e SÓ com a classe do gesto (fora dele o overflow do body sobe pra janela).
+  assert.match(CSS, /@supports \(overflow: clip\)\s*\{\s*html\.card-em-voo body\s*\{\s*overflow:\s*clip;?\s*\}\s*\}/,
+    'o recorte do body sumiu do styles.css: o excesso volta a crescer o tamanho rolável e o Android volta a desenhar as barras');
+  assert.doesNotMatch(CSS, /(^|[\n,}{])\s*body\s*\{[^}]*overflow(-x|-y)?:\s*(hidden|clip)/,
+    'o recorte não pode ser permanente no body (sem a classe, o overflow do body sobe pra janela e muda a rolagem da página)');
+  assert.ok(ler('css/app.css').includes('html.card-em-voo body{overflow:clip}'), 'css/app.css gerado está velho: npm run css');
+});
+
 test('rolagem do card: a barra da PÁGINA no tema escuro — o `.dark *` não pega o próprio <html>', () => {
   // `dark` mora no <html> e no <body>; `.dark *` e `.dark ::-webkit-…` só pegam descendentes.
   assert.match(CSS, /\.dark,\s*\.dark \*\s*\{\s*scrollbar-color:/, 'scrollbar-color do tema escuro não cobre o <html>');

@@ -10055,18 +10055,23 @@ function diagSentinelas(comp) {
         // claras nas bordas direita e de baixo, só no puxão pra direita. O
         // `sincronizarCorteDaPagina` liga `html.card-em-voo` (overflow: hidden)
         // durante o gesto, então com a classe ligada o viewport NÃO rola. Excesso
-        // sozinho não vale (o `hidden` o deixa), nem rolagem fora do gesto (a
-        // página rola na vertical de propósito em tela baixa): o alerta é o
-        // card no ar E o viewport rolável no excesso — a captura do arraste
+        // sozinho não valia (o `hidden` o deixa) — ver a correção abaixo —, nem
+        // rolagem fora do gesto (a página rola na vertical de propósito em tela
+        // baixa): o alerta é o card no ar — a captura do arraste
         // (`dlogCapturarAuto('arraste')`) cai exatamente aqui.
         // O vertical só conta se a página NÃO rolava quando o gesto começou: a que
         // já rola tem barra legítima, e o card só alonga o excesso dela.
+        //
+        // CORRIGIDO em v2026.11.15-02: o excesso passa a valer SOZINHO. No Android
+        // o `overflow` do `html` cortado (`rolaX/rolaY: false`) não impediu as
+        // barras: o navegador as desenha pelo TAMANHO rolável da página, e a
+        // captura do dono tinha o corte ligado com 82 × 167 px de excesso. O que o
+        // app garante agora é o card não aumentar esse tamanho (o `body` recorta).
         const pr = comp.paginaRola;
-        if (pr && pr.cardEmVoo && ((pr.excessoX > 1 && pr.rolaX)
-            || (!pr.jaRolavaNaVertical && pr.excessoY > 1 && pr.rolaY))) {
+        if (pr && pr.cardEmVoo && (pr.excessoX > 1 || (!pr.jaRolavaNaVertical && pr.excessoY > 1))) {
             diga('paginaRolaComCardNoAr',
-                'com o card no ar a página tem barra de rolagem — o card que sai desenha linhas finas '
-                + 'nas bordas direita e de baixo',
+                'com o card no ar o tamanho rolável da página cresce — o navegador desenha as barras '
+                + 'finas nas bordas direita e de baixo',
                 { excessoX: pr.excessoX, excessoY: pr.excessoY });
         }
         // NÃO existe sentinela de "modal achatado" por ALTURA, e a ausência é

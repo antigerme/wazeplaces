@@ -8,6 +8,13 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.11.15-02
+**A faixa clara na direita e embaixo, ao arrastar rápido (ou tocar no ✓), tinha outra causa além da que a v2026.11.07-01 tratou.** O vídeo e o diagnóstico do dono, na versão anterior, mostraram duas barras de rolagem retas de 10 px, na cor do polegar do tema escuro: uma à direita e uma embaixo, pelos ~0,35 s da saída do card. A página já estava com a rolagem cortada, mas o conteúdo continuava crescendo (82 × 167 px na captura): no Android o Chrome desenha as barras pelo **tamanho rolável**, não pela rolagem permitida.
+
+- **O conserto:** enquanto o card está no ar, o `body` recorta o que sai dele, e a página deixa de crescer. O card sai igual, só que o excesso não chega mais à janela. Medido no navegador: em todas as saídas (arraste, ✓, ✕, volta) o excesso passou de 689 × 36 px para zero.
+- **No modo dev:** o alerta `paginaRolaComCardNoAr` agora dispara pelo excesso, mesmo com a rolagem cortada. Era o caso da sua captura, e o alerta antigo ficava calado.
+- **Não medido:** o aparelho de verdade. A emulação do Chromium não desenha as barras do Android, então a confirmação fica por conta de quem testa no celular.
+
 ## v2026.11.15-01
 **O selo `✕ N` de autor reincidente vira rosa, e abre a folha da recusa automática, a partir de 4 rejeições (era 6).** Entre 2 e 3 o selo segue cinza, só contando. Quem já tem o interruptor "Recusar sozinho" liberado (L6+AM) chega a ele duas rejeições antes, pelo card. A lista de autores do Histórico não muda: lá o interruptor já existe pra todo autor listado.
 
