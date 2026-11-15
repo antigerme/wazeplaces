@@ -681,7 +681,7 @@ console.log('\n7. CARD NO AR — arrastando, saindo ou voltando, a página não 
     const ex = e.scrollWidth - e.clientWidth, ey = e.scrollHeight - e.clientHeight;
     const r = (sel) => { const el = document.querySelector(sel); if (!el) return null; const b = el.getBoundingClientRect(); return [Math.round(b.x), Math.round(b.y), Math.round(b.width), Math.round(b.height)]; };
     return { classe: h.classList.contains('card-em-voo'), ex, ey, barraX: ex > 0 && rolaX, barraY: ey > 0 && rolaY, barra: (ex > 0 && rolaX) || (ey > 0 && rolaY),
-      scrollY: Math.round(window.scrollY), clientW: e.clientWidth, header: r('header'), placar: r('#placar'), pilha: r('#cardStack') };
+      fila: AppState.queue.length, scrollY: Math.round(window.scrollY), clientW: e.clientWidth, header: r('header'), placar: r('#placar'), pilha: r('#cardStack') };
   };
   const GRAVAR = (extra) => {
     const e = document.scrollingElement, h = document.documentElement;
@@ -703,10 +703,13 @@ console.log('\n7. CARD NO AR — arrastando, saindo ou voltando, a página não 
   const TELA = { width: 393, height: 740 };   // onde o canto girado também passa da borda de BAIXO (+36 px medidos)
 
   // dir: direita | esquerda | cima | volta (arraste de 30 px, abaixo do flick de 40: solto, o card VOLTA e nada decide)
-  async function puxar(dir, { semConserto = false, corteVerticalSempre = false, viewport = TELA, css = '', rolarAteOFim = false, navegador } = {}) {
+  async function puxar(dir, { semConserto = false, semRecorteDoBody = false, corteVerticalSempre = false, viewport = TELA, css = '', rolarAteOFim = false, navegador } = {}) {
     const { ctx, page, errosJs } = await novaPagina({ viewport, navegador });
     if (css) { await page.addStyleTag({ content: css }); await page.waitForTimeout(350); }
-    if (semConserto) await page.addStyleTag({ content: 'html.card-em-voo { overflow: visible !important; }' });
+    // O conserto são DUAS regras (o corte da raiz e o recorte do body): o controle desliga as duas.
+    if (semConserto) await page.addStyleTag({ content: 'html.card-em-voo { overflow: visible !important; } html.card-em-voo body { overflow: visible !important; }' });
+    // E só o recorte do body: prova que ele é o que segura o crescimento do tamanho rolável.
+    if (semRecorteDoBody) await page.addStyleTag({ content: 'html.card-em-voo body { overflow: visible !important; }' });
     // O conserto de ANTES (corte vertical incondicional), pra provar que o guard vê o deslocamento.
     if (corteVerticalSempre) await page.addStyleTag({ content: 'html.card-em-voo { overflow: hidden !important; }' });
     if (rolarAteOFim) { await page.evaluate(() => window.scrollTo(0, 1e6)); await page.waitForTimeout(200); }
@@ -756,21 +759,32 @@ console.log('\n7. CARD NO AR — arrastando, saindo ou voltando, a página não 
     if (!r.fim.ok) dizer(`${onde}: o gesto não terminou (a classe ficou presa?)`, JSON.stringify(r.depois));
     else if (r.depois.classe || r.depois.barra) dizer(`${onde}: depois do gesto a página não voltou ao normal`, JSON.stringify(r.depois));
     if (r.errosJs.length) dizer(`${onde}: erro de JS`, r.errosJs[0]);
-    // CONTROLE do instrumento: a saída pra DIREITA tem que produzir excesso medido
-    // nos DOIS eixos a 393×740 (senão "sem barra" seria vácuo), e a pra ESQUERDA não (o lado que não rola).
-    const picoX = Math.max(0, ...r.quadros.map((q) => q.ex));
-    const picoY = Math.max(0, ...r.quadros.map((q) => q.ey));
-    if ((dir === 'direita' || dir === 'botao-lido') && (picoX <= 0 || picoY <= 0)) dizer('card no ar/direita: CONTROLE — a saída não gerou excesso nos DOIS eixos: o instrumento está cego', `x=${picoX} y=${picoY}`);
-    if (dir === 'volta' && picoX > 60) dizer('card no ar/volta: o arraste curto virou SAÍDA (flick) — o cenário não mede a volta', String(picoX));
-    if ((dir === 'esquerda' || dir === 'botao-rejeitar') && picoX > 0) dizer(`card no ar/${dir}: CONTROLE — a saída pra esquerda gerou excesso de largura (esperado: zero, o lado que não rola)`, String(picoX));
+    // INVARIANTE (v2026.11.15-02): o card no ar NÃO aumenta o tamanho rolável da página, nem na largura nem na
+    // altura. O `overflow` da raiz sozinho não bastou no Android: com o html cortado e o conteúdo crescendo, o
+    // Chrome desenhou as barras (vídeo do dono, 2026-11-15). O controle de que o instrumento VÊ esse
+    // crescimento está na seção B (a mesma saída sem o conserto).
+    const picoX = Math.max(0, ...r.quadros.map((q) => q.ex)), picoY = Math.max(0, ...r.quadros.map((q) => q.ey));
+    if (r.segurando.ex > 0 || r.segurando.ey > 0) dizer(`${onde}: arrastando, o tamanho rolável da página cresceu`, `ex=${r.segurando.ex} ey=${r.segurando.ey}`);
+    if (picoX > 0 || picoY > 0) dizer(`${onde}: o tamanho rolável da página cresceu com o card no ar — o Android desenha as barras por ele`, `ex=${picoX} ey=${picoY}`);
+    // O arraste curto (30 px, abaixo do flick) tem que VOLTAR: se virasse saída, o cenário não mediria a volta
+    // (agora que o excesso é zero, o sinal é a fila ter andado).
+    if (dir === 'volta' && r.depois.fila !== r.repouso.fila) dizer('card no ar/volta: o arraste curto virou SAÍDA (flick) — o cenário não mede a volta', `${r.repouso.fila} → ${r.depois.fila}`);
     console.log(`  ok ${dir.padEnd(8)} ${resumo(r)}`);
   }
 
-  // ── B. CONTROLE DO GUARD: sem o corte, a mesma saída pra direita TEM que mostrar a barra. ──
+  // ── B. CONTROLES DO GUARD: sem o conserto, a mesma saída pra direita TEM que crescer o tamanho rolável nos
+  // DOIS eixos a 393×740 e mostrar a barra (senão "sem excesso" seria vácuo); e sem SÓ o recorte do body o
+  // crescimento volta — é ele que segura, e a raiz cortada sozinha (o conserto de 2026-11-07) não bastou. ──
   const c = await puxar('direita', { semConserto: true });
   const barrasSem = c.quadros.filter((q) => q.barra).length + (c.segurando.barra ? 1 : 0);
+  const cX = Math.max(0, ...c.quadros.map((q) => q.ex)), cY = Math.max(0, ...c.quadros.map((q) => q.ey));
+  if (cX <= 0 || cY <= 0) dizer('card no ar: CONTROLE — a saída sem o conserto não cresceu o tamanho rolável nos DOIS eixos: o instrumento está cego', `x=${cX} y=${cY}`);
   if (barrasSem === 0) dizer('card no ar: CONTROLE — com o conserto neutralizado o guard NÃO viu a barra; ele está cego', resumo(c));
-  else console.log(`  ok controle: sem o corte o guard vê a barra (${barrasSem} amostras) — ${resumo(c)}`);
+  else console.log(`  ok controle: sem o conserto o guard vê o crescimento e a barra (${barrasSem} amostras) — ${resumo(c)}`);
+  const sb = await puxar('direita', { semRecorteDoBody: true });
+  const sbX = Math.max(0, ...sb.quadros.map((q) => q.ex));
+  if (sbX <= 0) dizer('card no ar: CONTROLE — sem o recorte do body o tamanho rolável NÃO cresceu: o recorte não é o que segura (ou o guard está cego)', `x=${sbX}`);
+  else console.log(`  ok controle: só o corte da raiz (sem o recorte do body) deixa o tamanho rolável crescer — pico ex=${sbX} — ${resumo(sb)}`);
 
   // ── C. A página que JÁ ROLA na vertical (texto 1,5× a 360×740, rolada até o fim) ──
   // `overflow: hidden` na raiz de uma página que já rola leva a rolagem de volta pro topo e tira a
@@ -790,6 +804,7 @@ console.log('\n7. CARD NO AR — arrastando, saindo ou voltando, a página não 
       const moveu = deslocou(j);
       if (moveu.length) dizer(`${onde}: segurar o card DESLOCOU a página`, moveu.map((k) => `${k}: ${JSON.stringify(j.repouso[k])} → ${JSON.stringify(j.segurando[k])}`).join(' · '));
       if (j.quadros.some((q) => q.barraX)) dizer(`${onde}: a saída deu barra HORIZONTAL`);
+      if (j.quadros.some((q) => q.ex > 0)) dizer(`${onde}: a LARGURA rolável cresceu com o card no ar (a vertical já rolava; a horizontal não pode)`, String(Math.max(...j.quadros.map((q) => q.ex))));
       if (!j.fim.ok) dizer(`${onde}: o gesto não terminou`);
       // A rolagem só se compara depois da VOLTA: a saída troca o card e o layout muda por outro motivo.
       if (dir === 'volta' && j.depois.scrollY !== j.repouso.scrollY) dizer(`${onde}: depois da volta a rolagem não voltou onde estava`, `${j.repouso.scrollY} → ${j.depois.scrollY}`);

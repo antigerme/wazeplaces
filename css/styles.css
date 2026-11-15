@@ -171,6 +171,22 @@ html.card-em-voo {
 html.card-em-voo:not(.card-pagina-rola) {
   overflow-y: hidden;
 }
+/* O `overflow` da raiz NÃO bastou no Android (vídeo e diagnóstico do dono,
+   2026-11-15, v2026.11.15-01): com o `html` cortado (`rolaX/rolaY: false`) e o
+   conteúdo ainda crescendo 82 px × 167 px além da tela, o Chrome desenhou as
+   barras finas de rolagem — retas, 10 px, na cor do polegar do tema escuro
+   (#475569) — à direita e embaixo, pelos ~21 quadros da saída. O `hidden` tira
+   a rolagem, não o TAMANHO rolável, e é ele que o navegador mostra. O conserto
+   é o card não aumentar o tamanho rolável: o `body` (a largura da janela)
+   recorta o que sai dele, e o excesso nunca chega à raiz. Só `clip`: o `hidden`
+   faria do `body` um contêiner de rolagem e o `position: sticky` passaria a
+   grudar nele em vez de na janela. `fixed` (avisos, FAB) não é recortado. Só com
+   a classe do gesto — fora dele o `overflow` do `body` sobe pra janela. */
+@supports (overflow: clip) {
+  html.card-em-voo body {
+    overflow: clip;
+  }
+}
 
 /* As classes `.swipe-out-*` e seus três keyframes viviam aqui e eram CÓDIGO
    MORTO — nenhum arquivo de `js/` as usava. Quem anima a saída é o
