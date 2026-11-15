@@ -9,6 +9,8 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 ---
 
 ## v2026.11.15-03
+**O ✓ num pedido que já está lido deixa de ir ao Waze.** Com "Apenas pedidos não lidos" desmarcado, o card de um pedido que o Waze já diz lido mostra a faixa «Já marcado como lido»; o ✓ (botão, arraste ou tecla) mandava a marcação de novo e ainda somava em "Lidos", no Histórico e nas conquistas uma leitura que não aconteceu agora. Agora o ✓ ali só passa pro próximo card: nada vai ao Waze, o placar não conta, não abre a janela do Desfazer (não há o que desfazer) e não há aviso (a faixa do card já disse). O "Restam" não desce, porque o pedido segue pendente no Waze, como no Pular. O ✕ e o ↑ continuam valendo nesse card. É a mesma regra que o "Marcar todos" já seguia com os já lidos.
+
 **O modo dev ficou capaz de dizer, sozinho, o que a página fez durante um gesto.** Até aqui o diagnóstico tirava uma foto do estado no instante em que o arraste cruzava o limiar, e o problema das faixas finas do Android aconteceu depois, na saída do card, e também pelo ✓ e ✕. Só o vídeo dizia quando e quanto. Só com o modo dev ligado (quem não liga não paga nada):
 
 - **Gravador de gestos.** Cada arraste, ✓, ✕ e volta é gravado quadro a quadro, até 300 ms depois do fim: o tamanho rolável da página nos dois eixos, o pico e quando veio, se a rolagem ou o zoom se mexeram e o `overflow` no pico. O relatório leva os últimos 20, e cada captura (inclusive a do botão do modo dev) leva os 8 últimos. Ao ver o problema, toque no botão e o ZIP já traz o que aconteceu naqueles segundos.

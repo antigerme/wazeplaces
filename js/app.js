@@ -29073,6 +29073,21 @@ function handleMarkAsRead() {
     // A OUTRA aba já decidiu este pedido: vale a primeira decisão (R10-2-02).
     if (typeof gestoNoDecididoPorOutraAba === 'function' && gestoNoDecididoPorOutraAba('read') === true) return;
     const place = AppState.currentPlace;
+    // O pedido que o Waze JÁ diz lido (`isRead`, a faixa "já lido" do card, que só
+    // existe com "Apenas pedidos não lidos" desmarcado): marcar de novo não tem o
+    // que dizer ao Waze, e antes mandava a requisição e contava no placar, no
+    // Histórico e nas conquistas uma leitura que não aconteceu agora. O ✓ aqui só
+    // PASSA pro próximo card, como o "Marcar todos" já fazia com os já lidos
+    // (R10-2-04): sem rede, sem fila de saída, sem placar, sem janela do Desfazer
+    // (não há o que desfazer) e sem aviso — a faixa do card já disse. O "Restam"
+    // não desce: o pedido segue pendente no Waze, como no Pular. Fica DEPOIS das
+    // guardas acima (treino, trava, a decisão da outra aba) e ANTES de qualquer
+    // contagem; o ✕ e o ↑ seguem valendo num card já lido.
+    if (place.isRead === true) {
+        if (typeof dlog === 'function') dlog('acao', { tipo: 'read', jaLido: true, place: dlogPlace(place) });
+        advanceQueue();
+        return;
+    }
     tratouNestaFila = true;
     AppState.stats.read++;
     AppState.serverTotal = Math.max(0, AppState.serverTotal - 1);
