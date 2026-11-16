@@ -2358,6 +2358,13 @@ async function desenharQrPareamento(url, idDoCanvas = 'pairQr') {
 let passagemEstado = 'clique';     // 'clique' | 'carregando' | 'qr' | 'vencido'
 let aberturaDaPassagem = 0;         // sobe a cada QR pedido e a cada limpeza
 let loginNestaPagina = false;       // um login NOVO deu certo nesta página (extensão ou cookies)
+// A fila só carrega DEPOIS do «Continuar»: quase todo uso do app no computador é só pra parear o
+// celular, e a busca por trás de uma tela que cobre o card era uma chamada ao Waze (e ao Worker, e
+// ao KV) que ninguém via. O portão mora no começo de `startFetching` e de `maybePrefetch` (os dois
+// que buscam; os ~25 chamadores passam por eles) e só ANOTA aqui que uma busca foi pedida; quem a
+// manda é a transição passagem → card (`retomarBuscaAdiada`, em `aplicarPassagem`). Anotar, e não
+// "buscar se a fila está vazia", é o que impede o redimensionar da janela de refazer a busca.
+let buscaAdiadaPelaPassagem = false;
 const PASSAGEM_LARGURA_MIN_PX = 900;
 
 function computadorDeTelaLarga() {
@@ -2383,6 +2390,19 @@ function limparPassagem() {
     passagemEstado = 'clique';
     const anuncio = document.getElementById('passagemAnuncio');
     if (anuncio) anuncio.textContent = '';
+}
+
+// A passagem saiu (o «Continuar», a janela que estreita, um ponteiro de toque que aparece): a busca
+// que o portão segurou sai agora, UMA vez. Sem busca pedida não faz nada (alargar e estreitar a
+// janela não pode refazer a fila). Com o treino aberto espera: o `sair()` dele busca, e a
+// anotação fica até uma busca passar pelo portão (`startFetching` a apaga).
+function retomarBuscaAdiada() {
+    if (!buscaAdiadaPelaPassagem || AppState.passagemNaTela === true || Treino.ativo) return;
+    buscaAdiadaPelaPassagem = false;
+    // Com fila (a janela alargou e estreitou com card na tela) só o prefetch de sempre; sem fila,
+    // a busca que a abertura, o login ou o ↻ pediu.
+    if (AppState.queue.length > 0) maybePrefetch();
+    else startFetching();
 }
 
 // O que cada estado mostra. Um lugar só: o idioma que muda e o redimensionar
@@ -2463,7 +2483,7 @@ function aplicarPassagem() {
         // idioma, que redesenha, e a página aberta já em francês divergiam: smoke de layout).
         desenharPassagem();
         // O card voltou à tela: o "Como funciona" que esperava a tela livre.
-        if (estavaAtiva) pedirComoFuncionaAdiado();
+        if (estavaAtiva) { pedirComoFuncionaAdiado(); retomarBuscaAdiada(); }
         return;
     }
     if (!estavaAtiva && loginNestaPagina && passagemEstado === 'clique') {
@@ -7125,6 +7145,8 @@ function atenderReordenacaoAdiada() {
 // É o `maybePrefetch` sem o limiar.
 function buscarORestoDaFila() {
     if (Treino.ativo || !AppState.hasMore || AppState.fetching) return;
+    // O mesmo portão do `startFetching`: sob a passagem nenhuma página sai.
+    if (AppState.passagemNaTela === true) { buscaAdiadaPelaPassagem = true; return; }
     fetchNextPage().then(() => {
         if (!AppState.currentPlace && AppState.queue.length > 0) showCurrentPlace();
     });
@@ -7483,6 +7505,7 @@ function showAuthScreen() {
     AppState.passagemNaTela = false;
     limparPassagem();
     loginNestaPagina = false;
+    buscaAdiadaPelaPassagem = false;   // a busca segurada era da sessão que acabou
     document.getElementById('authScreen').classList.remove('hidden');
     document.getElementById('appScreen').classList.add('hidden');
     document.getElementById('filtersBtn').classList.add('hidden');
@@ -15502,6 +15525,11 @@ async function startFetching() {
     // foco do teclado caía no <body>. Só a guarda daqui não basta: o laço já
     // podia estar no `await`. Quem busca de novo é o `sair()` do treino.
     if (Treino.ativo) return;
+    // Com a passagem do computador na tela o card está escondido: a busca fica ANOTADA e sai no
+    // «Continuar» (`retomarBuscaAdiada`). Lê o VALOR, nunca chama função (o harness de buraco negro
+    // dos testes devolve verdadeiro a qualquer função desconhecida).
+    if (AppState.passagemNaTela === true) { buscaAdiadaPelaPassagem = true; return; }
+    buscaAdiadaPelaPassagem = false;
     AppState.loadError = false;
     ultimaBuscaFalhouPorRede = false;
     // A fila desta busca: um `resetQueue` no meio (↻, filtro) é outra fila.
@@ -15715,6 +15743,8 @@ function abrirGuardadaDepoisDaFalha(epoca) {
 
 function maybePrefetch() {
     if (Treino.ativo) return;
+    // O mesmo portão do `startFetching`: nada de página em segundo plano sob a passagem.
+    if (AppState.passagemNaTela === true) { buscaAdiadaPelaPassagem = true; return; }
     if (AppState.queue.length <= PREFETCH_THRESHOLD && AppState.hasMore && !AppState.fetching) {
         fetchNextPage().then(() => {
             if (!AppState.currentPlace && AppState.queue.length > 0) {
