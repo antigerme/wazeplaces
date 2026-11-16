@@ -8,6 +8,13 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.11.16-01
+**No computador, a fila só carrega depois do «Continuar».** A tela de passagem cobre o card, mas o app ainda buscava os pedidos por trás dela a cada abertura, uma chamada ao Waze (e ao servidor) que ninguém via, já que quase todo mundo abre o app no computador só para conectar o celular. Agora, com a passagem na tela, nenhuma busca sai: nem a da abertura, nem a do ↻, nem a página em segundo plano. Ao tocar em «Continuar neste computador» (ou ao estreitar a janela, quando o card volta), a fila carrega naquele momento, uma vez só. Depois da primeira escolha, a passagem não volta mais e o app abre como sempre.
+
+- **O que muda para quem usa o computador de verdade:** na primeira vez, o toque em «Continuar» mostra o carregamento por um instante antes do primeiro card, em vez de o card já estar pronto. Nas aberturas seguintes nada muda.
+- **Não muda nada** no celular, no tablet nem no notebook com tela de toque, que nunca veem a passagem.
+- Alargar e estreitar a janela não refaz a fila.
+
 ## v2026.11.15-04
 **No computador, o app vira a ponte para o celular.** Quase todo mundo que abre o app no computador só quer chegar ao celular (a extensão só existe lá, e colar o `cookies.txt` num celular é inviável). Agora, num computador com mouse e a janela de 900 px ou mais, o app mostra uma tela de passagem no lugar do placar e do card: «Este app é feito para o celular», com o QR para conectar o celular, três passos (apontar a câmera, tocar no link, adicionar o app à tela inicial) e o aviso de que depois disso o celular fica conectado e não precisa voltar ao computador.
 

@@ -18781,6 +18781,92 @@ const gestosNada = (d) => !d.lidos && !d.rejeitados && !d.pulados && !d.janela;
   }
 }
 
+// ── A FILA SÓ CARREGA DEPOIS DO «CONTINUAR» (v2026.11.16-01) ───────────────────
+// Quase todo uso no computador é só pra parear o celular: a busca por trás de uma tela que cobre o
+// card era uma chamada ao Waze (e ao Worker e ao KV) que ninguém via. Aqui a ABERTURA é a de verdade
+// (sessão salva no aparelho, `initApp`, perfil), e o que se CONTA é cada `/api/buscar-places` que a
+// rota recebe. CONTROLES: com a escolha do «Continuar» já gravada a busca SAI na abertura (prova que
+// o instrumento enxerga a chamada), e numa janela estreita também; a janela que alarga e estreita
+// depois NÃO refaz a fila.
+{
+  const onde = 'passagem/fila';
+  const pedido = (i) => ({ venueID: 'pf' + i, updateRequestID: 'pfu' + i, name: 'Local ' + i, categories: ['OTHER'], address: 'Rua X',
+    updateType: 'Novo local', reqType: 'VENUE', createdBy: 'world_x' + i, creatorId: 900 + i, imageUrls: [], purType: 'NEW_PLACE', isRead: false });
+  const abrir = async ({ largura, dispensada }) => {
+    const ctx = await browser.newContext({ viewport: { width: largura, height: 800 }, locale: 'pt-BR', serviceWorkers: 'block' });
+    const chamadas = [];
+    await ctx.route('**/*-tiles/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route(/venue-image\.waze\.com/, (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: SVG_CINZA }));
+    await ctx.route('**/api/**', async (r) => {
+      const nome = r.request().url().split('/api/')[1].split(/[?#]/)[0];
+      chamadas.push(nome);
+      let b = { success: true };
+      if (nome === 'perfil') {
+        b = { success: true, visivelNoWme: true, profile: { id: 12444348, userName: 'wazer', rank: 5, isAreaManager: true, isStaff: false,
+          areas: [], managedAreas: [], editableCountryIDs: [30] } };
+      } else if (nome === 'lista-paises') b = { success: true, countries: [{ id: 30, name: 'Brazil' }] };
+      else if (nome === 'lista-estados') b = { success: true, states: [] };
+      else if (nome === 'buscar-places') b = { success: true, places: [pedido(0), pedido(1)], hasMore: false, page: 1, total: 2, totalAll: 2, blocked: 0 };
+      await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(b) }).catch(() => {});
+    });
+    await ctx.addInitScript((dispensada) => {
+      try {
+        if (sessionStorage.getItem('__passagemFila')) return;
+        sessionStorage.setItem('__passagemFila', '1');
+        localStorage.setItem('waze_session_token', 'tok-passagem-fila');
+        localStorage.setItem('waze_places_lang', 'pt');
+        localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true, undoGateSeen: true,
+          presenca: false, ...(dispensada ? { passagemDispensada: true } : {}) }));
+      } catch (e) { /* armazenamento bloqueado: o teste segue */ }
+    }, dispensada);
+    const page = await ctx.newPage();
+    const erros = [];
+    page.on('pageerror', (e) => erros.push(String(e.message || e)));
+    await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+    // A abertura TERMINOU quando o perfil (que ela sempre pede) chegou: sinal positivo, não prazo.
+    await esperarOuExplodir(page, () => AppState.authenticated === true && !!AppState.profile, `${onde}: a abertura (perfil) não terminou`);
+    await assentar(page, 400);
+    return { ctx, page, erros, buscas: () => chamadas.filter((n) => n === 'buscar-places').length };
+  };
+
+  // 1) Computador, sem a escolha: a passagem cobre o card e NENHUMA busca sai.
+  {
+    const a = await abrir({ largura: 1280, dispensada: false });
+    const e = await a.page.evaluate(() => ({ passagem: AppState.passagemNaTela, fila: AppState.queue.length, card: !!AppState.currentPlace, buscando: AppState.fetching }));
+    checa(e.passagem === true, `${onde}: PRÉ-CONDIÇÃO: a passagem não está na tela`, JSON.stringify(e));
+    checa(a.buscas() === 0 && e.fila === 0 && !e.card && !e.buscando, `${onde}: a abertura com a passagem na tela buscou a fila (${a.buscas()} chamada(s) a buscar-places)`, JSON.stringify(e));
+    // ↻ e o Esc/seta também não buscam por baixo.
+    await a.page.click('#refreshBtn');
+    await assentar(a.page, 400);
+    checa(a.buscas() === 0, `${onde}: o ↻ com a passagem na tela buscou a fila (${a.buscas()} chamada(s))`);
+    // 2) O «Continuar» manda a busca, UMA vez, e o card chega.
+    await a.page.click('#passagemContinuar');
+    await esperarOuExplodir(a.page, () => !!AppState.currentPlace && !AppState.fetching, `${onde}: o card não chegou depois do «Continuar»`);
+    checa(a.buscas() === 1, `${onde}: o «Continuar» devia mandar UMA busca e mandou ${a.buscas()}`);
+    // 3) A janela que alarga e estreita NÃO refaz a fila.
+    await a.page.setViewportSize({ width: 700, height: 800 }); await assentar(a.page, 200);
+    await a.page.setViewportSize({ width: 1280, height: 800 }); await assentar(a.page, 200);
+    await a.page.setViewportSize({ width: 700, height: 800 }); await assentar(a.page, 300);
+    checa(a.buscas() === 1, `${onde}: alargar e estreitar a janela refez a fila (${a.buscas()} buscas)`);
+    checa(a.erros.length === 0, `${onde}: erro de JS`, a.erros[0]);
+    await a.ctx.close();
+  }
+  // 4) CONTROLE: com a escolha do «Continuar» já gravada, a busca SAI na abertura (o instrumento a enxerga).
+  {
+    const a = await abrir({ largura: 1280, dispensada: true });
+    await esperarOuExplodir(a.page, () => !!AppState.currentPlace && !AppState.fetching, `${onde} (controle): o card não chegou na abertura`);
+    checa(a.buscas() === 1, `${onde} CONTROLE: com a escolha gravada a abertura devia buscar uma vez e buscou ${a.buscas()}`);
+    await a.ctx.close();
+  }
+  // 5) CONTROLE: janela estreita (nunca vê a passagem): a busca sai na abertura.
+  {
+    const a = await abrir({ largura: 600, dispensada: false });
+    await esperarOuExplodir(a.page, () => !!AppState.currentPlace && !AppState.fetching, `${onde} (estreita): o card não chegou na abertura`);
+    checa(a.buscas() === 1 && (await a.page.evaluate(() => AppState.passagemNaTela)) === false, `${onde} CONTROLE: a janela estreita devia buscar na abertura (${a.buscas()})`);
+    await a.ctx.close();
+  }
+}
+
 // ── MAPA + SERVICE WORKER: mora em `tools/smoke-offline.mjs` ──────────────
 //
 // Este bloco nasceu aqui e MUDOU DE CASA, de propósito. O offline precisa do
