@@ -89,6 +89,18 @@ sempre carregado; aqui mora o inteiro teor, pra ler quando o assunto aparece.
 
 ---
 
+## `smokes-navegador.md`
+
+Como os smokes de `tools/` (Playwright) funcionam: por que o motor é pinado no
+`latest`, o que é particular do job paralelo do WebKit, e o que fazer pra
+rodar navegador de verdade aqui no sandbox (CA do proxy, locale do WME,
+diff pixel a pixel). Saiu do CLAUDE.md na revisão de 2026-11-19: ficaram lá só
+os comandos de uso e as duas instruções permanentes (países, cookies do
+dono) — isto é referência de quem vai mexer num smoke, não algo que todo
+agente precisa em toda mensagem.
+
+---
+
 ## O que saiu na limpeza de 2026-10-26
 
 O arquivo de trabalho da auditoria de 2026-09, a história dos lotes de correção
