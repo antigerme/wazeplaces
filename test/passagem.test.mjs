@@ -101,11 +101,12 @@ function mundo({ largura = 1440, fino = true, toque = false, movel = false, auth
   const chaves = Object.keys(deps);
   const fonte = [
     'let epocaDaSessao = 1;',
-    'let passagemEstado = "clique", aberturaDaPassagem = 0, loginNestaPagina = false, buscaAdiadaPelaPassagem = false;',
+    'let passagemEstado = "clique", aberturaDaPassagem = 0, loginNestaPagina = false, loginPelaExtensaoNaPagina = false, buscaAdiadaPelaPassagem = false;',
     LARGURA,
     ...nomes.map(fatiar),
     `return { ${nomes.join(', ')}, estado: () => passagemEstado, abertura: () => aberturaDaPassagem, novoLogin: (v) => { loginNestaPagina = v; },
       loginNovo: () => loginNestaPagina, trocarEpoca: () => { epocaDaSessao++; },
+      novoLoginExtensao: (v) => { loginNestaPagina = v; loginPelaExtensaoNaPagina = v; }, loginExtensaoPendente: () => loginPelaExtensaoNaPagina,
       adiar: () => { buscaAdiadaPelaPassagem = true; }, adiada: () => buscaAdiadaPelaPassagem, treinoAtivo: (v) => { Treino.ativo = v; } };`,
   ].join('\n');
   const app = new Function(...chaves, fonte)(...chaves.map((k) => deps[k]));
@@ -281,11 +282,62 @@ test('a trava das ações, as setas e o "Como funciona" leem o VALOR, e só `===
 
 test('o "login novo" só liga na extensão (sem a renovação) e no cookies.txt — nunca na adoção da sessão guardada', () => {
   const quem = [];
-  for (const [i, l] of APP_SEM.split('\n').entries()) if (/loginNestaPagina = true;|if \(!manterFila\) loginNestaPagina = true;/.test(l)) quem.push(i);
+  for (const [i, l] of APP_SEM.split('\n').entries()) if (/loginNestaPagina = true;|if \(!manterFila\) \{ loginNestaPagina = true;/.test(l)) quem.push(i);
   assert.equal(quem.length, 2, 'o QR automático tem de sair só nos DOIS logins novos (extensão e cookies.txt)');
-  assert.match(APP_SEM, /if \(!manterFila\) loginNestaPagina = true;/, 'a renovação da queda (manterFila) passou a pedir o QR automático');
-  assert.doesNotMatch(fatiar('aoEntrarNestaPagina'), /loginNestaPagina/, 'aoEntrarNestaPagina também roda na ADOÇÃO da sessão guardada (toda reabertura): o QR sairia sempre');
-  assert.doesNotMatch(fatiar('adotarSessaoDoAparelho'), /loginNestaPagina/);
+  assert.match(APP_SEM, /if \(!manterFila\) \{ loginNestaPagina = true; loginPelaExtensaoNaPagina = true; \}/,
+    'a renovação da queda (manterFila) passou a pedir o QR automático, ou a marca de que o login é da extensão');
+  assert.doesNotMatch(fatiar('aoEntrarNestaPagina'), /loginNestaPagina|loginPelaExtensaoNaPagina/, 'aoEntrarNestaPagina também roda na ADOÇÃO da sessão guardada (toda reabertura): o QR sairia sempre');
+  assert.doesNotMatch(fatiar('adotarSessaoDoAparelho'), /loginNestaPagina|loginPelaExtensaoNaPagina/);
+});
+
+// ═══ login pela extensão: quem já resolveu "chegar ao celular" não vê a passagem ═════
+// Quem clica ACESSAR no WME já tem o que a passagem oferece — acesso rápido no PRÓPRIO
+// computador, sem copiar cookies. Mostrar o QR bem no primeiro clique do botão seria o
+// oposto do que a extensão promete: a passagem pula pro card, SÓ nesta decisão.
+test('login novo PELA EXTENSÃO: a passagem não aparece — vai direto pro card, e sem pedir QR', () => {
+  const m = mundo();
+  m.app.novoLoginExtensao(true);
+  m.app.aplicarPassagem();
+  assert.equal(m.AppState.passagemNaTela, false, 'DEFEITO: a passagem apareceu pro login da extensão');
+  assert.ok(!m.html.classes.has('passagem-ativa'), 'a classe que escondia o card ficou ligada');
+  assert.deepEqual(m.pedidos, [], 'DEFEITO: pediu um código de pareamento sem a tela nem aparecer');
+  assert.equal(m.app.loginExtensaoPendente(), false, 'a marca da extensão não foi consumida');
+  assert.equal(m.app.loginNovo(), false, 'o "QR já pronto" ficou pendente: um redimensionar pediria o QR à toa');
+});
+
+test('login novo pela extensão NUMA JANELA ESTREITA: a marca é consumida do mesmo jeito (sem sobrar pra depois)', () => {
+  const m = mundo({ largura: 600 });   // a passagem nem apareceria aqui
+  m.app.novoLoginExtensao(true);
+  m.app.aplicarPassagem();
+  assert.equal(m.AppState.passagemNaTela, false);
+  assert.equal(m.app.loginExtensaoPendente(), false, 'DEFEITO: a marca ficou pendente numa janela onde a passagem nem é de computador');
+});
+
+test('login pela extensão só pula a passagem UMA VEZ: alargar a janela DEPOIS, na mesma sessão, mostra a passagem normalmente', () => {
+  const m = mundo({ largura: 600 });
+  m.app.novoLoginExtensao(true);
+  m.app.aplicarPassagem();   // janela estreita: nem apareceria, e a marca é gasta aqui
+  m.janela.largura = 1300;
+  m.app.aplicarPassagem();   // agora é de computador — e NÃO é mais o momento do login
+  assert.equal(m.AppState.passagemNaTela, true,
+    'DEFEITO: o pulo da extensão virou permanente (deveria valer só pra decisão de QUANDO o login aconteceu)');
+  assert.equal(m.AppState.preferences.passagemDispensada, false, 'o pulo da extensão não é "Continuar": não grava preferência nenhuma');
+  assert.deepEqual(m.pedidos, [], 'o QR "já pronto" não pode sair sozinho depois: a janela estreita já tinha gasto a oferta');
+  assert.equal(m.app.estado(), 'clique', 'quem quiser o QR agora clica em "Mostrar", como alguém que nunca logou pela extensão');
+});
+
+test('CONTROLE: login novo por cookies.txt (sem a extensão) continua vendo a passagem e o QR já pronto', async () => {
+  const m = mundo();
+  m.app.novoLogin(true);   // como o login por cookies.txt faz — nunca `novoLoginExtensao`
+  m.app.aplicarPassagem();
+  await livre(); await livre();
+  assert.equal(m.AppState.passagemNaTela, true, 'CONTROLE: o login por cookies.txt deixou de ver a passagem');
+  assert.equal(m.pedidos.length, 1, 'CONTROLE: o login por cookies.txt deixou de pedir o QR já pronto');
+});
+
+test('"Sair" também esquece a marca do login da extensão (uma sessão nova não herda a pendência de outra)', () => {
+  assert.match(fatiar('showAuthScreen'), /loginPelaExtensaoNaPagina = false;/,
+    'DEFEITO: showAuthScreen não zera loginPelaExtensaoNaPagina');
 });
 
 test('o `loadPreferences` RELÊ a escolha (sem a linha ela era gravada e nunca lida), e o de fábrica a traz desligada', () => {
