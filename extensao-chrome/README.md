@@ -1,4 +1,4 @@
-# Waze Places Rapid Access — proposta de v0.3.4
+# Waze Places Rapid Access — proposta de v0.3.5
 
 Reescrita da extensão do [@daflash](https://www.waze.com/user/editor/daflash) para que o login
 entre o **Waze Map Editor** e o **Waze Places** seja totalmente automático.
@@ -412,5 +412,18 @@ embora, e pode seguir a ida até o fim) fica sem dono, e vence sozinha (em até 
 | atual | 0.3.3 | funciona como antes: a ponte ignora a `espera` e segue sem prazo |
 | atual | 0.3.4 | o login da ponte acaba antes de o app desistir, e é um por vez |
 | anterior | 0.3.4 | funciona — sem a `espera`, a ponte usa os 8 s que o app de antes esperava |
+
+## v0.3.5 — limpeza: a checagem `isAM === 'Sim'` era código morto
+
+Sem mudança de comportamento. Achado numa revisão do `content.js`: o painel checava
+`isAM === true || isAM === 'true' || isAM === 'Sim'` pra decidir o texto "AM: Sim/Não" e o portão do
+botão ACESSAR — mas o `inject.js` já normaliza `isAM` pra um booleano VERDADEIRO antes de mandar pro
+painel (`Boolean(isAM && isAM !== 'Não' && isAM !== 'false' && isAM !== false)`, na mensagem
+`AG_WAZE_DATA`). Quando o painel recebe o valor, ele já é `true` ou `false` — nunca a string `'Sim'`.
+A comparação com `'Sim'` nunca pôde ser verdadeira desde que essa normalização existe; é resíduo da
+v0.0.3 original do @daflash, de antes dela. Removida. `'true'` (string) fica como reserva, sem caso
+real conhecido que a use.
+
+Sem publicação ainda (proposta).
 
 Permissões: **as mesmas** da 0.2.0.

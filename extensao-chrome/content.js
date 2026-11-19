@@ -248,7 +248,11 @@ function createAGInterface(userName, level, isAM, language = 'en', rank, isStaff
     title.style.cssText = 'margin: 0; font-size: 15px; font-weight: bold; color: #222; text-align: center;';
     container.appendChild(title);
 
-    const isAMBoolean = (isAM === true || isAM === 'true' || isAM === 'Sim');
+    // `isAM` já chega BOOLEANO: o `inject.js` normaliza antes de mandar pro painel
+    // (`Boolean(isAM && isAM !== 'Não' && ...)`). O `=== 'true'` fica como reserva pra
+    // string (nunca viu um caso real); `=== 'Sim'` era resíduo do daflash v0.0.3, de
+    // antes de o `inject.js` normalizar — código morto: nunca pôde ser verdadeiro.
+    const isAMBoolean = (isAM === true || isAM === 'true');
     const amText = isAMBoolean ? t.yes : t.no;
 
     const info = document.createElement('span');
