@@ -1169,9 +1169,8 @@ function entrarPelaExtensao({ silencioso = false, manterFila = false } = {}) {
             API.setSession(String(d.token), 'extensao');
             aoEntrarNestaPagina();
             // Um login NOVO (não a renovação da queda, que mantém a fila): a passagem
-            // do computador oferece o QR já pronto (`aplicarPassagem`) — menos pra quem
-            // chegou por AQUI (a extensão), que `aplicarPassagem` pula direto pro card.
-            if (!manterFila) { loginNestaPagina = true; loginPelaExtensaoNaPagina = true; }
+            // do computador oferece o QR já pronto (`aplicarPassagem`).
+            if (!manterFila) loginNestaPagina = true;
             // O foco que estava NA tela de entrada (no "Colar cookies", no campo
             // dele) vai ao ✕ do primeiro card: ela some agora, sem gesto, e ele
             // caía no <body> (R10-1-05; ver a função). Lido antes de fechar.
@@ -2359,13 +2358,6 @@ async function desenharQrPareamento(url, idDoCanvas = 'pairQr') {
 let passagemEstado = 'clique';     // 'clique' | 'carregando' | 'qr' | 'vencido'
 let aberturaDaPassagem = 0;         // sobe a cada QR pedido e a cada limpeza
 let loginNestaPagina = false;       // um login NOVO deu certo nesta página (extensão ou cookies)
-// Login novo pela EXTENSÃO, especificamente (nunca por cookies.txt): quem chegou por ali já tem
-// o que a passagem oferece (acesso rápido no PRÓPRIO computador, sem copiar cookies) — mostrar o
-// QR pro celular bem no primeiro clique do ACESSAR seria o oposto do que a extensão promete.
-// Consumida em `aplicarPassagem()`, numa decisão só: um redimensionar depois, na mesma sessão,
-// segue a regra normal (como já vale pra quem logou com cookies.txt numa janela estreita e
-// alargou depois).
-let loginPelaExtensaoNaPagina = false;
 // A fila só carrega DEPOIS do «Continuar»: quase todo uso do app no computador é só pra parear o
 // celular, e a busca por trás de uma tela que cobre o card era uma chamada ao Waze (e ao Worker, e
 // ao KV) que ninguém via. O portão mora no começo de `startFetching` e de `maybePrefetch` (os dois
@@ -2475,17 +2467,7 @@ function aoVencerQrDaPassagem() {
 function aplicarPassagem() {
     const tela = document.getElementById('passagemScreen');
     if (!tela) return;
-    let ativa = passagemAtiva();
-    // Login novo pela extensão: a marca é consumida aqui, dê ela certo ou não. Se a passagem
-    // ia aparecer, esta decisão pula pro card — e o "QR já pronto" (`loginNestaPagina`, abaixo)
-    // também sai: ele era PRA esta passagem, que não vai existir.
-    if (loginPelaExtensaoNaPagina) {
-        loginPelaExtensaoNaPagina = false;
-        // A oferta do QR "já pronto" (`loginNestaPagina`, abaixo) era PRA esta passagem: sem
-        // ela, não tem QR pra oferecer, nem agora nem num redimensionar mais tarde.
-        loginNestaPagina = false;
-        if (ativa) ativa = false;
-    }
+    const ativa = passagemAtiva();
     const estavaAtiva = !tela.classList.contains('hidden');
     AppState.passagemNaTela = ativa;
     document.documentElement.classList.toggle('passagem-ativa', ativa);
@@ -7523,7 +7505,6 @@ function showAuthScreen() {
     AppState.passagemNaTela = false;
     limparPassagem();
     loginNestaPagina = false;
-    loginPelaExtensaoNaPagina = false;
     buscaAdiadaPelaPassagem = false;   // a busca segurada era da sessão que acabou
     document.getElementById('authScreen').classList.remove('hidden');
     document.getElementById('appScreen').classList.add('hidden');

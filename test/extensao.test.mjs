@@ -939,20 +939,6 @@ test('R6-1-10: a abertura do app é a que o teste encena — sessão guardada ab
     'a abertura com sessão guardada deixou de marcar `jaAtiva`: reveja este teste');
 });
 
-// A passagem do computador (`js/app.js`) pula pro card em todo login NOVO que veio daqui — quem
-// clica ACESSAR no WME já resolveu "chegar ao celular sem copiar cookies", que é o problema que a
-// passagem existe pra resolver. A marca tem de nascer no MESMO guard (`!manterFila`) que já
-// protege o "QR já pronto" da renovação da queda — senão a renovação silenciosa pularia a
-// passagem de alguém que nem sabe que ela existe.
-test('login pela extensão marca `loginPelaExtensaoNaPagina`, no MESMO guard que `loginNestaPagina` (nunca na renovação da queda)', () => {
-  const corpo = fatiar('entrarPelaExtensao');
-  assert.match(corpo, /if \(!manterFila\) \{ loginNestaPagina = true; loginPelaExtensaoNaPagina = true; \}/,
-    'DEFEITO: entrarPelaExtensao não marca loginPelaExtensaoNaPagina junto de loginNestaPagina, sob o mesmo `!manterFila`');
-  // CONTROLE: a marca não aparece em NENHUM outro lugar do arquivo (só a extensão a liga).
-  const vezes = (APP_SEM.match(/loginPelaExtensaoNaPagina = true;/g) || []).length;
-  assert.equal(vezes, 1, `loginPelaExtensaoNaPagina = true apareceu ${vezes} vez(es) — só entrarPelaExtensao pode ligá-la`);
-});
-
 async function botaoDoWme({ guardadoAntes = {}, idadeDoPendente = 0 } = {}) {
   // 1. O botão no WME: o background de verdade autentica e guarda o pendente.
   const bg = rodarBackground({ waze: () => json(PERFIL_L6) });
