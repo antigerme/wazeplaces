@@ -23,6 +23,36 @@ function podeEntrarNoApp(rank, isAM, isStaff) {
     return r >= RANK_MINIMO && !!isAM;
 }
 
+// O painel roda DENTRO do www.waze.com — `location.origin` aqui não é o do
+// app. Duplicado do `API_BASE` do background.js de propósito (são scripts
+// isolados; mudou lá, muda aqui também).
+const APP_BASE = 'https://places.wazebrasil.com';
+
+// O nível mínimo vem da constante do portão, nunca escrito à mão em 4 línguas.
+function comNivel(frase, nivel = NIVEL_MINIMO) {
+    return String(frase).replace(/\{nivel\}/g, String(nivel));
+}
+
+// A frase do alerta sai do dicionário DESTE painel, na língua do WME (`t`,
+// passado pelo chamador). Ia o `error` cru — a frase do servidor, sempre em
+// português, ou a do próprio background —, e no cookie vencido ela mandava
+// "exportar os cookies", que não é o caminho de quem entra pela extensão
+// (auditoria da rodada 6, R66-2). O background repassa a CHAVE e a categoria
+// que o servidor mandou; a frase crua fica no FIM da cadeia, pra resposta que
+// não traz nenhuma das duas.
+function fraseDoErro(r, t) {
+    if (r.semLogin) return t.erroSemLogin;
+    if (r.negado || r.errorCategory === 'access_denied') {
+        const n = r.errorVars && Number.isInteger(r.errorVars.minLevel) && r.errorVars.minLevel > 0
+            ? r.errorVars.minLevel : NIVEL_MINIMO;
+        return comNivel(t.erroNegado, n);
+    }
+    if (r.errorKey === 'ext.conexao') return t.erroConexao;
+    if (r.errorCategory === 'transient' || r.errorCategory === 'unknown') return t.erroWaze;
+    if (r.errorKey) return t.erroGenerico;
+    return r.error || t.erroGenerico;
+}
+
 // O ACESSAR fica TRAVADO enquanto loga (auditoria da rodada 7, R7-1-06). Cada
 // toque é um `abrirPlaces`: uma ida ao /Session do Waze no nome da pessoa, uma
 // sessão nova no servidor e uma aba nova do app — e o toque duplo abria duas
@@ -109,7 +139,6 @@ function createAGInterface(userName, level, isAM, language = 'en', rank, isStaff
             am: 'AM:',
             accessBtn: 'ACESSAR',
             loggingBtn: 'LOGANDO...',
-            accessWazePlacesBtn: 'Acessar o Waze Places',
             errorLogin: 'Falha no login automático:\n',
             erroSemLogin: 'O seu login no WME não foi encontrado. Recarregue esta página (ou entre de novo no WME) e tente outra vez.',
             erroNegado: 'O Waze Places é restrito a editores Area Manager de Nível {nivel}+ ou Staff.',
@@ -124,6 +153,17 @@ function createAGInterface(userName, level, isAM, language = 'en', rank, isStaff
             infoBox: "No momento, esta função está disponível apenas para usuários Nível {nivel}+ com Area Manager, ou Staff.\nA extensão fará o login automático no WAZE PLACES utilizando o seu cookie (sem a necessidade de extensões adicionais ou de copiar/colar o cookie).",
             version: "Versão",
             by: "by",
+            mostrarQrBtn: 'Mostrar QR para o celular',
+            gerando: 'Gerando o código…',
+            valePor: 'Vale por mais {time}',
+            vencido: 'Código expirado',
+            gerarOutro: 'Gerar outro código',
+            passo1: 'Abra a câmera do celular e aponte para o código.',
+            passo2: 'Toque no link que aparecer: você já entra conectado.',
+            passo3: 'Adicione o app à tela inicial para abri-lo como um app.',
+            semCamera: 'Sem câmera? Mostrar um código',
+            digiteCodigo: 'Digite este código no celular:',
+            continuarComputador: 'Continuar neste computador',
             yes: "Sim",
             no: "Não"
         },
@@ -134,7 +174,6 @@ function createAGInterface(userName, level, isAM, language = 'en', rank, isStaff
             am: 'AM:',
             accessBtn: 'ACCESS',
             loggingBtn: 'LOGGING IN...',
-            accessWazePlacesBtn: 'Access Waze Places',
             errorLogin: 'Auto login failed:\n',
             erroSemLogin: "Couldn't find your WME login. Reload this page (or sign in to WME again) and try once more.",
             erroNegado: 'Waze Places is restricted to Area Manager editors at Level {nivel}+ or Staff.',
@@ -149,6 +188,17 @@ function createAGInterface(userName, level, isAM, language = 'en', rank, isStaff
             infoBox: "Currently, this function is only available to Level {nivel}+ users with Area Manager, or Staff.\nThe extension will automatically log in to WAZE PLACES using your cookie (without the need for extra extensions or copying/pasting the cookie).",
             version: "Version",
             by: "by",
+            mostrarQrBtn: 'Show QR code for my phone',
+            gerando: 'Generating the code…',
+            valePor: 'Valid for {time} more',
+            vencido: 'Code expired',
+            gerarOutro: 'Generate another code',
+            passo1: 'Open your phone’s camera and point it at the code.',
+            passo2: 'Tap the link that appears: you get in already signed in.',
+            passo3: 'Add the app to your home screen to open it like an app.',
+            semCamera: 'No camera? Show a code',
+            digiteCodigo: 'Enter this code on your phone:',
+            continuarComputador: 'Continue on this computer',
             yes: "Yes",
             no: "No"
         },
@@ -159,7 +209,6 @@ function createAGInterface(userName, level, isAM, language = 'en', rank, isStaff
             am: 'AM:',
             accessBtn: 'ACCEDER',
             loggingBtn: 'INICIANDO SESIÓN...',
-            accessWazePlacesBtn: 'Acceder a Waze Places',
             errorLogin: 'Fallo en el inicio de sesión automático:\n',
             erroSemLogin: 'No se encontró su inicio de sesión en el WME. Recargue esta página (o vuelva a entrar en el WME) e inténtelo de nuevo.',
             erroNegado: 'Waze Places está restringido a editores Area Manager de Nivel {nivel}+ o Staff.',
@@ -174,6 +223,17 @@ function createAGInterface(userName, level, isAM, language = 'en', rank, isStaff
             infoBox: "Actualmente, esta función solo está disponible para usuarios Nivel {nivel}+ con Area Manager, o Staff.\nLa extensión iniciará sesión automáticamente en WAZE PLACES utilizando su cookie (sin necesidad de extensiones adicionales ni de copiar/pegar la cookie).",
             version: "Versión",
             by: "por",
+            mostrarQrBtn: 'Mostrar QR para el teléfono',
+            gerando: 'Generando el código…',
+            valePor: 'Vale por {time} más',
+            vencido: 'Código vencido',
+            gerarOutro: 'Generar otro código',
+            passo1: 'Abre la cámara del teléfono y apunta al código.',
+            passo2: 'Toca el enlace que aparezca: entras ya conectado.',
+            passo3: 'Añade la app a la pantalla de inicio para abrirla como una app.',
+            semCamera: '¿Sin cámara? Mostrar un código',
+            digiteCodigo: 'Escribe este código en el teléfono:',
+            continuarComputador: 'Continuar en esta computadora',
             yes: "Sí",
             no: "No"
         },
@@ -184,7 +244,6 @@ function createAGInterface(userName, level, isAM, language = 'en', rank, isStaff
             am: 'AM:',
             accessBtn: 'ACCÉDER',
             loggingBtn: 'CONNEXION...',
-            accessWazePlacesBtn: 'Accéder à Waze Places',
             errorLogin: 'Échec de la connexion automatique :\n',
             erroSemLogin: 'Impossible de trouver votre connexion au WME. Rechargez cette page (ou reconnectez-vous au WME) et réessayez.',
             erroNegado: 'Waze Places est réservé aux éditeurs Area Manager de niveau {nivel}+ ou Staff.',
@@ -199,6 +258,17 @@ function createAGInterface(userName, level, isAM, language = 'en', rank, isStaff
             infoBox: "Pour le moment, cette fonction n'est disponible que pour les utilisateurs de niveau {nivel}+ avec Area Manager, ou Staff.\nL'extension se connectera automatiquement à WAZE PLACES en utilisant votre cookie (sans avoir besoin d'extensions supplémentaires ou de copier/coller le cookie).",
             version: "Version",
             by: "par",
+            mostrarQrBtn: 'Afficher le QR pour le téléphone',
+            gerando: 'Génération du code…',
+            valePor: 'Valable encore {time}',
+            vencido: 'Code expiré',
+            gerarOutro: 'Générer un autre code',
+            passo1: 'Ouvrez l’appareil photo du téléphone et pointez-le vers le code.',
+            passo2: 'Touchez le lien qui s’affiche : vous arrivez déjà connecté.',
+            passo3: 'Ajoutez l’appli à l’écran d’accueil pour l’ouvrir comme une appli.',
+            semCamera: 'Pas de caméra ? Afficher un code',
+            digiteCodigo: 'Saisissez ce code sur le téléphone :',
+            continuarComputador: 'Continuer sur cet ordinateur',
             yes: "Oui",
             no: "Non"
         }
@@ -220,27 +290,6 @@ function createAGInterface(userName, level, isAM, language = 'en', rank, isStaff
     }
     
     const t = translations[langKey];
-    // O nível mínimo vem da constante do portão, nunca escrito à mão em 4 línguas.
-    const comNivel = (frase, nivel = NIVEL_MINIMO) => String(frase).replace(/\{nivel\}/g, String(nivel));
-
-    // A frase do alerta sai do dicionário DESTE painel, na língua do WME. Ia o
-    // `error` cru — a frase do servidor, sempre em português, ou a do próprio
-    // background —, e no cookie vencido ela mandava "exportar os cookies", que não
-    // é o caminho de quem entra pela extensão (auditoria da rodada 6, R66-2). O
-    // background repassa a CHAVE e a categoria que o servidor mandou; a frase
-    // crua fica no FIM da cadeia, pra resposta que não traz nenhuma das duas.
-    function fraseDoErro(r) {
-        if (r.semLogin) return t.erroSemLogin;
-        if (r.negado || r.errorCategory === 'access_denied') {
-            const n = r.errorVars && Number.isInteger(r.errorVars.minLevel) && r.errorVars.minLevel > 0
-                ? r.errorVars.minLevel : NIVEL_MINIMO;
-            return comNivel(t.erroNegado, n);
-        }
-        if (r.errorKey === 'ext.conexao') return t.erroConexao;
-        if (r.errorCategory === 'transient' || r.errorCategory === 'unknown') return t.erroWaze;
-        if (r.errorKey) return t.erroGenerico;
-        return r.error || t.erroGenerico;
-    }
 
 //----------- titulo aba
     const title = document.createElement('h4');
@@ -248,7 +297,11 @@ function createAGInterface(userName, level, isAM, language = 'en', rank, isStaff
     title.style.cssText = 'margin: 0; font-size: 15px; font-weight: bold; color: #222; text-align: center;';
     container.appendChild(title);
 
-    const isAMBoolean = (isAM === true || isAM === 'true' || isAM === 'Sim');
+    // `isAM` já chega BOOLEANO: o `inject.js` normaliza antes de mandar pro painel
+    // (`Boolean(isAM && isAM !== 'Não' && ...)`). O `=== 'true'` fica como reserva pra
+    // string (nunca viu um caso real); `=== 'Sim'` era resíduo do daflash v0.0.3, de
+    // antes de o `inject.js` normalizar — código morto: nunca pôde ser verdadeiro.
+    const isAMBoolean = (isAM === true || isAM === 'true');
     const amText = isAMBoolean ? t.yes : t.no;
 
     const info = document.createElement('span');
@@ -259,70 +312,15 @@ function createAGInterface(userName, level, isAM, language = 'en', rank, isStaff
     info.innerHTML = `${t.user} <b style="color: #007bff;">${userName}</b><br>${t.level} <b>${level}</b> | ${t.am} <b>${amText}</b>`;
     container.appendChild(info);
 
-    const btn = document.createElement('button');
-    btn.innerText = t.accessBtn;
-    
 //------------- regra de acesso: a do servidor (ver `podeEntrarNoApp`)
     const canAccess = podeEntrarNoApp(rank, isAMBoolean, isStaff === true || isStaff === 'true');
 
     if (canAccess) {
-//------------- botao OK
-        btn.style.cssText = `
-            background: #33ccff; border: none; color: black; font-weight: bold;
-            padding: 10px 15px; border-radius: 5px; cursor: pointer;
-            font-size: 13px; width: 100%; transition: 0.3s; font-family: sans-serif;
-            display: flex; justify-content: center; align-items: center; text-align: center; box-sizing: border-box;
-        `;
-        
-        btn.addEventListener('click', () => {
-            if (btn.disabled) return;   // um login por vez (ver `ESPERA_DO_BOTAO_MS`)
-            btn.disabled = true;
-            btn.innerText = t.loggingBtn;
-            btn.style.background = '#ffcc00';
-
-            // Devolve o botão UMA vez por toque: a resposta que chega depois do
-            // teto não avisa de novo, nem destrava o toque seguinte, que pode
-            // estar com outro login no ar.
-            let terminou = false;
-            let teto = null;
-            const terminar = () => {
-                if (terminou) return false;
-                terminou = true;
-                clearTimeout(teto);
-                btn.disabled = false;
-                btn.innerText = t.accessWazePlacesBtn;
-                btn.style.background = '#33ccff';
-                return true;
-            };
-            teto = setTimeout(() => {
-                if (terminar()) alert(t.errorLogin + t.erroExtensao);
-            }, ESPERA_DO_BOTAO_MS);
-
-            // "abrirPlaces" (era "getCookies"): o nome agora diz o que o botão
-            // FAZ, e o background tem uma segunda ação ("autenticar") que a
-            // ponte usa sem abrir aba. Dois nomes porque são dois fluxos. O
-            // `desde` é a hora do toque: é dela que o prazo do login conta lá.
-            try {
-                chrome.runtime.sendMessage({ action: "abrirPlaces", desde: Date.now() }, (response) => {
-                    // Lido SEMPRE, antes de tudo: o `lastError` só vale aqui
-                    // dentro, e o Chrome acusa o que ninguém leu.
-                    const semResposta = chrome.runtime.lastError;
-                    if (!terminar()) return;
-                    if (semResposta) {
-                        alert(t.errorLogin + t.erroExtensao);
-                    } else if (response && response.success !== true) {
-                        alert(t.errorLogin + fraseDoErro(response));
-                    }
-                });
-            } catch (e) {
-                // A extensão se atualizou com o WME aberto: o `sendMessage` deste
-                // painel LANÇA ("Extension context invalidated"), e só recarregar
-                // a página traz o painel novo — que é o que o aviso diz.
-                if (terminar()) alert(t.errorLogin + t.erroExtensao);
-            }
-        });
+        container.appendChild(montarAreaDePareamento(t, comNivel));
     } else {
 // -------------- botao NO
+        const btn = document.createElement('button');
+        btn.innerText = t.accessBtn;
         btn.style.cssText = `
             background: #cccccc; border: none; color: #666666; font-weight: bold;
             padding: 10px 15px; border-radius: 20px; cursor: not-allowed;
@@ -331,7 +329,7 @@ function createAGInterface(userName, level, isAM, language = 'en', rank, isStaff
         `;
         btn.disabled = true;
         btn.title = comNivel(t.reqLevel);
-        
+
 // -------------- botao erro
         const aviso = document.createElement('span');
         aviso.style.fontSize = '11px';
@@ -340,9 +338,8 @@ function createAGInterface(userName, level, isAM, language = 'en', rank, isStaff
         aviso.style.fontWeight = 'bold';
         aviso.innerText = comNivel(t.reqLevelShort);
         container.appendChild(aviso);
+        container.appendChild(btn);
     }
-
-    container.appendChild(btn);
 
     const infoBox = document.createElement('div');
     infoBox.style.cssText = `
@@ -463,4 +460,310 @@ function createAGInterface(userName, level, isAM, language = 'en', rank, isStaff
             }
         }, 5000);
     }
+}
+
+// Injeta a `@keyframes` do spinner UMA vez (CSS inline não define keyframe;
+// a propriedade `animation` pode ficar inline, mas a regra tem que existir
+// nalguma folha de estilo do documento).
+function injetarEstiloSpinner() {
+    if (document.getElementById('ag-estilo-spinner')) return;
+    const style = document.createElement('style');
+    style.id = 'ag-estilo-spinner';
+    style.textContent = '@keyframes ag-spin { to { transform: rotate(360deg); } }';
+    document.head.appendChild(style);
+}
+
+// Desenha o QR de verdade (mesmo algoritmo do app, `qr.js` — ver o comentário
+// no topo do arquivo). QUIET=4 é a margem exigida pela norma; a escala é a
+// maior que cabe em ~180px de lado.
+function desenharQrNoPainel(canvas, url) {
+    const qr = window.gerarQR(url);
+    if (!qr) return false;
+    const QUIET = 4;
+    const lado = qr.tamanho + QUIET * 2;
+    const escala = Math.max(2, Math.floor(180 / lado));
+    const px = lado * escala;
+    canvas.width = px; canvas.height = px;
+    canvas.style.width = px + 'px'; canvas.style.height = px + 'px';
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, px, px);
+    ctx.fillStyle = '#0f172a';
+    for (let l = 0; l < qr.tamanho; l++) {
+        for (let c = 0; c < qr.tamanho; c++) {
+            if (qr.modulos[l][c]) ctx.fillRect((c + QUIET) * escala, (l + QUIET) * escala, escala, escala);
+        }
+    }
+    return true;
+}
+
+// A área de pareamento: no lugar do ACESSAR, pede e desenha o QR direto no
+// painel do WME, sem abrir aba — a extensão só existe no WME porque é lá que
+// o cookie do Waze vive, não porque a pessoa quer triar no computador (decisão
+// do dono). "Continuar neste computador" é o único caminho que ainda abre a
+// aba de hoje, pra quem (dev/teste) quer usar ali mesmo.
+//
+// Nenhuma chamada sai sozinha: o primeiro pedido só vai ao toque em "Mostrar
+// QR" (mesmo princípio do app — nada de chamada sem gesto explícito).
+function montarAreaDePareamento(t, comNivel) {
+    injetarEstiloSpinner();
+    const area = document.createElement('div');
+    area.style.cssText = 'width:100%; display:flex; flex-direction:column; align-items:center; gap:10px;';
+
+    let tickerQr = null;
+    let tickerCodigo = null;
+    let codigoAtual = null;   // o código do QR atual — "Continuar" cancela, se ainda valer
+    let pedindo = false;
+
+    function pararTickers() {
+        if (tickerQr) { clearInterval(tickerQr); tickerQr = null; }
+        if (tickerCodigo) { clearInterval(tickerCodigo); tickerCodigo = null; }
+    }
+
+    // Um ticker por elemento (o QR e o código de 6 correm juntos, com prazos
+    // próprios — são registros DIFERENTES no servidor, ver `server/core.mjs`).
+    function iniciarTicker(elemento, segundos, aoVencer) {
+        const venceEm = Date.now() + segundos * 1000;
+        let id = null;
+        const tick = () => {
+            const restante = Math.ceil((venceEm - Date.now()) / 1000);
+            if (restante <= 0) {
+                elemento.textContent = t.vencido;
+                clearInterval(id);
+                if (aoVencer) aoVencer();
+                return;
+            }
+            const m = Math.floor(restante / 60);
+            const seg = String(restante % 60).padStart(2, '0');
+            elemento.textContent = t.valePor.replace('{time}', m + ':' + seg);
+        };
+        tick();
+        id = setInterval(tick, 1000);
+        return id;
+    }
+
+    function botaoPrimario(texto) {
+        const btn = document.createElement('button');
+        btn.innerText = texto;
+        btn.style.cssText = `
+            background: #33ccff; border: none; color: black; font-weight: bold;
+            padding: 10px 15px; border-radius: 5px; cursor: pointer;
+            font-size: 13px; width: 100%; transition: 0.3s; font-family: sans-serif;
+            display: flex; justify-content: center; align-items: center; text-align: center; box-sizing: border-box;
+        `;
+        return btn;
+    }
+
+    function linkContinuar() {
+        const rodape = document.createElement('div');
+        rodape.style.cssText = 'width:100%; border-top:1px solid #e3e3e3; margin-top:4px; padding-top:8px; text-align:center;';
+        const btn = document.createElement('button');
+        btn.innerText = t.continuarComputador;
+        btn.style.cssText = 'font-size:11.5px; color:#888; text-decoration:underline; background:none; border:none; cursor:pointer; padding:2px; font-family:sans-serif;';
+        btn.addEventListener('click', () => abrirNesteComputador(btn));
+        rodape.appendChild(btn);
+        return rodape;
+    }
+
+    // O caminho de hoje (abre a aba), agora no rodapé — pra quem (dev/teste)
+    // quer usar o app ali mesmo. Mesma lógica de sempre: um login por vez, com
+    // teto, devolvendo o botão em qualquer desfecho.
+    function abrirNesteComputador(btn) {
+        if (btn.disabled) return;
+        btn.disabled = true;
+        const original = btn.innerText;
+        btn.innerText = t.loggingBtn;
+
+        // O código ainda na tela não serve mais pra ninguém: fecha a janela da
+        // credencial em vez de deixar vencer sozinho (melhor esforço — sem
+        // resposta, vence em 5 min do mesmo jeito).
+        if (codigoAtual) {
+            try { chrome.runtime.sendMessage({ action: 'cancelarPareamento', code: codigoAtual }); } catch (e) { /* ok */ }
+        }
+
+        let terminou = false;
+        let teto = null;
+        const terminar = () => {
+            if (terminou) return false;
+            terminou = true;
+            clearTimeout(teto);
+            btn.disabled = false;
+            btn.innerText = original;
+            return true;
+        };
+        teto = setTimeout(() => {
+            if (terminar()) alert(t.errorLogin + t.erroExtensao);
+        }, ESPERA_DO_BOTAO_MS);
+
+        try {
+            chrome.runtime.sendMessage({ action: 'abrirPlaces', desde: Date.now() }, (response) => {
+                const semResposta = chrome.runtime.lastError;
+                if (!terminar()) return;
+                if (semResposta) alert(t.errorLogin + t.erroExtensao);
+                else if (response && response.success !== true) alert(t.errorLogin + fraseDoErro(response, t));
+            });
+        } catch (e) {
+            if (terminar()) alert(t.errorLogin + t.erroExtensao);
+        }
+    }
+
+    function passosEl() {
+        const passos = document.createElement('ol');
+        passos.style.cssText = 'list-style:none; margin:4px 0 0; padding:0; width:100%; display:flex; flex-direction:column; gap:7px;';
+        [t.passo1, t.passo2, t.passo3].forEach((txt, i) => {
+            const li = document.createElement('li');
+            li.style.cssText = 'display:flex; gap:8px; font-size:12.5px; color:#333; line-height:1.35;';
+            const n = document.createElement('span');
+            n.style.cssText = 'flex-shrink:0; width:18px; height:18px; border-radius:50%; background:#33ccff; color:#003a4d; font-size:11px; font-weight:bold; display:flex; align-items:center; justify-content:center;';
+            n.textContent = String(i + 1);
+            const span = document.createElement('span');
+            span.textContent = txt;
+            li.append(n, span);
+            passos.appendChild(li);
+        });
+        return passos;
+    }
+
+    function mostrarBotaoInicial() {
+        pararTickers();
+        codigoAtual = null;
+        area.innerHTML = '';
+        const btn = botaoPrimario(t.mostrarQrBtn);
+        btn.addEventListener('click', () => { if (!btn.disabled) pedirQr(); });
+        area.appendChild(btn);
+    }
+
+    function mostrarCarregando() {
+        pararTickers();
+        area.innerHTML = '';
+        const box = document.createElement('div');
+        box.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:8px;padding:18px 0;width:100%;';
+        const sp = document.createElement('div');
+        sp.style.cssText = 'width:28px;height:28px;border-radius:50%;border:3px solid #e0e0e0;border-top-color:#33ccff;animation:ag-spin 0.8s linear infinite;';
+        const lbl = document.createElement('div');
+        lbl.style.cssText = 'font-size:12px;color:#888;';
+        lbl.textContent = t.gerando;
+        box.append(sp, lbl);
+        area.appendChild(box);
+    }
+
+    function mostrarErro(mensagem) {
+        pararTickers();
+        codigoAtual = null;
+        area.innerHTML = '';
+        const msg = document.createElement('div');
+        msg.style.cssText = 'font-size:12px; color:#d93025; text-align:center; font-weight:bold;';
+        msg.textContent = mensagem;
+        area.appendChild(msg);
+        const btn = botaoPrimario(t.gerarOutro);
+        btn.addEventListener('click', pedirQr);
+        area.appendChild(btn);
+        area.appendChild(linkContinuar());
+    }
+
+    function mostrarVencido() {
+        pararTickers();
+        codigoAtual = null;
+        area.innerHTML = '';
+        const msg = document.createElement('div');
+        msg.style.cssText = 'font-size:13px; color:#d93025; font-weight:bold; text-align:center; padding:4px 0;';
+        msg.textContent = t.vencido;
+        area.appendChild(msg);
+        const btn = botaoPrimario(t.gerarOutro);
+        btn.addEventListener('click', pedirQr);
+        area.appendChild(btn);
+        area.appendChild(linkContinuar());
+    }
+
+    // "Sem câmera?" — o código CURTO é um registro SEPARADO e mais fraco (6
+    // chars, ~30 bits), criado só quando pedido: se existisse sempre, um
+    // vazamento traria a cópia fraca ao lado da forte (ver `server/core.mjs`,
+    // PAIR_SECRET_LEN × PAIR_CODE_LEN). Por isso é uma SEGUNDA chamada, nunca
+    // parte da mesma resposta do QR.
+    function pedirCodigoCurto(btn, qrCard) {
+        if (btn.disabled) return;
+        btn.disabled = true;
+        try {
+            chrome.runtime.sendMessage({ action: 'parear', comCodigo: true, desde: Date.now() }, (r) => {
+                const semResposta = chrome.runtime.lastError;
+                if (semResposta || !r || !r.success || !r.code) {
+                    btn.disabled = false;
+                    alert(t.errorLogin + (semResposta ? t.erroExtensao : fraseDoErro(r || {}, t)));
+                    return;
+                }
+                btn.remove();   // não dá pra pedir de novo até este vencer (como no app)
+                const codeBox = document.createElement('div');
+                codeBox.style.cssText = 'width:100%; box-sizing:border-box; background:#f8fbfc; border:2px dashed #7fd6ee; border-radius:14px; padding:14px 0; text-align:center;';
+                const label = document.createElement('div');
+                label.style.cssText = 'font-size:11px; color:#888; margin-bottom:6px;';
+                label.textContent = t.digiteCodigo;
+                const codigo = document.createElement('div');
+                codigo.style.cssText = 'font-size:26px; font-weight:900; letter-spacing:0.22em; color:#0891b2; font-variant-numeric:tabular-nums;';
+                codigo.textContent = r.code;
+                const expiryEl = document.createElement('div');
+                expiryEl.style.cssText = 'font-size:11px; color:#888; margin-top:6px;';
+                codeBox.append(label, codigo, expiryEl);
+                qrCard.insertAdjacentElement('afterend', codeBox);
+                tickerCodigo = iniciarTicker(expiryEl, r.expiresIn, () => { codeBox.remove(); tickerCodigo = null; });
+            });
+        } catch (e) {
+            btn.disabled = false;
+            alert(t.errorLogin + t.erroExtensao);
+        }
+    }
+
+    function mostrarQr(r) {
+        pararTickers();
+        area.innerHTML = '';
+        codigoAtual = r.code;
+
+        const qrCard = document.createElement('div');
+        qrCard.style.cssText = 'background:#fff; border:1px solid #ddd; border-radius:10px; padding:10px; display:flex; flex-direction:column; align-items:center; gap:6px; width:100%; box-sizing:border-box;';
+        const canvas = document.createElement('canvas');
+        canvas.setAttribute('role', 'img');
+        qrCard.appendChild(canvas);
+        const expiry = document.createElement('div');
+        expiry.style.cssText = 'font-size:11px; color:#888;';
+        qrCard.appendChild(expiry);
+        area.appendChild(qrCard);
+
+        if (!desenharQrNoPainel(canvas, APP_BASE + '/#pair=' + r.code)) {
+            mostrarErro(t.erroGenerico);
+            return;
+        }
+
+        area.appendChild(passosEl());
+
+        const semCameraBtn = document.createElement('button');
+        semCameraBtn.innerText = t.semCamera;
+        semCameraBtn.style.cssText = 'font-size:12px; color:#007bff; text-decoration:underline; background:none; border:none; cursor:pointer; padding:2px; font-family:sans-serif;';
+        semCameraBtn.addEventListener('click', () => pedirCodigoCurto(semCameraBtn, qrCard));
+        area.appendChild(semCameraBtn);
+
+        area.appendChild(linkContinuar());
+
+        tickerQr = iniciarTicker(expiry, r.expiresIn, mostrarVencido);
+    }
+
+    // Pede um QR novo (o botão inicial, ou "Gerar outro código" depois de
+    // vencido ou de uma falha). Não renova sozinho — nada de polling.
+    function pedirQr() {
+        if (pedindo) return;
+        pedindo = true;
+        mostrarCarregando();
+        try {
+            chrome.runtime.sendMessage({ action: 'parear', desde: Date.now() }, (r) => {
+                pedindo = false;
+                const semResposta = chrome.runtime.lastError;
+                if (semResposta) { mostrarErro(t.erroExtensao); return; }
+                if (!r || !r.success || !r.code) { mostrarErro(fraseDoErro(r || {}, t)); return; }
+                mostrarQr(r);
+            });
+        } catch (e) {
+            pedindo = false;
+            mostrarErro(t.erroExtensao);
+        }
+    }
+
+    mostrarBotaoInicial();
+    return area;
 }

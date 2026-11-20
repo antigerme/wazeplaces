@@ -8,6 +8,9 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.11.20-01
+**Login pela extensão do Chrome volta a ver a passagem do computador.** Numa versão anterior (não publicada), o app passou a pular a tela «Este app é feito para o celular» pra quem entrava pelo ACESSAR do WME, por uma suposição errada — a de que quem usa a extensão quer usar o app ali mesmo, no computador. Na prática, quem clica em ACESSAR também quer chegar ao celular: a extensão só existe no WME porque é lá que o cookie do Waze vive, não porque a pessoa quer triar no computador. Login pela extensão volta a mostrar a passagem e o QR já pronto, exatamente como o login pelo `cookies.txt`.
+
 ## v2026.11.16-01
 **No computador, a fila só carrega depois do «Continuar».** A tela de passagem cobre o card, mas o app ainda buscava os pedidos por trás dela a cada abertura, uma chamada ao Waze (e ao servidor) que ninguém via, já que quase todo mundo abre o app no computador só para conectar o celular. Agora, com a passagem na tela, nenhuma busca sai: nem a da abertura, nem a do ↻, nem a página em segundo plano. Ao tocar em «Continuar neste computador» (ou ao estreitar a janela, quando o card volta), a fila carrega naquele momento, uma vez só. Depois da primeira escolha, a passagem não volta mais e o app abre como sempre.
 

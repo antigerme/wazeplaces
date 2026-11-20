@@ -537,6 +537,9 @@ const CODIGO_POR_VERSAO = {
   '0.3.2': '5a8fd648c151b022ca3c11b2c30fc980bda1023406b78c785716245e6e78483b',
   '0.3.3': 'fae3ead541b97453a0b66f8ecc6eebf7b333fff4cc6abfbfebdad52bd648d430',
   '0.3.4': '98cbedc9239c03bfef84a9a94056e8b60cab8ad26ee521cd02b09102b2419ff7',
+  '0.3.5': '6b009c92338dc97b0468203b8acaa051b59d7b840697f1c1fe5dccb3806476a4',
+  '0.3.6': '3b0fda30831b92b0da562db3abc20b651ee32a458d4b780a44ab49948192192f',
+  '0.3.7': '948c388ec8abbb7ea76f3e9846814df1425b7dfc03bcaf72e0d83b13a35c1685',
 };
 const semver = (v) => v.split('.').map(Number);
 const antes = (a, b) => { const x = semver(a), y = semver(b); for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] - y[i]; return 0; };

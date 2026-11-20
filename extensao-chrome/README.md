@@ -1,4 +1,4 @@
-# Waze Places Rapid Access — proposta de v0.3.4
+# Waze Places Rapid Access — proposta de v0.3.7
 
 Reescrita da extensão do [@daflash](https://www.waze.com/user/editor/daflash) para que o login
 entre o **Waze Map Editor** e o **Waze Places** seja totalmente automático.
@@ -412,5 +412,53 @@ embora, e pode seguir a ida até o fim) fica sem dono, e vence sozinha (em até 
 | atual | 0.3.3 | funciona como antes: a ponte ignora a `espera` e segue sem prazo |
 | atual | 0.3.4 | o login da ponte acaba antes de o app desistir, e é um por vez |
 | anterior | 0.3.4 | funciona — sem a `espera`, a ponte usa os 8 s que o app de antes esperava |
+
+## v0.3.5 — limpeza: a checagem `isAM === 'Sim'` era código morto
+
+Sem mudança de comportamento. Achado numa revisão do `content.js`: o painel checava
+`isAM === true || isAM === 'true' || isAM === 'Sim'` pra decidir o texto "AM: Sim/Não" e o portão do
+botão ACESSAR — mas o `inject.js` já normaliza `isAM` pra um booleano VERDADEIRO antes de mandar pro
+painel (`Boolean(isAM && isAM !== 'Não' && isAM !== 'false' && isAM !== false)`, na mensagem
+`AG_WAZE_DATA`). Quando o painel recebe o valor, ele já é `true` ou `false` — nunca a string `'Sim'`.
+A comparação com `'Sim'` nunca pôde ser verdadeira desde que essa normalização existe; é resíduo da
+v0.0.3 original do @daflash, de antes dela. Removida. `'true'` (string) fica como reserva, sem caso
+real conhecido que a use.
+
+Sem publicação ainda (proposta).
+
+## v0.3.6 — o painel mostra o QR direto, sem abrir aba
+
+Decisão do dono: quem clica no painel do WME quase sempre só quer chegar ao celular — a extensão
+existe no WME porque é lá que o cookie do Waze vive, não porque a pessoa quer triar no computador.
+Até aqui, ACESSAR trocava os cookies, guardava o token e abria uma aba nova do app só pra ela mostrar
+a passagem (o QR de pareamento) — uma aba inteira, um carregamento do bundle todo, só pra um código
+que a extensão já tem tudo pra gerar sozinha.
+
+Agora o botão vira **"Mostrar QR para o celular"**: no toque, o painel pede o código direto
+(`/api/parear`, a MESMA rota que o "Conectar outro aparelho" do app já usa) e desenha o QR ali mesmo
+na barra lateral — com os três passos, "Sem câmera? Mostrar um código" (o registro curto, separado e
+mais fraco, pedido só sob demanda — ver o core) e, no rodapé, **"Continuar neste computador"**: pra
+quem (dev, teste) realmente quer usar o app ali, e é o único caminho que ainda abre a aba de hoje.
+
+- **Nenhuma chamada sai sozinha**: o primeiro pedido só vai ao toque em "Mostrar QR" — mesmo princípio
+  do resto da extensão (e do app): nada de pedir sem gesto explícito.
+- **O código vence em 5 min e não se renova sozinho**: vencido, vira "Gerar outro código" (mesmo
+  cuidado com o free tier que a passagem do app já tem).
+- **"Continuar neste computador" cancela o código que estava na tela** antes de abrir a aba — fecha a
+  janela da credencial, melhor esforço (sem resposta, o código vence sozinho do mesmo jeito).
+- **A sessão usada aqui é só pra gerar código**: fica em memória (nunca em disco), e some se o service
+  worker dormir — a próxima vez troca cookies de novo.
+- `qr.js` é cópia de `js/qr.js` (a extensão não importa código do app — o mesmo motivo do dicionário
+  de idiomas duplicado em `content.js`).
+
+Sem publicação ainda (proposta).
+
+## v0.3.7 — limpeza: `accessWazePlacesBtn` ficou sem uso depois da 0.3.6
+
+Sem mudança de comportamento. A 0.3.6 trocou o texto que o botão volta a mostrar depois do login (de
+"Access Waze Places" pra "Continue on this computer" — `continuarComputador`), e a chave antiga
+ficou só no dicionário, sem nenhum código lendo ela. Removida das 4 línguas.
+
+Sem publicação ainda (proposta).
 
 Permissões: **as mesmas** da 0.2.0.
