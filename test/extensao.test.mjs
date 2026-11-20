@@ -18,6 +18,7 @@ import { storeEmMemoria } from './_sessao.mjs';
 
 const ler = (p) => readFileSync(new URL('../' + p, import.meta.url), 'utf8');
 const CONTENT = ler('extensao-chrome/content.js');
+const QR = ler('extensao-chrome/qr.js');
 const INJECT = ler('extensao-chrome/inject.js');
 const BACKGROUND = ler('extensao-chrome/background.js');
 const PONTE = ler('extensao-chrome/ponte.js');
@@ -90,20 +91,34 @@ function relogioVirtual(inicio = Date.now()) {
 // ── O painel (content.js) num DOM de mentira com o #sidebar do WME ──────────
 // Com `relogio`, os timers e o `Date.now()` do painel são os dele (o mesmo do
 // background, no teste do prazo do login); sem, nada dispara sozinho (abaixo).
-function rodarPainel({ sendMessage = () => {}, relogio = null } = {}) {
+// `autoParear`: responde SOZINHO (síncrono, sem passar pelo `sendMessage` do
+// chamador) todo `{action:'parear', comCodigo: falsy}` com um código de
+// mentira — é o que faz `botao()` (o "Mostrar QR") render o "Continuar neste
+// computador" na hora, sem cada teste do ACESSAR/abrirPlaces precisar simular
+// o pareamento. Testes que exercitam o pareamento DE VERDADE (a tela do QR
+// em si) passam `autoParear: false`.
+function rodarPainel({ sendMessage = () => {}, relogio = null, autoParear = true } = {}) {
   const todos = [];
   const alertas = [];
   const alertasEm = [];
   const elemento = (tag) => {
     const el = {
       tagName: String(tag).toUpperCase(), id: '', className: '', children: [], style: {},
-      innerText: '', innerHTML: '', disabled: false, title: '', src: '', ouvintes: {},
+      innerText: '', innerHTML: '', textContent: '', disabled: false, title: '', src: '', width: 0, height: 0, ouvintes: {},
       appendChild(c) { this.children.push(c); return c; },
+      append(...cs) { this.children.push(...cs); },
+      insertAdjacentElement(_onde, c) { this.children.push(c); return c; },
       addEventListener(tipo, fn) { (this.ouvintes[tipo] = this.ouvintes[tipo] || []).push(fn); },
+      setAttribute() {},
       remove() {},
       // Como o navegador: botão `disabled` não recebe o clique.
       click() { if (this.disabled) return; for (const fn of this.ouvintes.click || []) fn({ type: 'click', target: this }); },
     };
+    // O canvas do QR: um contexto 2D de mentira, só o suficiente pra
+    // `desenharQrNoPainel` não lançar (o teste não confere pixel).
+    if (String(tag).toLowerCase() === 'canvas') {
+      el.getContext = () => ({ fillRect() {}, fillStyle: '' });
+    }
     todos.push(el);
     return el;
   };
@@ -115,12 +130,25 @@ function rodarPainel({ sendMessage = () => {}, relogio = null } = {}) {
   // navegador — o painel desarma o teto quando a resposta chega.
   const agendados = new Map();
   let proximoTimer = 1;
+  const sendMessageComAutoParear = (msg, cb, chromeObj) => {
+    // SEM código (`code: null`): os testes do ACESSAR/abrirPlaces (R66, R7, R8)
+    // só querem chegar ao "Continuar" depressa, e um código de mentira aqui
+    // dispararia o `cancelarPareamento` de verdade no clique de "Continuar"
+    // (fire-and-forget, sem callback) — uma mensagem a mais que eles não
+    // esperam. Teste do pareamento em si usa `autoParear: false` e dá a
+    // resposta que quiser, código incluído.
+    if (autoParear && msg && msg.action === 'parear' && !msg.comCodigo) {
+      cb({ success: true, code: null, expiresIn: 300 });
+      return;
+    }
+    sendMessage(msg, cb, chromeObj);
+  };
   const chrome = {
     runtime: {
       lastError: null,
       getURL: (p) => 'chrome-extension://ext/' + p,
       getManifest: () => MANIFESTO,
-      sendMessage: (msg, cb) => sendMessage(msg, cb, chrome),
+      sendMessage: (msg, cb) => sendMessageComAutoParear(msg, cb, chrome),
     },
   };
   const ctx = {
@@ -132,24 +160,38 @@ function rodarPainel({ sendMessage = () => {}, relogio = null } = {}) {
     },
     chrome, alert: (m) => { alertas.push(m); alertasEm.push(relogio ? relogio.agora() : null); }, console,
     MutationObserver: class { observe() {} disconnect() {} },
+    TextEncoder,   // o `qr.js` precisa pra codificar o link do pareamento (bytesDeTexto)
     setTimeout: relogio ? relogio.setTimeout : (fn, ms) => { const id = proximoTimer++; agendados.set(id, { fn, ms }); return id; },
     clearTimeout: relogio ? relogio.clearTimeout : (id) => { agendados.delete(id); },
+    setInterval: () => 0, clearInterval() {},   // os tickers do QR não são o assunto destes testes
     ...(relogio ? { Date: relogio.Date } : {}),
   };
   ctx.window = ctx;
   ctx.addEventListener = (tipo, fn) => { if (tipo === 'message') ouvinte = fn; };
   vm.createContext(ctx);
+  vm.runInContext(QR, ctx);
   vm.runInContext(CONTENT, ctx);
   assert.ok(ouvinte, 'CONTROLE: o content.js não ouve a mensagem do inject.js');
   // Lá dentro, `window` é o objeto GLOBAL do contexto (o vm troca o sandbox por
   // ele), e é com ele que o content.js confere quem mandou a mensagem.
   const global = vm.runInContext('globalThis', ctx);
+  // Os textos de "Continuar neste computador", nas 4 línguas — pra achar o
+  // botão sem precisar saber em qual idioma este painel foi montado.
+  const TEXTOS_CONTINUAR = new Set(Object.values(DICIONARIO).map((d) => d.continuarComputador));
   return {
     alertas, alertasEm, chrome,
     receber(msg) { ouvinte({ source: global, data: msg }); },
     botao: () => todos.find((e) => e.tagName === 'BUTTON'),
+    // O "Continuar neste computador": só existe depois de o QR aparecer (ver
+    // `autoParear`, acima). É quem manda o `abrirPlaces` agora — o antigo ACESSAR.
+    continuarBtn: () => todos.find((e) => e.tagName === 'BUTTON' && TEXTOS_CONTINUAR.has(e.innerText)),
+    // Achar um botão (ou qualquer elemento) pelo texto — pra "Sem câmera?" e
+    // "Gerar outro código", sem precisar de um accessor por chave.
+    botaoComTexto: (texto) => todos.find((e) => e.tagName === 'BUTTON' && e.innerText === texto),
+    // O canvas do QR, só depois de desenhado de verdade (`width > 0`).
+    canvasDoQr: () => todos.find((e) => e.tagName === 'CANVAS' && e.width > 0),
     // Tudo o que o painel escreve na tela (texto, HTML e o `title` do botão).
-    textos: () => todos.map((e) => [e.innerText, e.innerHTML, e.title].filter(Boolean).join(' ')).join('\n'),
+    textos: () => todos.map((e) => [e.innerText, e.innerHTML, e.textContent, e.title].filter(Boolean).join(' ')).join('\n'),
     // Os prazos armados (em ms), e disparar os de um prazo — como se ele vencesse.
     agendados: () => [...agendados.values()].map((a) => a.ms),
     disparar(ms) { for (const [id, a] of [...agendados]) if (a.ms === ms) { agendados.delete(id); a.fn(); } },
@@ -265,6 +307,7 @@ function rodarBackground({ cookies = COOKIES_OK, waze = () => json({}), rede = n
   const guardado = {};
   const abas = [];
   const abasEm = [];
+  const rotas = [];   // 'testar-cookies' ou 'parear', uma por ida ao `fetch` daqui
   let ouvinte = null;
   const ctx = {
     chrome: {
@@ -274,14 +317,17 @@ function rodarBackground({ cookies = COOKIES_OK, waze = () => json({}), rede = n
       tabs: { create: (o) => { abas.push(o.url); abasEm.push(relogio.agora()); }, query() {}, reload() {} },
     },
     // O servidor DE VERDADE, com o Waze de mentira (o `fetch` do core) só
-    // durante a chamada.
+    // durante a chamada. A URL decide a ROTA — `/api/parear` ou `/api/testar-cookies`,
+    // as duas únicas que o background.js chama.
     fetch: servidor || ((url, init) => relogio.acompanhar((async () => {
       if (rede) throw rede;
       const salvo = globalThis.fetch;
       globalThis.fetch = async (u, i) => waze(String(u), i);
+      const rota = String(url).includes('/api/parear') ? 'parear' : 'testar-cookies';
+      rotas.push(rota);
       try {
-        const r = await dispatch('testar-cookies', JSON.parse(init.body), { sessions });
-        return { json: async () => r.body };
+        const r = await dispatch(rota, JSON.parse(init.body), { sessions });
+        return { json: async () => r.body, status: r.status };
       } finally { globalThis.fetch = salvo; }
     })())),
     AbortController,
@@ -294,7 +340,7 @@ function rodarBackground({ cookies = COOKIES_OK, waze = () => json({}), rede = n
   const ABA_DO_WME = { tab: { url: 'https://www.waze.com/editor' } };
   const ABA_DO_APP = { tab: { url: 'https://places.wazebrasil.com/' } };
   return {
-    guardado, abas, abasEm, relogio,
+    guardado, abas, abasEm, relogio, rotas,
     // Uma constante do background.js, lida do script que rodou.
     constante: (nome) => {
       try { return vm.runInContext(nome, ctx); } catch { assert.fail(`sumiu a constante ${nome} do background.js`); }
@@ -333,9 +379,10 @@ const FRASE_DO_TIPO = { semLogin: 'erroSemLogin', negado: 'erroNegado', waze: 'e
 async function alertaDoPainel(cenario, lingua) {
   const bg = rodarBackground(cenario);
   let resposta = null;
-  const painel = rodarPainel({ sendMessage: (msg, cb) => { bg.pedir(msg).then((r) => { resposta = r; cb(r); }); } });
+  const painel = rodarPainel({ sendMessage: (msg, cb) => { bg.pedir(msg).then((r) => { resposta = r; if (cb) cb(r); }); } });
   painel.receber(rodarInject(usuarioDoWme(PERFIL_L6), { locale: lingua }));
-  painel.botao().click();
+  painel.botao().click();           // "Mostrar QR" — autorrespondido (ver `autoParear`)
+  painel.continuarBtn().click();    // "Continuar neste computador" — manda o `abrirPlaces` de verdade
   for (let i = 0; i < 200 && !painel.alertas.length; i++) await tique();
   return { alertas: painel.alertas, resposta };
 }
@@ -373,6 +420,7 @@ test('R66-2: a extensão que não responde (lastError do Chrome) também vira fr
     const painel = rodarPainel({ sendMessage: (msg, cb, chrome) => { chrome.runtime.lastError = { message: CRU }; cb(undefined); chrome.runtime.lastError = null; } });
     painel.receber(rodarInject(usuarioDoWme(PERFIL_L6), { locale: lingua }));
     painel.botao().click();
+    painel.continuarBtn().click();
     assert.equal(painel.alertas.length, 1, `${lingua}: o painel não avisou`);
     assert.equal(painel.alertas[0], DICIONARIO[lingua].errorLogin + DICIONARIO[lingua].erroExtensao,
       `${lingua}: a mensagem crua do Chrome foi pro alerta`);
@@ -411,7 +459,12 @@ function painelSegurado(lingua, { lanca = false } = {}) {
   });
   painel.receber(rodarInject(usuarioDoWme(PERFIL_L6), { locale: lingua }));
   assert.equal(painel.botao().disabled, false, `CONTROLE (${lingua}): o L6+AM vê o ACESSAR liberado`);
-  return { painel, pedidos, b: painel.botao(), t: DICIONARIO[lingua] };
+  // "Mostrar QR" avança sozinho (autorrespondido — ver `autoParear`) pro "Continuar
+  // neste computador", que agora é quem manda o `abrirPlaces` — o ACESSAR de antes.
+  painel.botao().click();
+  const b = painel.continuarBtn();
+  assert.ok(b, `CONTROLE (${lingua}): "Continuar neste computador" não apareceu depois do QR`);
+  return { painel, pedidos, b, t: DICIONARIO[lingua] };
 }
 
 test('R7-1-06: o ACESSAR trava enquanto loga — o toque duplo manda UM `abrirPlaces`, e ele volta quando a resposta chega', () => {
@@ -426,7 +479,7 @@ test('R7-1-06: o ACESSAR trava enquanto loga — o toque duplo manda UM `abrirPl
     assert.deepEqual(painel.agendados(), [ESPERA_DO_BOTAO_MS], `${lingua}: o toque não armou o teto do botão`);
     pedidos[0].responder({ success: true });
     assert.equal(b.disabled, false, `${lingua}: o login terminou e o botão seguiu travado`);
-    assert.equal(b.innerText, t.accessWazePlacesBtn);
+    assert.equal(b.innerText, t.continuarComputador);
     assert.deepEqual(painel.alertas, [], `${lingua}: o login que deu certo avisou alguma coisa`);
     assert.deepEqual(painel.agendados(), [], `${lingua}: a resposta chegou e o teto seguiu armado`);
     // CONTROLE: a trava é do login em curso, não um botão morto — destravado, ele manda de novo.
@@ -449,7 +502,7 @@ test('R7-1-06: o ACESSAR destrava em QUALQUER desfecho — a falha, a extensão 
       assert.equal(p.b.disabled, true, `CONTROLE (${lingua}, ${nome}): o botão não travou no toque`);
       desfecho(p);
       assert.equal(p.b.disabled, false, `${lingua}, ${nome}: o ACESSAR seguiu travado`);
-      assert.equal(p.b.innerText, p.t.accessWazePlacesBtn, `${lingua}, ${nome}: o botão seguiu em "${p.b.innerText}"`);
+      assert.equal(p.b.innerText, p.t.continuarComputador, `${lingua}, ${nome}: o botão seguiu em "${p.b.innerText}"`);
       assert.deepEqual(p.painel.alertas, [fraseEsperada(p.t, nome)], `${lingua}, ${nome}: o aviso não diz o que fazer`);
       assert.deepEqual(p.painel.agendados(), [], `${lingua}, ${nome}: o teto seguiu armado`);
     }
@@ -497,13 +550,15 @@ test('R7-6-07: o painel diz o que acontece quando o login falha — o aviso, e n
     // O que o CÓDIGO faz com o login do WME vencido (o background e o servidor de verdade).
     const bg = rodarBackground({ waze: () => json({ errorList: [{ code: 101 }] }, 403) });
     let respondeu = false;
-    const painel = rodarPainel({ sendMessage: (msg, cb) => { bg.pedir(msg).then((r) => { respondeu = true; cb(r); }); } });
+    const painel = rodarPainel({ sendMessage: (msg, cb) => { bg.pedir(msg).then((r) => { respondeu = true; if (cb) cb(r); }); } });
     painel.receber(rodarInject(usuarioDoWme(PERFIL_L6), { locale: lingua }));
     const oQueOPainelDiz = painel.textos();   // antes do toque: o botão ainda diz o seu nome
-    painel.botao().click();
+    painel.botao().click();           // "Mostrar QR" — autorrespondido (ver `autoParear`)
+    const continuar = painel.continuarBtn();
+    continuar.click();                // "Continuar neste computador" — manda o `abrirPlaces` de verdade
     for (let i = 0; i < 200 && !respondeu; i++) await tique();
     assert.ok(respondeu, `CONTROLE (${lingua}): o background não respondeu`);
-    assert.equal(painel.botao().innerText, t.accessWazePlacesBtn, `CONTROLE (${lingua}): com o login vencido o botão não voltou`);
+    assert.equal(continuar.innerText, t.continuarComputador, `CONTROLE (${lingua}): com o login vencido o botão não voltou`);
     assert.deepEqual(painel.alertas, [t.errorLogin + t.erroSemLogin], `CONTROLE (${lingua}): o aviso do login vencido mudou`);
     // O painel não promete o contrário.
     assert.ok(!oQueOPainelDiz.toLowerCase().includes(t.loggingBtn.toLowerCase()),
@@ -596,8 +651,10 @@ async function acessarComServidorLento({ idas, lingua = 'pt-BR', entregaMs = 0, 
     },
   });
   painel.receber(rodarInject(usuarioDoWme(PERFIL_L6), { locale: lingua }));
-  const b = painel.botao();
-  assert.equal(b.disabled, false, `CONTROLE (${lingua}): o L6+AM vê o ACESSAR liberado`);
+  assert.equal(painel.botao().disabled, false, `CONTROLE (${lingua}): o L6+AM vê o ACESSAR liberado`);
+  painel.botao().click();   // "Mostrar QR" — autorrespondido (ver `autoParear`)
+  const b = painel.continuarBtn();
+  assert.ok(b, `CONTROLE (${lingua}): "Continuar neste computador" não apareceu depois do QR`);
   b.click();
   let segundoToque = null;
   if (tocarDeNovo !== null) {
@@ -632,7 +689,7 @@ test('R8-6-01: o Waze que estoura os 30 s na 1ª ida e responderia na 2ª não a
     assert.ok(r.alertasEm[0] < ESPERA_DO_BOTAO_MS, `${lingua}: o botão só voltou no teto (${r.alertasEm[0]} ms), com o login ainda no ar`);
     assert.equal(r.alertas[0], r.t.errorLogin + r.t.erroWaze, `${lingua}: o aviso não diz que foi o Waze que não respondeu: ${JSON.stringify(r.alertas[0])}`);
     assert.equal(r.b.disabled, false, `${lingua}: o botão seguiu travado`);
-    assert.equal(r.b.innerText, r.t.accessWazePlacesBtn);
+    assert.equal(r.b.innerText, r.t.continuarComputador);
   }
 });
 
@@ -1258,4 +1315,149 @@ test('R9-1-02: nenhum login da ponte espera mais que o do botão — a espera qu
   const ultima = r.idas.at(-1);
   assert.ok(ultima.fim <= PRAZO, `o login da ponte foi até ${ultima.fim} ms, além do prazo do botão (${PRAZO} ms): ${JSON.stringify(r.idas)}`);
   assert.ok(r.idas.length < bg0.constante('MAX_TENTATIVAS'), `CONTROLE: o prazo nem cortou as idas: ${JSON.stringify(r.idas)}`);
+});
+
+// ═══ Pareamento direto no painel — sem abrir aba ════════════════════════════
+// Decisão do dono: quem clica no painel do WME quase sempre só quer chegar ao
+// celular — a extensão existe no WME porque é lá que o cookie do Waze vive,
+// não porque a pessoa quer triar no computador. Em vez de abrir uma aba só
+// pra mostrar o QR que o app já desenharia, o painel pede o código direto
+// (`/api/parear`, a MESMA rota do "Conectar outro aparelho" do app) e desenha
+// ele mesmo. "Continuar neste computador" é o único caminho que ainda abre a
+// aba de hoje.
+
+test('o painel pede o código direto (`/api/parear`), sem abrir aba — e reaproveita a sessão trocada', async () => {
+  const bg = rodarBackground({ waze: () => json(PERFIL_L6) });
+  const r1 = await bg.pedir({ action: 'parear' });
+  assert.equal(r1.success, true, `CONTROLE: o pareamento não deu certo: ${JSON.stringify(r1)}`);
+  assert.ok(typeof r1.code === 'string' && r1.code.length > 0, 'o código não veio');
+  assert.ok(Number.isInteger(r1.expiresIn) && r1.expiresIn > 0, 'o prazo do código não veio');
+  assert.deepEqual(bg.abas, [], 'DEFEITO: pedir o QR abriu uma aba');
+  assert.deepEqual(bg.rotas, ['testar-cookies', 'parear'], 'CONTROLE: a 1ª vez troca cookies e pede o código');
+
+  // 2º pedido, mesma aba: reaproveita o token — SEM trocar cookies de novo
+  // (zero ida a mais ao /Session do Waze no nome da pessoa).
+  const r2 = await bg.pedir({ action: 'parear' });
+  assert.equal(r2.success, true);
+  assert.notEqual(r2.code, r1.code, 'CONTROLE: o 2º pedido devolveu o MESMO código (o teste não pediu outro de verdade)');
+  assert.deepEqual(bg.rotas, ['testar-cookies', 'parear', 'parear'], 'DEFEITO: o 2º pedido trocou cookies de novo — a sessão em memória não foi reaproveitada');
+});
+
+test('"Sem câmera? Mostrar um código": `comCodigo` chega à rota e o código CURTO volta marcado (`curto: true`)', async () => {
+  const bg = rodarBackground({ waze: () => json(PERFIL_L6) });
+  const r = await bg.pedir({ action: 'parear', comCodigo: true });
+  assert.equal(r.success, true, `CONTROLE: ${JSON.stringify(r)}`);
+  assert.equal(r.curto, true, 'DEFEITO: o código pedido com `comCodigo` não veio marcado como CURTO (o registro fraco, 6 chars)');
+});
+
+test('o portão recusa igual ao do ACESSAR: `parear` de uma conta sem nível/AM volta `negado`, sem pedir código', async () => {
+  const bg = rodarBackground({ waze: () => json({ ...PERFIL_L6, rank: 0, isAreaManager: false }) });
+  const r = await bg.pedir({ action: 'parear' });
+  assert.equal(r.success, false);
+  assert.equal(r.negado, true, `CONTROLE: a conta sem nível deveria ser negada: ${JSON.stringify(r)}`);
+  assert.deepEqual(bg.rotas, ['testar-cookies'], 'DEFEITO: o portão recusou e mesmo assim pediu um código de pareamento');
+});
+
+test('"Continuar neste computador" cancela o código que estava na tela (melhor esforço — sem resposta, não trava)', async () => {
+  const chamadas = [];
+  const bg = rodarBackground({
+    servidor: (url, init) => { chamadas.push({ url: String(url), corpo: JSON.parse(init.body) }); return Promise.resolve(json({ success: true })); },
+  });
+  const r = await bg.pedir({ action: 'cancelarPareamento', code: 'K7QXMWR2NTBZ4PHD9CVA' });
+  assert.equal(r.success, true);
+  assert.equal(chamadas.length, 1, 'DEFEITO: cancelar não chamou o servidor (ou chamou mais de uma vez)');
+  assert.match(chamadas[0].url, /\/api\/parear$/, 'a chamada não foi pro `/api/parear`');
+  assert.deepEqual(chamadas[0].corpo, { action: 'cancel', code: 'K7QXMWR2NTBZ4PHD9CVA' });
+  // CONTROLE: sem código (nada pra cancelar), nem chama o servidor.
+  const semCodigo = await rodarBackground().pedir({ action: 'cancelarPareamento' });
+  // `assert.equal` (não `deepEqual`): o objeto vem de dentro do `vm`, com um
+  // `Object.prototype` de outro realm — estruturalmente igual, mas o
+  // `deepStrictEqual` do assert/strict recusa comparar os dois.
+  assert.equal(semCodigo.success, true);
+});
+
+test('ESTRUTURAL: a sessão do painel que morreu (401) troca cookies de novo UMA vez e tenta o pareamento de novo', () => {
+  const corpo = ler('extensao-chrome/background.js');
+  assert.match(corpo, /if \(r\.httpCode === 401\) \{[\s\S]{0,80}tokenDoPainel\(urlDaAba, ate, true\)[\s\S]{0,160}trocarPorCodigo/,
+    'DEFEITO: pedirPareamento não troca cookies de novo (forcarNova) depois de um 401 na hora de pedir o código');
+});
+
+// ── O painel desenha o QR de verdade e some com a aba — `autoParear: false` ──
+function respostaPareamento({ code = 'K7QXMWR2NTBZ4PHD9CVA', expiresIn = 300, curto = false, ...resto } = {}) {
+  return { success: true, code, curto, expiresIn, ...resto };
+}
+
+test('"Mostrar QR": o painel pede o código (sem abrir aba) e desenha o QR, os passos e "Continuar"', () => {
+  for (const lingua of LINGUAS_DO_PAINEL) {
+    const t = DICIONARIO[lingua];
+    const pedidos = [];
+    const painel = rodarPainel({ autoParear: false, sendMessage: (msg, cb) => { pedidos.push(msg); cb(respostaPareamento()); } });
+    painel.receber(rodarInject(usuarioDoWme(PERFIL_L6), { locale: lingua }));
+    painel.botao().click();
+    assert.equal(pedidos.length, 1, `${lingua}: DEFEITO: "Mostrar QR" não pediu o código (ou pediu mais de um)`);
+    assert.equal(pedidos[0].action, 'parear');
+    assert.equal(pedidos[0].comCodigo, undefined, `${lingua}: o primeiro pedido já pediu o código CURTO`);
+    assert.ok(painel.continuarBtn(), `${lingua}: "Continuar neste computador" não apareceu depois do QR`);
+    assert.ok(painel.canvasDoQr(), `${lingua}: DEFEITO: o QR não foi desenhado (canvas sem largura)`);
+    assert.ok(painel.textos().includes(t.passo1) && painel.textos().includes(t.passo3), `${lingua}: os passos não apareceram`);
+  }
+});
+
+test('"Sem câmera? Mostrar um código": pede o código CURTO (2ª chamada), numa caixa própria, sem sumir com o QR', () => {
+  const pedidos = [];
+  const respostas = [respostaPareamento(), respostaPareamento({ code: '7X9K4M', curto: true, expiresIn: 300 })];
+  const painel = rodarPainel({ autoParear: false, sendMessage: (msg, cb) => { pedidos.push(msg); cb(respostas[pedidos.length - 1]); } });
+  painel.receber(rodarInject(usuarioDoWme(PERFIL_L6), { locale: 'en' }));
+  painel.botao().click();
+  const t = DICIONARIO.en;
+  const semCamera = painel.botaoComTexto(t.semCamera);
+  assert.ok(semCamera, 'CONTROLE: "Sem câmera?" não apareceu');
+  semCamera.click();
+  assert.equal(pedidos.length, 2, 'DEFEITO: "Sem câmera?" não mandou um 2º pedido');
+  assert.equal(pedidos[1].action, 'parear');
+  assert.equal(pedidos[1].comCodigo, true, 'DEFEITO: o 2º pedido não pediu o código CURTO');
+  assert.ok(painel.textos().includes('7X9K4M'), 'DEFEITO: o código curto não apareceu na tela');
+  assert.ok(painel.canvasDoQr(), 'DEFEITO: o QR sumiu quando o código curto apareceu');
+  assert.ok(painel.continuarBtn(), 'DEFEITO: "Continuar" sumiu quando o código curto apareceu');
+});
+
+test('login novo que vence na hora (`expiresIn: 0`) cai direto em "vencido", com "Gerar outro código"', () => {
+  const t = DICIONARIO['pt-BR'];
+  const painel = rodarPainel({ autoParear: false, sendMessage: (msg, cb) => cb(respostaPareamento({ expiresIn: 0 })) });
+  painel.receber(rodarInject(usuarioDoWme(PERFIL_L6), { locale: 'pt-BR' }));
+  painel.botao().click();
+  assert.ok(painel.textos().includes(t.vencido), `DEFEITO: o código que já nasce vencido não caiu em "vencido": ${painel.textos()}`);
+  assert.ok(painel.textos().includes(t.gerarOutro), 'DEFEITO: sem "Gerar outro código" depois de vencido');
+});
+
+test('"Continuar neste computador" cancela o código ainda na tela E manda o `abrirPlaces` de sempre', () => {
+  const pedidos = [];
+  const painel = rodarPainel({
+    autoParear: false,
+    sendMessage: (msg, cb) => {
+      pedidos.push(msg);
+      if (msg.action === 'parear') cb(respostaPareamento({ code: 'CODIGO-NA-TELA' }));
+      else if (msg.action === 'cancelarPareamento') cb({ success: true });
+      else cb({ success: true });   // abrirPlaces
+    },
+  });
+  painel.receber(rodarInject(usuarioDoWme(PERFIL_L6)));
+  painel.botao().click();
+  painel.continuarBtn().click();
+  const acoes = pedidos.map((m) => m.action);
+  assert.deepEqual(acoes, ['parear', 'cancelarPareamento', 'abrirPlaces'],
+    `DEFEITO: "Continuar" não cancelou o código antes de abrir a aba: ${JSON.stringify(acoes)}`);
+  assert.equal(pedidos[1].code, 'CODIGO-NA-TELA', 'o cancelamento não leva o código que estava na tela');
+});
+
+test('o pedido que FALHA mostra erro e "Gerar outro código" — nunca trava sem saída', () => {
+  for (const lingua of LINGUAS_DO_PAINEL) {
+    const t = DICIONARIO[lingua];
+    const painel = rodarPainel({ autoParear: false, sendMessage: (msg, cb) => cb({ success: false, errorCategory: 'transient' }) });
+    painel.receber(rodarInject(usuarioDoWme(PERFIL_L6), { locale: lingua }));
+    painel.botao().click();
+    assert.ok(painel.textos().includes(t.erroWaze), `${lingua}: DEFEITO: a falha não mostrou a frase do painel: ${painel.textos()}`);
+    assert.ok(painel.textos().includes(t.gerarOutro), `${lingua}: DEFEITO: sem jeito de tentar de novo depois da falha`);
+    assert.ok(painel.continuarBtn(), `${lingua}: DEFEITO: "Continuar neste computador" sumiu com a falha (quem quer usar aqui ficaria preso)`);
+  }
 });

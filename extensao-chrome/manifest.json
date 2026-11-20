@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Waze Places Rapid Access",
-  "version": "0.3.5",
+  "version": "0.3.7",
   "description": "Login automático entre o Waze Map Editor e o Waze Places — sem copiar cookies, sem clicar em nada.",
   "permissions": [
     "cookies",
@@ -17,6 +17,7 @@
   "content_scripts": [
     {
       "js": [
+        "qr.js",
         "content.js"
       ],
       "matches": [

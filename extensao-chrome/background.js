@@ -216,6 +216,70 @@ function loginDaPonte(urlDaAba, ate) {
   });
 }
 
+// ── Pareamento direto no painel do WME (sem abrir aba) ───────────────────────
+// Pedido do dono: quem clica no painel quase sempre só quer chegar ao celular
+// — a extensão existe no WME porque é lá que o cookie do Waze vive, não porque
+// a pessoa quer triar no computador. Em vez de abrir uma aba só pra mostrar o
+// QR que o app já desenharia, o painel pede o QR direto e desenha ele mesmo.
+//
+// A sessão usada aqui é SÓ pra gerar código de pareamento — nunca abre aba,
+// nunca é escrita em disco. Fica em MEMÓRIA, e só: o service worker pode
+// dormir e perdê-la a qualquer hora, e tudo bem — a próxima vez troca cookies
+// de novo. É a mesma economia de sempre (nenhuma chamada sem gesto: o painel
+// só pede o primeiro QR quando a pessoa toca em "Mostrar QR").
+let sessaoDoPainel = null;   // { token, conta } | null
+
+// Troca cookies por sessionToken (reaproveitando `autenticar`, com o mesmo
+// prazo e a mesma retentativa do resto da extensão). `forcarNova` descarta a
+// sessão em memória — usado quando ela morreu (401) na hora de pedir o código.
+async function tokenDoPainel(urlDaAba, ate, forcarNova) {
+  if (!forcarNova && sessaoDoPainel) return { ok: true, sessao: sessaoDoPainel };
+  sessaoDoPainel = null;
+  const r = await autenticar(urlDaAba, ate);
+  // A falha de `autenticar` já vem pronta (negado, semLogin, errorKey…) — é a
+  // MESMA que o `abrirPlaces` devolve direto; aqui ela só não vira "sem token"
+  // genérico, que escondia o motivo de verdade (o portão recusou, o login do
+  // WME venceu…).
+  if (!r || !r.success || !r.sessionToken) return { ok: false, falha: r };
+  sessaoDoPainel = { token: r.sessionToken, conta: r.conta || null };
+  return { ok: true, sessao: sessaoDoPainel };
+}
+
+// Uma ida ao `/api/parear` — é NOSSO servidor, não o Waze, então sem o
+// jitter/retentativa do resto da extensão (aqui a falha é rede ou um bug
+// nosso, não um WAF do Waze). `comCodigo`: o registro CURTO (6 chars, pro
+// "Sem câmera?"), separado do do QR por construção (ver o core).
+async function trocarPorCodigo(sessionToken, comCodigo, conta) {
+  try {
+    const resp = await fetch(`${API_BASE}/api/parear`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'create', sessionToken, comCodigo: !!comCodigo, ...(conta ? { conta } : {}) }),
+    });
+    const body = await resp.json().catch(() => null);
+    if (!body) return { success: false, errorKey: 'ext.conexao', error: 'A API não respondeu.' };
+    if (body.success) return { success: true, code: body.code, curto: !!body.curto, expiresIn: body.expiresIn };
+    return { success: false, httpCode: resp.status, errorKey: body.errorKey, error: body.error, errorCategory: body.errorCategory };
+  } catch (e) {
+    return { success: false, errorKey: 'ext.conexao', error: 'Erro de conexão: ' + e.message };
+  }
+}
+
+// Garante um token (trocando cookies se preciso) e pede o código. Se o token
+// em memória já morreu (401 — a sessão venceu, ou foi apagada por um "Sair"
+// em outro lugar), troca cookies de novo UMA vez e tenta de novo com o novo.
+async function pedirPareamento(urlDaAba, comCodigo, ate) {
+  let t = await tokenDoPainel(urlDaAba, ate, false);
+  if (!t.ok) return t.falha || { success: false, errorKey: 'ext.semToken', error: 'Não foi possível autenticar.' };
+  let r = await trocarPorCodigo(t.sessao.token, comCodigo, t.sessao.conta);
+  if (r.httpCode === 401) {
+    t = await tokenDoPainel(urlDaAba, ate, true);
+    if (!t.ok) return t.falha || { success: false, errorKey: 'ext.semToken', error: 'Não foi possível autenticar.' };
+    r = await trocarPorCodigo(t.sessao.token, comCodigo, t.sessao.conta);
+  }
+  return r;
+}
+
 chrome.runtime.onMessage.addListener((req, sender, responder) => {
   // Pedido vindo da PONTE (o app pediu sessão). Devolve o token pra ela, sem
   // abrir aba nem gravar nada: quem guarda é o próprio app, no localStorage
@@ -254,6 +318,28 @@ chrome.runtime.onMessage.addListener((req, sender, responder) => {
         responder(r || { success: false, errorKey: 'ext.desconhecida', error: 'Falha desconhecida' });
       }
     });
+    return true;
+  }
+
+  // Pedido vindo do painel: "Mostrar QR" (sem código) ou "Sem câmera? Mostrar
+  // um código" (comCodigo). Mesmo prazo e mesma régua de desde do botão — é o
+  // mesmo tipo de gesto (um toque, uma espera, uma resposta).
+  if (req.action === 'parear') {
+    const desde = Number.isFinite(req.desde) ? Math.min(req.desde, Date.now()) : Date.now();
+    pedirPareamento(sender.tab ? sender.tab.url : null, req.comCodigo === true, desde + PRAZO_DO_BOTAO_MS).then(responder);
+    return true;
+  }
+
+  // "Continuar neste computador" com um código ainda na tela: fecha a janela
+  // da credencial em vez de deixar vencer sozinha (a mesma ideia do "Sair" no
+  // app, que cancela os códigos que o aparelho emitiu). Melhor esforço: sem
+  // resposta, o código vence em 5 min do mesmo jeito.
+  if (req.action === 'cancelarPareamento') {
+    if (!req.code) { responder({ success: true }); return; }
+    fetch(`${API_BASE}/api/parear`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'cancel', code: req.code }),
+    }).then(() => responder({ success: true })).catch(() => responder({ success: true }));
     return true;
   }
 });
