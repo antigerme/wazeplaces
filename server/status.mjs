@@ -16,9 +16,11 @@
 const EH_SESSAO = /^[0-9a-f]{64}$/;
 const EH_MANTER = /^ka_[0-9a-f]{64}$/;
 
-// A tendência de 30 dias do mockup aprovado (o "Resumo do mês" já cobre 1 mês
-// de detalhe por dia; isto é só a contagem agregada, sem dado de pessoa).
-export const STATUS_HISTORICO_DIAS = 30;
+// A tendência de 90 dias (decisão do owner, 2026-11-21 — o mockup aprovado
+// mostrava 30; o "Resumo do mês" já cobre 1 mês de detalhe por dia, isto é só
+// a contagem agregada, sem dado de pessoa, então o custo de guardar mais dias
+// é irrisório: 90 baldes pequenos no blob, nada por sessão).
+export const STATUS_HISTORICO_DIAS = 90;
 
 // Conta as chaves BRUTAS do store (como `store.list('')` devolve: sem o
 // prefixo de arquivo/KV, mas com os prefixos lógicos como `ka_`).

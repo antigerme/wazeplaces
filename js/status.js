@@ -90,8 +90,13 @@ function montarTendencia(historico) {
   const pontos = pontosDoGrafico(valores);
   document.getElementById('linha').setAttribute('points', pontos.map((p) => `${p.x},${p.y}`).join(' '));
   const svg = document.getElementById('chart');
-  svg.setAttribute('aria-label', t('status.tendencia.title') + ': ' + valores.join(', '));
-  document.getElementById('resumoInicio').textContent = t('status.tendencia.resumoInicio', { n: valores[0] });
+  // `dias` é o tamanho REAL do histórico recebido (nunca um número cravado): logo
+  // após o deploy, ou nos primeiros dias de uma conta nova, o blob tem menos
+  // baldes que STATUS_HISTORICO_DIAS, e a frase tem que dizer o que há de verdade.
+  const dias = historico.length;
+  document.getElementById('tendenciaTitulo').textContent = t('status.tendencia.title', { dias });
+  svg.setAttribute('aria-label', t('status.tendencia.title', { dias }) + ': ' + valores.join(', '));
+  document.getElementById('resumoInicio').textContent = t('status.tendencia.resumoInicio', { n: valores[0], dias });
   document.getElementById('resumoFim').textContent = t('status.tendencia.resumoFim', { n: valores[valores.length - 1] });
 
   const crosshair = document.getElementById('crosshair');

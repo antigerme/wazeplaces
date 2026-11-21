@@ -66,8 +66,8 @@ test('atualizarHistorico: funde o balde do dia (sem duplicar), ordena e poda', (
   assert.deepEqual(antes, copia);
 });
 
-test('atualizarHistorico: o padrão de poda é STATUS_HISTORICO_DIAS (a tendência do mockup aprovado)', () => {
-  assert.equal(STATUS_HISTORICO_DIAS, 30);
+test('atualizarHistorico: o padrão de poda é STATUS_HISTORICO_DIAS (decisão do owner: 90 dias)', () => {
+  assert.equal(STATUS_HISTORICO_DIAS, 90);
 });
 
 test('calcularStatusPublico: listar falhando mantém o blob ANTERIOR, com mudou=false', async () => {
