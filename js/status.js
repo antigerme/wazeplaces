@@ -8,6 +8,12 @@
 // Zero dependência de app.js/AppState: esta página não tem fila, sessão nem
 // gestos — é vitrine pública, lida por qualquer um, logado ou não.
 
+// Espelha MANTER_CRON_MIN (server/manter-conectado.mjs) — o cliente não pode
+// importar o core (script clássico, zero build), então é uma CÓPIA como
+// SESSAO_DIAS_EXIBIDO/MANTER_DIAS_EXIBIDO em app.js: test/consistencia.test.mjs
+// confere a paridade com o servidor, pelo MESMO padrão.
+const MANTER_CRON_MIN_EXIBIDO = 30;
+
 // Zona de capacidade, por LIMIAR — pura, testável sem DOM.
 function zonaDaCapacidade(manterConectado, capacidade) {
   if (manterConectado <= capacidade.confortavel) return 'tranquila';
@@ -177,6 +183,7 @@ async function carregarStatus() {
 
 (function init() {
   try { setLang(localStorage.getItem('waze_places_lang')); } catch { /* storage bloqueado: fica no padrão detectado */ }
+  setI18nVars({ minCron: () => MANTER_CRON_MIN_EXIBIDO });
   applyI18n();
   montarVersao();
   montarExtensao();
