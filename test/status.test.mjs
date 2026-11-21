@@ -9,6 +9,7 @@ import { contarChaves, diaChaveUTC, atualizarHistorico, calcularStatusPublico, S
 import { dispatch } from '../server/core.mjs';
 import { STATUS_CAPACIDADE_CONFORTAVEL, STATUS_CAPACIDADE_LIMITE, STATUS_CAPACIDADE_TETO_MEDIDO } from '../server/manter-conectado.mjs';
 import { PAISES_OBRIGATORIOS } from '../tools/paises-validacao.mjs';
+import { existsSync } from 'node:fs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -150,6 +151,17 @@ test('dispatch("status"): não exige sessionToken nem rejeita quando a rota não
 });
 
 // ─── A lista de países da página é a FONTE ÚNICA, não uma cópia ────────────
+
+test('status.src.html: todo link local (favicon, css) aponta pra arquivo que EXISTE no disco', () => {
+  // Achado validando em produção: `favicon.svg` nunca existiu no repo (404 em
+  // toda visita, calado). O vm-estaticos só varre .js/.css de index.html; isto
+  // cobre status.src.html e qualquer extensão.
+  const html = readFileSync(join(ROOT, 'status.src.html'), 'utf8');
+  const refs = [...html.matchAll(/(?:href|src)="((?!https?:|data:|\/\/|#)[^"]+)"/g)].map((m) => m[1]);
+  assert.ok(refs.length >= 2, 'o extrator não achou nem o favicon nem o css — instrumento quebrado');
+  const faltam = refs.filter((r) => !existsSync(join(ROOT, r)));
+  assert.deepEqual(faltam, [], `status.src.html referencia arquivo que não existe: ${faltam.join(', ')}`);
+});
 
 test('status.src.html: os países mostrados são EXATAMENTE os PAISES_OBRIGATORIOS (fonte: tools/paises-validacao.mjs)', () => {
   const html = readFileSync(join(ROOT, 'status.src.html'), 'utf8');
