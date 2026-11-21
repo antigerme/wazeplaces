@@ -26,6 +26,7 @@ const N_LINGUAS = LANGS_DO_DICT.length;
 const HTML = read('index.src.html');
 const APP = read('js/app.js');
 const I18N = read('js/i18n.js');
+const STATUS_JS = read('js/status.js');
 
 test('código de pareamento: quem mostra e quem lê usam a MESMA formatação', () => {
   assert.match(APP, /function formatarCodigoPareamento/, 'sumiu a fonte única de formato do código');
@@ -691,6 +692,27 @@ test('prazo da lista de fotos da lixeira citado na Ajuda == o do servidor, pela 
   for (const v of vs) {
     assert.ok(v.includes('{listaFotosMin}'), `help.privacy.server não usa {listaFotosMin}: ${v}`);
     assert.doesNotMatch(v, /\b\d+\s*(?:minutos?|minutes?)\b/, `help.privacy.server escreve o prazo à mão: ${v}`);
+  }
+});
+
+// O "em até N minutos" do /status.html (status.semDados) é o intervalo do cron
+// do «Manter conectado», que também computa o status público (server/status.mjs).
+// Achado pelo dono: estava cravado em 30 nas 4 línguas, e mudar o cron um dia
+// deixaria a frase desatualizada até alguém lembrar de ajustar à mão.
+test('o "em até N minutos" do /status.html == MANTER_CRON_MIN, pela variável, nunca à mão', () => {
+  const m = /^const MANTER_CRON_MIN_EXIBIDO = (\d+);/m.exec(STATUS_JS);
+  assert.ok(m, 'sumiu a constante MANTER_CRON_MIN_EXIBIDO do js/status.js');
+  const min = Number(m[1]);
+  const doServidor = Number((/export const MANTER_CRON_MIN = (\d+);/.exec(read('server/manter-conectado.mjs')) || [])[1]);
+  assert.ok(doServidor > 0, 'CONTROLE: não achei MANTER_CRON_MIN no servidor');
+  assert.equal(min, doServidor, `a página diz ${min} min e o cron do «Manter conectado» roda a cada ${doServidor} min`);
+  assert.match(STATUS_JS, /setI18nVars\(\{\s*minCron: \(\) => MANTER_CRON_MIN_EXIBIDO \}\)/,
+    'MANTER_CRON_MIN_EXIBIDO não está registrado em setI18nVars — o {minCron} vazaria cru pra tela');
+  const vs = [...I18N.matchAll(/'status\.semDados':\s*'((?:[^'\\\n]|\\.)*)'/g)].map((x) => x[1]);
+  assert.equal(vs.length, N_LINGUAS, `CONTROLE: status.semDados não está nas ${N_LINGUAS} línguas`);
+  for (const v of vs) {
+    assert.ok(v.includes('{minCron}'), `status.semDados não usa {minCron}: ${v}`);
+    assert.doesNotMatch(v, /\b\d+\s*(?:minutos?|minutes?)\b/, `status.semDados escreve o prazo à mão: ${v}`);
   }
 });
 

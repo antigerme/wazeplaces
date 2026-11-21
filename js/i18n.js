@@ -809,7 +809,7 @@ const I18N_DICT = {
     'status.rodape.p1': 'Projeto de comunidade, código aberto.',
     'status.rodape.p2': 'Sessões são zero-conhecimento: nem o servidor decifra sem o seu token.',
     'status.rodape.github': 'Ver no GitHub ↗',
-    'status.semDados': 'Ainda sem números — a primeira contagem roda em até 30 minutos.',
+    'status.semDados': 'Ainda sem números — a primeira contagem roda em até {minCron} minutos.',
     'status.erro': 'Não deu pra carregar os números agora.',
 
   },
@@ -1517,7 +1517,7 @@ const I18N_DICT = {
     'status.rodape.p1': 'Community project, open source.',
     'status.rodape.p2': 'Sessions are zero-knowledge: not even the server decrypts them without your token.',
     'status.rodape.github': 'View on GitHub ↗',
-    'status.semDados': 'No numbers yet — the first count runs within 30 minutes.',
+    'status.semDados': 'No numbers yet — the first count runs within {minCron} minutes.',
     'status.erro': 'Couldn’t load the numbers right now.',
 
   },
@@ -2226,7 +2226,7 @@ const I18N_DICT = {
     'status.rodape.p1': 'Proyecto de comunidad, código abierto.',
     'status.rodape.p2': 'Las sesiones son de conocimiento cero: ni el servidor las descifra sin tu token.',
     'status.rodape.github': 'Ver en GitHub ↗',
-    'status.semDados': 'Todavía sin números — el primer conteo se ejecuta en hasta 30 minutos.',
+    'status.semDados': 'Todavía sin números — el primer conteo se ejecuta en hasta {minCron} minutos.',
     'status.erro': 'No se pudieron cargar los números ahora.',
 
   },
@@ -2934,7 +2934,7 @@ const I18N_DICT = {
     'status.rodape.p1': 'Projet communautaire, open source.',
     'status.rodape.p2': 'Les sessions sont à connaissance nulle : même le serveur ne les déchiffre pas sans votre jeton.',
     'status.rodape.github': 'Voir sur GitHub ↗',
-    'status.semDados': 'Pas encore de chiffres — le premier comptage s’exécute dans les 30 minutes.',
+    'status.semDados': 'Pas encore de chiffres — le premier comptage s’exécute dans les {minCron} minutes.',
     'status.erro': 'Impossible de charger les chiffres pour le moment.',
 
   },
