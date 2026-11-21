@@ -73,6 +73,8 @@ wazeplaces/
 │                            #   o que os TESTES leem e o que o Tailwind varre. Não é publicado nem servido.
 ├── index.html               # GERADO por `npm run html`, commitado, NÃO editar. É o que a RAIZ serve. O
 │                            #   gerador confere o hash do script inline do tema e não grava se divergir.
+├── status.src.html          # A página pública /status.html (transparência de uso). FONTE, mesmo tratamento do index.src.html.
+├── status.html              # GERADO por `npm run html`. Servido SEM extensão (`/status`; `/status.html` redireciona).
 ├── manifest.json            # PWA manifest (ícones SVG em icons/)
 ├── service-worker.js        # Cache + auto-update (controllerchange + SKIP_WAITING)
 ├── icons/
@@ -92,6 +94,7 @@ wazeplaces/
 │   ├── mapa.js              # Mapa de evidência, JS puro: `mapaMontar` (o mapinha do card, enquadramento
 │   │                        #   fixo) e `mapaGrade` (o mapa ampliado). Tiles do Waze, camada `live/base`.
 │   ├── qr.js                # Gerador de QR, JS puro, só pro pareamento; sob demanda (`carregarQr()`); vetores em test/qr.test.mjs
+│   ├── status.js            # A página /status.html: busca /api/status UMA vez (zero polling) e monta o DOM
 │   ├── version.js           # FONTE ÚNICA da versão (APP_VERSION + verLabel). Carregado antes do app.js
 │   ├── i18n.js              # i18n pt/en/es/fr: I18N_DICT, t(), applyI18n(), setLang(), setI18nVars(). FONTE
 │   │                        #   ÚNICA de texto de tela; LANGS_SUPORTADOS = Object.keys(I18N_DICT)
@@ -110,6 +113,7 @@ wazeplaces/
 │   ├── marca-app.mjs        # A MARCA de quem usa o app na posição da presença do WME (lat mod 100 = 47,
 │   │                        #   lon mod 1000 = país). PURO; quem escreve e quem lê importam daqui
 │   ├── manter-conectado.mjs # A varredura do «Manter conectado» (renova o cookie do Waze de quem pediu); PURA
+│   ├── status.mjs           # Contagem pública (/status.html): conta chaves sess_/ka_, PURA, nunca decifra
 │   ├── core.mjs             # Toda a lógica: sessões, cripto (AES-GCM), callWaze, categorizeWazeError,
 │   │                        #   categorizeGrpcError, isUserAllowed, os handlers e o dispatch()
 │   └── node.mjs             # Adaptador VM/Node: servidor http, estáticos, sessões em arquivo, chave
