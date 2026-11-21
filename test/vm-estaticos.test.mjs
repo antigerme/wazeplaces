@@ -249,7 +249,7 @@ test('.assetsignore: toda entrada da raiz tem DECISÃO — frontend ou ignorada'
   // O que é frontend de verdade. Curto de propósito: crescer esta lista é um
   // ato deliberado, que é justamente o que faltou pro `tools/` e pro `test/`.
   const FRONTEND = new Set([
-    'index.html', 'manifest.json', 'service-worker.js',
+    'index.html', 'status.html', 'manifest.json', 'service-worker.js',
     'js', 'css', 'icons', 'fonts',
     '_headers',            // consumido pelo Cloudflare, nunca servido
     'LICENSE',             // licença do projeto: publicar é o certo
@@ -286,12 +286,15 @@ test('.assetsignore: nada que o app CARREGA pode estar ignorado', () => {
   // O sentido inverso, e é o que protege a produção. Um padrão largo demais
   // apaga o `js/min/` e o app morre inteiro — com o guard de cima passando.
   const html = readFileSync(join(RAIZ, 'index.html'), 'utf8');
+  const statusHtml = readFileSync(join(RAIZ, 'status.html'), 'utf8');
   const sw = readFileSync(join(RAIZ, 'service-worker.js'), 'utf8');
 
-  const doHtml = [...html.matchAll(/(?:src|href)="((?!https?:|data:|\/\/)[^"]+\.(?:js|css))"/g)]
+  const extrairRefs = (h) => [...h.matchAll(/(?:src|href)="((?!https?:|data:|\/\/)[^"]+\.(?:js|css))"/g)]
     .map((m) => m[1].replace(/^\.?\//, ''));
+  const doHtml = extrairRefs(html);
+  const doStatusHtml = extrairRefs(statusHtml);
   const doSw = [...sw.matchAll(/^\s*'\/((?:js|css)\/[^']+)',?\s*$/gm)].map((m) => m[1]);
-  const carregados = [...new Set([...doHtml, ...doSw, 'js/min/qr.js'])];   // qr entra sob demanda
+  const carregados = [...new Set([...doHtml, ...doStatusHtml, ...doSw, 'js/min/qr.js'])];   // qr entra sob demanda
 
   assert.ok(carregados.length >= 9,
     `achei só ${carregados.length} recursos carregados — o extrator quebrou, não o .assetsignore`);
@@ -470,6 +473,40 @@ test('estáticos: a VM responde como o Cloudflare MEDIDO — tipo, publicação,
     // Rota desconhecida não devolve o app: nem o corpo do index.
     const html = await (await fetch(URL_('/qualquer-rota'), { headers: { Accept: 'text/html' } })).text();
     assert.ok(!html.includes('<html'), 'rota desconhecida devolveu uma página do app');
+  });
+});
+
+// `/status` é PÁGINA NOVA, sem extensão na URL — não está na tabela
+// NO_CLOUDFLARE de cima (aquela é "medido no wrangler dev"; isto é
+// GENERALIZADO por analogia ao mesmo `html_handling: auto-trailing-slash` que
+// já rege o índice, documentado em PAGINAS_SEM_EXTENSAO no node.mjs). O que
+// este teste cobra é a VM ser CONSISTENTE com a regra que ela mesma declara —
+// não uma segunda medição no Cloudflare.
+test('estáticos: /status é página sem extensão (como o índice) — /status.html redireciona pra /status', async () => {
+  await comServidor(async () => {
+    const r1 = await pedidoCru('/status');
+    assert.equal(r1.status, 200, '/status deveria servir o conteúdo de status.html direto, como / serve index.html');
+    assert.match(r1.headers['content-type'] || '', /^text\/html/);
+    assert.ok(r1.corpo.length > 0);
+
+    const r2 = await pedidoCru('/status.html');
+    assert.equal(r2.status, 307);
+    assert.equal(r2.headers.location, '/status');
+
+    const r3 = await pedidoCru('/status.html?x=1');
+    assert.equal(r3.status, 307);
+    assert.equal(r3.headers.location, '/status?x=1');
+
+    // Fora do GET/HEAD: 405 (há asset), igual ao índice — nunca 404.
+    const r4 = await pedidoCru('/status', { metodo: 'POST' });
+    assert.equal(r4.status, 405);
+    const r5 = await pedidoCru('/status.html', { metodo: 'POST' });
+    assert.equal(r5.status, 405);
+
+    // O conteúdo servido por /status É o de status.html (mesmo arquivo).
+    const bonito = await (await fetch(URL_('/status'))).text();
+    assert.ok(bonito.includes('<html') || bonito.includes('<!doctype') || bonito.length > 100,
+      '/status não devolveu uma página de verdade');
   });
 });
 

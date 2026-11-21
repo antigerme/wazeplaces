@@ -15,6 +15,7 @@
 // Toda a lógica vive em server/core.mjs (compartilhada com a VM Node).
 
 import { dispatch, makeSessions, chaveDoSecret, varrerMantidosDoStore, SESSION_TTL, MAX_BODY_BYTES, RESPOSTA_CORPO_GRANDE } from '../server/core.mjs';
+import { calcularStatusPublico } from '../server/status.mjs';
 
 // O corpo, lido com TETO — o mesmo da VM (`readBody`), e com a mesma resposta.
 // Era `request.json()`, que lê o que vier: o corpo de 5,5 MB (e o de 20) dava
@@ -87,6 +88,42 @@ function storeDoKv(env) {
   };
 }
 
+// A chave RAW do blob público (/status.html), FORA do namespace `sess_` das
+// sessões — reaproveitar `storeDoKv` aqui faria o próprio blob aparecer na
+// PRÓXIMA contagem (um `sess_status_publico` de 64+ bytes não casa com nenhum
+// dos dois formatos que `contarChaves` reconhece, então não inflaria a
+// contagem — mas é limpo demais pra depender disso: fica fora do namespace
+// mesmo, por decisão, não por sorte de regex).
+const STATUS_CHAVE_KV = 'status_publico';
+
+// A contagem roda DEPOIS do «Manter conectado» terminar — nunca em paralelo —
+// porque soma UM `list` (+ o `get`/`put` do próprio blob) ao orçamento de
+// subrequisições da MESMA execução (o comentário de orçamento em
+// manter-conectado.mjs já mede até 53–55 no pior caso, sob o teto de 50;
+// isto não pode competir pelas operações que a renovação de verdade precisa).
+// Nunca lança — falha aqui não pode derrubar nem atrasar a renovação.
+async function atualizarStatusPublico(env) {
+  try {
+    const brutoAnterior = await env.SESSIONS.get(STATUS_CHAVE_KV);
+    let anterior = null;
+    try { anterior = brutoAnterior ? JSON.parse(brutoAnterior) : null; } catch { anterior = null; }
+    const { blob, mudou } = await calcularStatusPublico({ listar: (p) => storeDoKv(env).list(p), anterior });
+    // Só grava quando algo mudou de verdade: a escrita de KV é cota escassa
+    // (1.000/dia), dividida com o app e com o «Manter conectado».
+    if (mudou) await env.SESSIONS.put(STATUS_CHAVE_KV, JSON.stringify(blob));
+    return { sessoesAtivas: blob.sessoesAtivas, manterConectado: blob.manterConectado, gravou: mudou };
+  } catch (err) {
+    console.error('status-publico falhou:', err && err.message);
+    return null;
+  }
+}
+
+function statusStoreDoKv(env) {
+  return {
+    get: () => env.SESSIONS.get(STATUS_CHAVE_KV),
+  };
+}
+
 export default {
   // O Cron Trigger do wrangler.jsonc (a cada 30 min): renova o cookie do Waze das
   // sessões que ligaram «Manter conectado». O que fazer, em que ritmo e a conta
@@ -100,14 +137,20 @@ export default {
       if (!env || !env.ENCRYPTION_KEY || !env.SESSIONS) { console.error('manter-conectado: sem ENCRYPTION_KEY ou sem o KV SESSIONS'); return null; }
       const { keyBytes, problema } = chaveDoSecret(env.ENCRYPTION_KEY);
       if (problema) { console.error('manter-conectado: ENCRYPTION_KEY inválida'); return null; }
+      let resumo = null;
       try {
-        const resumo = await varrerMantidosDoStore({ store: storeDoKv(env), keyBytes });
+        resumo = await varrerMantidosDoStore({ store: storeDoKv(env), keyBytes });
         console.log('manter-conectado', JSON.stringify(resumo));
-        return resumo;
       } catch (err) {
         console.error('manter-conectado falhou:', err && err.message);
-        return null;
       }
+      // SEQUENCIAL, depois da renovação — nunca em paralelo (ver o comentário
+      // de `atualizarStatusPublico`). Roda mesmo se a renovação falhou: a
+      // contagem de chaves não depende dela ter dado certo. NUNCA muda o que
+      // esta função devolve — a contagem é um efeito colateral best-effort,
+      // fora do contrato de retorno da renovação (que os testes conferem).
+      await atualizarStatusPublico(env);
+      return resumo;
     })();
     // Sem o `waitUntil` o runtime corta a promessa quando o handler retorna.
     if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(tarefa);
@@ -155,7 +198,7 @@ export default {
         // da presença de carona que passou do teto de espera). Sem `waitUntil`
         // o runtime da Cloudflare corta a promessa assim que a resposta sai.
         const aoFundo = ctx && typeof ctx.waitUntil === 'function' ? (p) => ctx.waitUntil(p) : undefined;
-        const { status, body } = await dispatch(route, data, { sessions, aoFundo });
+        const { status, body } = await dispatch(route, data, { sessions, aoFundo, statusStore: statusStoreDoKv(env) });
         return json(body, status);
       } catch (err) {
         console.error('Erro no handler /api:', err);

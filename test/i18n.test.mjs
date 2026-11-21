@@ -367,8 +367,9 @@ test('i18n: toda chave do dicionário é usada pelo app — chave morta sai', ()
   const semComentario = (txt, html) => (html ? txt.replace(/<!--[\s\S]*?-->/g, '') : txt)
     .split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
   const codigo = ['js/app.js', 'js/api.js', 'js/presenca.js', 'js/swipe.js', 'js/sw-register.js', 'js/mapa.js', 'js/qr.js',
-    'server/core.mjs', 'worker/index.mjs', 'server/node.mjs'].map((a) => semComentario(read(a), false))
-    .concat(semComentario(read('index.src.html'), true)).join('\n');
+    'js/status.js', 'server/core.mjs', 'worker/index.mjs', 'server/node.mjs'].map((a) => semComentario(read(a), false))
+    .concat(semComentario(read('index.src.html'), true))
+    .concat(semComentario(read('status.src.html'), true)).join('\n');
   const citada = (k) => codigo.includes(`'${k}'`) || codigo.includes(`"${k}"`) || codigo.includes('`' + k + '`');
   const familias = [...new Set([...codigo.matchAll(/['"`]([a-z][a-zA-Z0-9]*(?:\.[a-zA-Z0-9_]+)*\.)['"`]/g)].map((m) => m[1]))];
   const usada = (k) => citada(k) || familias.some((f) => k.startsWith(f))

@@ -73,6 +73,8 @@ wazeplaces/
 │                            #   o que os TESTES leem e o que o Tailwind varre. Não é publicado nem servido.
 ├── index.html               # GERADO por `npm run html`, commitado, NÃO editar. É o que a RAIZ serve. O
 │                            #   gerador confere o hash do script inline do tema e não grava se divergir.
+├── status.src.html          # A página pública /status.html (transparência de uso). FONTE, mesmo tratamento do index.src.html.
+├── status.html              # GERADO por `npm run html`. Servido SEM extensão (`/status`; `/status.html` redireciona).
 ├── manifest.json            # PWA manifest (ícones SVG em icons/)
 ├── service-worker.js        # Cache + auto-update (controllerchange + SKIP_WAITING)
 ├── icons/
@@ -92,6 +94,7 @@ wazeplaces/
 │   ├── mapa.js              # Mapa de evidência, JS puro: `mapaMontar` (o mapinha do card, enquadramento
 │   │                        #   fixo) e `mapaGrade` (o mapa ampliado). Tiles do Waze, camada `live/base`.
 │   ├── qr.js                # Gerador de QR, JS puro, só pro pareamento; sob demanda (`carregarQr()`); vetores em test/qr.test.mjs
+│   ├── status.js            # A página /status.html: busca /api/status UMA vez (zero polling) e monta o DOM
 │   ├── version.js           # FONTE ÚNICA da versão (APP_VERSION + verLabel). Carregado antes do app.js
 │   ├── i18n.js              # i18n pt/en/es/fr: I18N_DICT, t(), applyI18n(), setLang(), setI18nVars(). FONTE
 │   │                        #   ÚNICA de texto de tela; LANGS_SUPORTADOS = Object.keys(I18N_DICT)
@@ -110,6 +113,7 @@ wazeplaces/
 │   ├── marca-app.mjs        # A MARCA de quem usa o app na posição da presença do WME (lat mod 100 = 47,
 │   │                        #   lon mod 1000 = país). PURO; quem escreve e quem lê importam daqui
 │   ├── manter-conectado.mjs # A varredura do «Manter conectado» (renova o cookie do Waze de quem pediu); PURA
+│   ├── status.mjs           # Contagem pública (/status.html): conta chaves sess_/ka_, PURA, nunca decifra
 │   ├── core.mjs             # Toda a lógica: sessões, cripto (AES-GCM), callWaze, categorizeWazeError,
 │   │                        #   categorizeGrpcError, isUserAllowed, os handlers e o dispatch()
 │   └── node.mjs             # Adaptador VM/Node: servidor http, estáticos, sessões em arquivo, chave
@@ -411,6 +415,7 @@ Todos os handlers de `server/core.mjs` são **proxies stateless**: recebem o `se
 | `chat` | gRPC `com.waze.wmp.{Messaging,MessagingHistory}` em `/<região>-wmp/` | `acao`: `token` (exige `instalacao`), `naoLidas`, `conversas`, `mensagens`, `abrir` (histórico + "lida" numa ida; página antiga não marca), `perfis`, `enviar` (o SERVIDOR põe a marca do app), `recibo`, `lida`, `confirmar`. Toda ação aceita a confirmação de carona; pedido recusado não confirma nada. Recusada pelo `diag-api` |
 | `lista-paises` | `/row-Descartes/app/LocationSearch/Countries` | Nomes **sempre em inglês**. Ordem base no servidor; o cliente reordena na colação do idioma (`ordenarPorNome`) |
 | `lista-estados` | `/row-Descartes/app/LocationSearch/States?countryId=N` | Nomes no idioma **local** (é o nome próprio). Idem ordenação |
+| `status` | — (local) | A página pública `/status.html`. SEM sessão, SEM Waze: só lê o blob que o MESMO cron do «Manter conectado» computa a cada 30 min (`server/status.mjs`, contagem pura de chaves `sess_`/`ka_` — nunca decifra nada) e grava num par `{get,put}` PRÓPRIO, fora do namespace das sessões (senão o próprio blob se contaria). Devolve `agora` (relógio do servidor, pro "atualizado há N min" nunca depender do relógio de quem visita) e `capacidade` (`STATUS_CAPACIDADE_*` de `manter-conectado.mjs`, a mesma medição do cron). Zero polling no cliente: `js/status.js` lê uma vez ao abrir |
 
 - **`fromCreationTime`/`toCreationTime`/`fromUpdateTime`/`toUpdateTime` são do LOCAL, não do PEDIDO** (medido: dois cortes bem diferentes devolviam o mesmo conjunto — gotcha #28). Não dá pra recortar a fila por idade do PEDIDO pelo servidor: quem sabe a data do pedido é o `ur.dateAdded`, e o corte é nosso. O conjunto sem filtro é completo (`hasMore: false`, página 2 vazia).
 - **Idioma dos nomes (medido, 248 países)**: país SEMPRE em inglês, e o Waze ignora `Accept-Language`, `Referer` com locale e `?language=` (byte a byte iguais) — não há conserto pelo header; se um dia incomodar, é tabela de tradução por `abbr`/ISO. Estado vem no idioma local. **Categoria é outro problema**: o Waze a regionaliza por PAÍS, não por idioma (`ônibus` no pt-BR × `autocarro` no pt-PT), então tabela por idioma erra em metade dos países; enquanto não houver fonte de regionalização do próprio Waze, categoria sai CRUA (gotcha #39). Ordenar nomes é do cliente (`ordenarPorNome`, via `i18nLocale()`), nunca `localeCompare(…, 'pt-BR')` cravado no servidor. O texto de erro da API do Waze não é localizado (não serve de sonda de idioma).

@@ -52,7 +52,7 @@ const ESCRITA = new Set(['validar-place', 'marcar-lido', 'excluir-foto', 'renome
 // (a URL normaliza DEPOIS da recusa e chega na rota de escrita), e rota nova
 // que escrevesse passaria sem ninguém lembrar de pô-la aqui. A de cima fica pra
 // explicar a recusa; quem decide é esta.
-const LEITURA = new Set(['buscar-places', 'lista-paises', 'lista-estados']);
+const LEITURA = new Set(['buscar-places', 'lista-paises', 'lista-estados', 'status']);
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 '
   + '(KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
 

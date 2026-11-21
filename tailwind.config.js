@@ -9,11 +9,13 @@ module.exports = {
   darkMode: 'class', // .dark no <html> (o mesmo que o bundle runtime usava)
   content: [
     './index.src.html',   // o FONTE — varrer o gerado criaria dependência de ordem
+    './status.src.html',  // idem, pro /status.html
     './js/app.js',
     './js/api.js',
     './js/swipe.js',
     './js/i18n.js',
     './js/version.js',
+    './js/status.js',
   ],
   theme: { extend: {} },
   plugins: [],

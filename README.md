@@ -170,6 +170,8 @@ APIs internas do Waze
 wazeplaces/
 ├── index.src.html          # Single-page app — o FONTE, comentado (é o que se edita)
 ├── index.html              # GERADO por `npm run html` — é ele que a raiz serve
+├── status.src.html         # A página pública /status.html (transparência de uso) — o FONTE
+├── status.html             # GERADO por `npm run html` — servido sem extensão (`/status`)
 ├── manifest.json           # PWA manifest
 ├── service-worker.js       # Service worker (cache + auto-update)
 ├── icons/
@@ -191,6 +193,7 @@ wazeplaces/
 │   ├── presenca.js         # Quem está no app e a conversa (pelo WME)
 │   ├── mapa.js             # Mini-mapa e mapa ampliado (tiles do Waze)
 │   ├── qr.js               # Gerador de QR do pareamento (sob demanda)
+│   ├── status.js           # A página /status.html: busca /api/status uma vez, sem polling
 │   ├── swipe.js            # Gestos drag/swipe
 │   ├── version.js          # A versão (serial YYYYMMDDnn)
 │   ├── sw-register.js      # Registro e auto-update do service worker
@@ -200,6 +203,7 @@ wazeplaces/
 │   ├── wme-grpc.mjs        # O fio gRPC-web da presença e do chat do WME
 │   ├── marca-app.mjs       # A marca de quem usa o app, na posição da presença
 │   ├── manter-conectado.mjs # A varredura do «Manter conectado» (renova o cookie de quem pediu)
+│   ├── status.mjs          # Contagem pública (/status.html): conta sessões sem decifrar nada
 │   ├── corpo.mjs           # Leitura do corpo da requisição na VM (UTF-8 inteiro)
 │   └── node.mjs            # Adaptador VM/Node (http + estáticos + fs sessions)
 ├── worker/

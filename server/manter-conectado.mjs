@@ -108,6 +108,17 @@ export const PAUSA_MAX_MS = 4_000;
 export const MANTER_MORTA_APOS = 20 * 3600;  // 403/401 só vale como «morta» com o carimbo da sessão tão velho (o valor morre em 24–26 h)
 export const MANTER_CRON_MIN = 30;           // de quanto em quanto tempo os adaptadores varrem
 
+// A CAPACIDADE medida acima (ver o parágrafo "por dia" e o cabeçalho do
+// módulo), em UM lugar — a página /status.html (server/status.mjs) lê estes
+// três números pro medidor de capacidade, em vez de os cravar de novo lá:
+//   · CONFORTÁVEL: população PARADA, 0 mortes até aqui na simulação de 8 dias.
+//   · LIMITE: a promessa pública ("~100 se a lista for estável").
+//   · TETO_MEDIDO: o maior valor medido com 0 mortes em população parada —
+//     ACIMA dele, com rotatividade real, a simulação já mede mortes (R27-1-03).
+export const STATUS_CAPACIDADE_CONFORTAVEL = 80;
+export const STATUS_CAPACIDADE_LIMITE = 100;
+export const STATUS_CAPACIDADE_TETO_MEDIDO = 125;
+
 // A mesma faixa do `tools/waze-jitter.mjs` (fonte do dono), reescrita aqui porque
 // aquele usa `node:timers/promises` e este módulo roda no Worker.
 export function pausaPadrao() {

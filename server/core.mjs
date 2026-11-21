@@ -21,6 +21,7 @@ import {
 import { marcarPosicao, paisValido, temMarcaDaApp, paisDaMarca } from './marca-app.mjs';
 import {
   KA_PREFIXO, KA_TTL, KA_REGRAVA_APOS, MANTER_ESPERA_WAZE_MS, varrerMantidos,
+  STATUS_CAPACIDADE_CONFORTAVEL, STATUS_CAPACIDADE_LIMITE, STATUS_CAPACIDADE_TETO_MEDIDO,
 } from './manter-conectado.mjs';
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -4149,6 +4150,45 @@ export async function varrerMantidosDoStore({ store, keyBytes, sessions = null, 
   });
 }
 export { varrerMantidos };
+export { calcularStatusPublico, STATUS_HISTORICO_DIAS } from './status.mjs';
+
+// ─────────────────────────────────────────────────────────────────────────
+// Status público (/status.html) — rota SEM sessão, SEM chamada ao Waze: só
+// lê o blob que o cron (o mesmo do «Manter conectado», rodando DEPOIS dele —
+// ver worker/index.mjs e server/node.mjs) já deixou pronto. Isto é zero
+// computação por visita, de propósito (free tier: "nada de polling").
+//
+// `ctx.statusStore` é um par `{ get, put }` SEPARADO do store das sessões —
+// nunca passa pelo `sess_`/`ka_` do store delas (contaria a si mesmo como
+// sessão na próxima varredura). Sem `statusStore` (adaptador não configurado),
+// devolve o estado "sem dados ainda", nunca erro: é uma vitrine pública, e
+// uma falha aqui não pode parecer um 500 de verdade pra quem só está olhando.
+async function handleStatusPublico(data, { statusStore } = {}) {
+  const vazio = { atualizadoEm: null, sessoesAtivas: 0, manterConectado: 0, historico: [] };
+  let blob = vazio;
+  if (statusStore && typeof statusStore.get === 'function') {
+    try {
+      const bruto = await statusStore.get();
+      const lido = bruto ? JSON.parse(bruto) : null;
+      if (lido && typeof lido === 'object') blob = { ...vazio, ...lido };
+    } catch { /* sem dado legível ainda: fica no vazio */ }
+  }
+  return {
+    status: 200,
+    body: {
+      success: true,
+      ...blob,
+      // O relógio do SERVIDOR, pra "atualizado há N min" nunca depender do
+      // relógio de quem está vendo a página (o mesmo motivo do `Presenca.desvio`).
+      agora: Date.now(),
+      capacidade: {
+        confortavel: STATUS_CAPACIDADE_CONFORTAVEL,
+        limite: STATUS_CAPACIDADE_LIMITE,
+        tetoMedido: STATUS_CAPACIDADE_TETO_MEDIDO,
+      },
+    },
+  };
+}
 
 const ROUTES = {
   sessao: handleSessao,
@@ -4166,6 +4206,7 @@ const ROUTES = {
   chat: handleChat,
   'lista-paises': handleListaPaises,
   'lista-estados': handleListaEstados,
+  status: handleStatusPublico,
 };
 
 // O corpo que a conversão pra texto ou número não consegue ler. `JSON.parse` dá
