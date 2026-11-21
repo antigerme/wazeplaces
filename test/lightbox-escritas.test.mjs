@@ -28,7 +28,19 @@ function fatiar(nome) {
     if (APP_SEM[j] === '(') par++;
     else if (APP_SEM[j] === ')') { par--; if (par === 0) { i = j + 1; break; } }
   }
-  return APP_SEM.slice(m.index, fechar(APP_SEM, i));
+  const corpo = APP_SEM.slice(m.index, fechar(APP_SEM, i));
+  // `podeAgirDestrutivoAqui` passou a ler `MIN_RANK_DESTRUTIVO` (uma constante
+  // do MÓDULO) em vez de cravar o número — fatiar só a função, pra quem a
+  // chama (direto ou via delegador), dá ReferenceError sem a constante junto.
+  // Escopado a ESTA constante, não genérico: um sweep de "todo identificador
+  // maiúsculo" colidia com constantes que outros call sites JÁ injetam por
+  // conta própria (`UNDO_WINDOW_MS` virava "already declared").
+  if (corpo.includes('MIN_RANK_DESTRUTIVO')) {
+    const cm = /^const MIN_RANK_DESTRUTIVO = [^;]+;/m.exec(APP_SEM);
+    assert.ok(cm, 'MIN_RANK_DESTRUTIVO sumiu do app.js');
+    return cm[0] + '\n' + corpo;
+  }
+  return corpo;
 }
 // Um MÉTODO do objeto `Lightbox`, como texto de método (`nome(args) { … }`).
 function metodo(nome) {
@@ -66,7 +78,7 @@ function lightbox(podeL6 = true) {
   const corpo = ['podeAprovarAtual', 'idAprovadoDaFoto', 'marcarComoAprovada', 'desmarcarAprovada', 'esquecerProposta',
     'removerFoto', 'indiceDaFoto']
     .map(metodo).join(',\n').replace(/placeResolvidoPorAprovacao/g, '__res.v');
-  const L = new Function('podeAgirComoL6Aqui', '__res', `return {
+  const L = new Function('podeAgirDestrutivoAqui', '__res', `return {
     place: null, urls: [], idx: 0, newIdx: -1, eDenuncia: false, aberto: true, renders: 0,
     isOpen() { return this.aberto; }, _render() { this.renders++; }, close() { this.aberto = false; },
     ${corpo}
@@ -712,7 +724,7 @@ function lightboxQueAbre() {
     .replace(/placeResolvidoPorAprovacao/g, '__res.v');
   // A região viva da camada (o `_anunciarFoto` de verdade escreve nela, R9-3-05).
   const anuncios = [];
-  const L = new Function('document', 'CamadaVoltar', 'mostrarNomeNoLightbox', 'podeAgirComoL6Aqui', '__res',
+  const L = new Function('document', 'CamadaVoltar', 'mostrarNomeNoLightbox', 'podeAgirDestrutivoAqui', '__res',
     't', 'anunciarNoLightbox', `return {
     place: null, urls: [], idx: 0, newIdx: -1, eDenuncia: false, aberto: false, renders: 0,
     isOpen() { return this.aberto; }, _render() { this.renders++; }, close() { this.aberto = false; },
@@ -2086,7 +2098,7 @@ test('R6-3-06 → com o foco no "Aprovar" (ou na lixeira): a ação some e o foc
 // a renovação da sessão zera o perfil: com a foto aberta antes dele, o
 // "Aprovar", a lixeira e a pílula do nome seguiam escondidos pra um L6+AM até
 // fechar e reabrir (MEDIDO). O `definirPerfil` de verdade, com o portão de
-// verdade (`podeAgirComoL6Aqui`, `podeRenomearAqui`) e a tela de mentira.
+// verdade (`podeAgirDestrutivoAqui`, `podeRenomearAqui`) e a tela de mentira.
 function fotoAbertaSemPerfil({ aberta = true } = {}) {
   const ocultos = {};
   const el = (id) => ({ textContent: '', classList: { toggle(c, v) { if (c === 'hidden') ocultos[id] = !!v; },
@@ -2106,10 +2118,10 @@ function fotoAbertaSemPerfil({ aberta = true } = {}) {
     __P: P, __aberta: aberta,
   };
   const nomes = ['definirPerfil', 'reavaliarFotoAbertaPeloPerfil', 'mostrarNomeNoLightbox', 'podeRenomearAqui',
-    'podeAgirComoL6Aqui', 'atualizarAcoesDeFoto'];
+    'podeAgirDestrutivoAqui', 'atualizarAcoesDeFoto'];
   const app = new Function(...Object.keys(deps),
     // A foto aberta é a PROPOSTA (o "Aprovar" é dela): o portão é o de verdade.
-    'const Lightbox = { isOpen: () => __aberta, place: __P, idFotoAtual: () => null, podeAprovarAtual: () => podeAgirComoL6Aqui() };\n'
+    'const Lightbox = { isOpen: () => __aberta, place: __P, idFotoAtual: () => null, podeAprovarAtual: () => podeAgirDestrutivoAqui() };\n'
     + nomes.map(fatiar).join('\n') + `\nreturn { ${nomes.join(', ')} };`)(...Object.values(deps));
   // O que a abertura da foto faz, sem perfil ainda.
   if (aberta) { app.mostrarNomeNoLightbox(); app.atualizarAcoesDeFoto(); }
@@ -2123,10 +2135,10 @@ test('R6-3-07 o perfil L6+AM chega com a foto aberta: o "Aprovar" e a pílula do
   assert.equal(m.app.definirPerfil(L6AM), true);
   assert.equal(m.ocultos.lightboxApprove, false, 'o perfil L6+AM chegou com a foto aberta e o "Aprovar" seguiu escondido');
   assert.equal(m.ocultos.lightboxNome, false, 'o perfil L6+AM chegou com a foto aberta e a pílula do nome seguiu escondida');
-  // CONTROLE: o perfil de quem NÃO pode (L5) deixa os dois escondidos.
+  // CONTROLE: o perfil de quem NÃO pode (L4, abaixo do portão L5+AM) deixa os dois escondidos.
   const n = fotoAbertaSemPerfil();
-  n.app.definirPerfil({ success: true, profile: { id: 1, rank: 4, isAreaManager: true } });
-  assert.ok(n.ocultos.lightboxApprove && n.ocultos.lightboxNome, 'CONTROLE: o perfil de um L5 acendeu as ações do L6');
+  n.app.definirPerfil({ success: true, profile: { id: 1, rank: 3, isAreaManager: true } });
+  assert.ok(n.ocultos.lightboxApprove && n.ocultos.lightboxNome, 'CONTROLE: o perfil de um L4 acendeu as ações do L5');
   // CONTROLE: com a foto fechada, o perfil não mexe nela.
   const f = fotoAbertaSemPerfil({ aberta: false });
   f.app.definirPerfil(L6AM);
@@ -2425,7 +2437,7 @@ function fotoComDica() {
     AppState, Treino: { ativo: false }, fecharEdicaoNome: () => {}, atualizarAcoesDeFoto: () => {},
     aplicarTravaDeAcao: () => {},   // a trava da pílula, que é do local da camada (R11-3-06)
   };
-  const nomes = ['mostrarNomeNoLightbox', 'reavaliarFotoAbertaPeloPerfil', 'podeRenomearAqui', 'podeAgirComoL6Aqui'];
+  const nomes = ['mostrarNomeNoLightbox', 'reavaliarFotoAbertaPeloPerfil', 'podeRenomearAqui', 'podeAgirDestrutivoAqui'];
   const app = new Function(...Object.keys(deps),
     `const Lightbox = { urls: [], idx: 0, newIdx: -1, place: null, _render() {},
       isOpen() { return !document.getElementById('imageLightbox').classList.contains('hidden'); },
@@ -2998,7 +3010,7 @@ function camadaDeVerdade({ resolvido = { v: null } } = {}) {
   const doc = { getElementById: () => el(), body: { style: {} }, activeElement: null };
   const nomes = ['open', 'recolocarFoto', 'removerFoto', 'podeAprovarAtual', 'idAprovadoDaFoto', 'idFotoAtual',
     'indiceDaFoto', '_anunciarFoto', 'marcarComoAprovada', 'desmarcarAprovada', 'esquecerProposta'];
-  const L = new Function('document', 'CamadaVoltar', 'mostrarNomeNoLightbox', 'podeAgirComoL6Aqui', 'podeExcluirFotoAqui',
+  const L = new Function('document', 'CamadaVoltar', 'mostrarNomeNoLightbox', 'podeAgirDestrutivoAqui', 'podeExcluirFotoAqui',
     '__res', 't', 'anunciarNoLightbox', 'setTimeout', 'clearTimeout', `return {
     place: null, urls: [], idx: 0, newIdx: -1, eDenuncia: false, aberto: false, renders: 0,
     isOpen() { return this.aberto; }, _render() { this.renders++; }, close() { this.aberto = false; },
@@ -3833,7 +3845,7 @@ function pilulaDeVerdade({ exclusaoNoAr = false, nomeNoAr = false } = {}) {
     atualizarAcoesDeFoto: () => {},
   };
   const nomes = ['mostrarNomeNoLightbox', 'aplicarTravaDeAcao', 'exclusaoDoLocalNoAr', 'renomeacaoNoAr', 'podeRenomearAqui',
-    'podeAgirComoL6Aqui', 'abrirEdicaoNome'];
+    'podeAgirDestrutivoAqui', 'abrirEdicaoNome'];
   const app = new Function(...Object.keys(deps), nomes.map(fatiar).join('\n') + `\nreturn { ${nomes.join(', ')} };`)(...Object.values(deps));
   return { app, els };
 }
@@ -4465,7 +4477,7 @@ function camadaQueAnuncia() {
   const doc = { getElementById: (id) => (id === 'lightboxAnuncio' ? regiao : el()), body: { style: {} }, activeElement: null };
   const nomes = ['open', 'next', 'prev', 'recolocarFoto', 'removerFoto', 'podeAprovarAtual', 'idAprovadoDaFoto', 'idFotoAtual',
     'indiceDaFoto', '_anunciarFoto', 'marcarComoAprovada', 'desmarcarAprovada', 'esquecerProposta'];
-  const L = new Function('document', 'CamadaVoltar', 'mostrarNomeNoLightbox', 'podeAgirComoL6Aqui', 'podeExcluirFotoAqui',
+  const L = new Function('document', 'CamadaVoltar', 'mostrarNomeNoLightbox', 'podeAgirDestrutivoAqui', 'podeExcluirFotoAqui',
     '__res', 't', 'anunciarNoLightbox', `return {
     place: null, urls: [], idx: 0, newIdx: -1, eDenuncia: false, aberto: false, renders: 0,
     isOpen() { return this.aberto; }, _render() { this.renders++; }, close() { this.aberto = false; },

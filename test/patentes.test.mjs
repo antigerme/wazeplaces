@@ -78,7 +78,7 @@ test('patenteDe acerta as BORDAS — é onde um >= virando > move todo mundo', (
 
 // ── 2 e 3. A LISTA, A ORDEM E O PORTÃO ─────────────────────────────────────
 test('as de portão ficam no FIM, pra esconder não deixar buraco', () => {
-  const comPortao = CONQUISTAS.map((c, i) => (c.l6 ? i : -1)).filter((i) => i >= 0);
+  const comPortao = CONQUISTAS.map((c, i) => (c.destrutivo ? i : -1)).filter((i) => i >= 0);
   assert.ok(comPortao.length > 0, 'sumiram as conquistas de portão');
   const esperado = CONQUISTAS.length - comPortao.length;
   assert.deepEqual(comPortao, comPortao.map((_, k) => esperado + k),
@@ -87,12 +87,12 @@ test('as de portão ficam no FIM, pra esconder não deixar buraco', () => {
 
 test('o portão não destrava o que ele guarda — nos dois sentidos', () => {
   const cheio = { fotos: 99, nomes: 99 };
-  const semPortao = avaliarConquistas(Object.assign({ gateL6: false }, cheio), {});
+  const semPortao = avaliarConquistas(Object.assign({ gateDestrutivo: false }, cheio), {});
   assert.ok(!semPortao.includes('curador') && !semPortao.includes('corretor'),
     'destravou conquista de L6 pra quem não passa no portão');
   // CONTROLE: com o portão, as MESMAS entradas destravam. Sem isto, "nenhuma
   // destravou" passaria também se a avaliação estivesse quebrada inteira.
-  const comPortao = avaliarConquistas(Object.assign({ gateL6: true }, cheio), {});
+  const comPortao = avaliarConquistas(Object.assign({ gateDestrutivo: true }, cheio), {});
   assert.ok(comPortao.includes('curador') && comPortao.includes('corretor'),
     'com o portão elas deveriam destravar — a avaliação está quebrada, não o portão');
 });
@@ -107,8 +107,8 @@ test('cada conquista tem a SUA condição, e ela é o limiar exato', () => {
     ['viajante',       { paises: 2 },    { paises: 1 }],
     ['poliglota',      { idiomas: 2 },   { idiomas: 1 }],
     ['semanaCheia',    { diasSeguidos: 7 }, { diasSeguidos: 6 }],
-    ['curador',        { fotos: 10, gateL6: true }, { fotos: 9, gateL6: true }],
-    ['corretor',       { nomes: 5, gateL6: true },  { nomes: 4, gateL6: true }],
+    ['curador',        { fotos: 10, gateDestrutivo: true }, { fotos: 9, gateDestrutivo: true }],
+    ['corretor',       { nomes: 5, gateDestrutivo: true },  { nomes: 4, gateDestrutivo: true }],
     ['detetive',       { duplicado: true },   {}],
     ['elefante',       { reincidente: true }, {}],
     ['tudoLimpo',      { filaZerada: true },  {}],

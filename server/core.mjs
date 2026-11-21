@@ -2732,7 +2732,7 @@ async function handleMarcarLido(data, { sessions, aoFundo }) {
 // que o WME mostra, e que tem busca salva pré-definida lá ("starred").
 //
 // É a única escrita do app que NÃO mexe no mapa: a estrela é estado do EDITOR
-// sobre o pedido, não do pedido. Por isso não tem portão de L6 — o portão
+// sobre o pedido, não do pedido. Por isso não tem portão de L5 — o portão
 // destrutivo existe pra o que altera dado de mapa, e aqui não altera.
 //
 // MEDIDO contra o Waze real (2026-09-11, escrita autorizada pelo owner): este
@@ -2821,7 +2821,7 @@ async function handleValidarPlace(data, { sessions, aoFundo }) {
   // Esquecida, a próxima exclusão relê do Waze. Com qualquer resultado: o que
   // importa é o Waze PODER ter mudado a lista. E só no aprovar: rejeitar é o
   // gesto de todo swipe, e uma leitura do KV a mais em cada um pesaria na cota;
-  // aprovar é raro — só foto, só L6+AM (auditoria de 2026-09-26).
+  // aprovar é raro — só foto, só L5+AM (auditoria de 2026-09-26).
   if (aprovar) await esquecerReleitura(data, sessions);
   const cat = categorizeWazeError(result.httpCode, result.response, result.error);
   const extra = await esperarCarona(carona, aoFundo);
@@ -3256,7 +3256,7 @@ async function handleExcluirFoto(data, { sessions }) {
 //
 // Sem portão no servidor, mesma razão do excluir-foto: o Waze valida
 // `permissions` e `lockRank` na gravação, então quem não pode por aqui também
-// não consegue por lá. A trava de PRODUTO (L6+AM ou staff) vive no cliente.
+// não consegue por lá. A trava de PRODUTO (L5+AM ou staff) vive no cliente.
 const NOME_MAX = 255;   // teto NOSSO, defensivo. O maior nome medido na fila
                         // real tinha 49 caracteres; quem recusa de verdade é o Waze.
 

@@ -4,7 +4,7 @@ PWA estilo Tinder para **editores do Waze Map Editor (WME)** limparem rapidament
 
 > ⚠️ **Este app NUNCA aprova dados de local** — nome, categoria, endereço, posição. Isso exige ajuste no mapa e é feito no WME oficial (o botão ↗ do card abre lá). Aqui você **rejeita** ou **marca como lido**, eliminando o lixo antes que outro editor novato aprove besteira.
 >
-> As exceções ficam na **foto ampliada**, e só para quem é **L6 + Area Manager** ou **staff** do Waze: **aprovar a foto nova** do pedido, **excluir uma foto** que já está no local e **corrigir o nome** do local. Nas três a decisão está inteira na tela — a foto ou a fachada ampliada é o dado completo.
+> As exceções ficam na **foto ampliada**, e só para quem é **L5 + Area Manager** ou **staff** do Waze: **aprovar a foto nova** do pedido, **excluir uma foto** que já está no local e **corrigir o nome** do local. Nas três a decisão está inteira na tela — a foto ou a fachada ampliada é o dado completo.
 
 ---
 

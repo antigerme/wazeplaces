@@ -8,6 +8,11 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.11.21-03
+**O portão dos recursos destrutivos baixou de L6+AM pra L5+AM.** Aprovar a foto nova, excluir uma foto do local, corrigir o nome e a recusa automática passam a exigir **L5 + Area Manager** (ou staff), em vez de L6. O resto não muda: a decisão continua inteira na tela (a foto ou a fachada ampliada é o dado completo), e quem não tem o nível simplesmente não vê os botões — as duas conquistas **Curador** e **Corretor** seguem com o mesmo portão.
+
+---
+
 ## v2026.11.20-01
 **Login pela extensão do Chrome volta a ver a passagem do computador.** Numa versão anterior (não publicada), o app passou a pular a tela «Este app é feito para o celular» pra quem entrava pelo ACESSAR do WME, por uma suposição errada — a de que quem usa a extensão quer usar o app ali mesmo, no computador. Na prática, quem clica em ACESSAR também quer chegar ao celular: a extensão só existe no WME porque é lá que o cookie do Waze vive, não porque a pessoa quer triar no computador. Login pela extensão volta a mostrar a passagem e o QR já pronto, exatamente como o login pelo `cookies.txt`.
 
