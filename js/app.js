@@ -3906,7 +3906,7 @@ const Lightbox = {
         if (!p.venueID || !p.updateRequestID) return false;
         if ((this.urls[this.idx] || '').indexOf(String(p.updateRequestID)) === -1) return false;
         if (this.idAprovadoDaFoto(this.urls[this.idx])) return false;
-        return podeAgirComoL6Aqui();   // mesmo portão, decisão do owner
+        return podeAgirDestrutivoAqui();   // mesmo portão, decisão do owner
     },
     // O id que a foto desta URL tem entre as APROVADAS do pedido aberto (a foto
     // já está no mapa), ou nulo. A URL traz o id da foto, como no
@@ -4091,13 +4091,13 @@ const Lightbox = {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  O portão dos recursos destrutivos: L6 + Area Manager, ou staff
+//  O portão dos recursos destrutivos: L5 + Area Manager, ou staff
 // ═══════════════════════════════════════════════════════════════════════════
 //
 // O app tem DOIS níveis, e o par é deliberado:
 //   · ENTRAR é L2+AM (`isUserAllowed`, no core) — é o portão de verdade, no
 //     SERVIDOR, e é ele que impede que qualquer um com cookies do Waze use o app.
-//   · AGIR de forma destrutiva é L6+AM — este aqui, só do CLIENTE.
+//   · AGIR de forma destrutiva é L5+AM — este aqui, só do CLIENTE.
 //
 // Só do cliente é decisão, não esquecimento: o Waze valida `permissions` e
 // `lockRank` na gravação, então quem não pode por aqui também não consegue por
@@ -4110,28 +4110,34 @@ const Lightbox = {
 // O nome NÃO fala de foto de propósito. Ele já guardava três recursos — excluir
 // foto, aprovar foto e renomear local — e chamá-lo de "excluir foto" fazia cada
 // novo call site parecer estranho, o que empurra a próxima pessoa a
-// re-implementar `rank >= 5` em vez de delegar. `test/gates.test.mjs` reprova
+// re-implementar a comparação em vez de delegar. `test/gates.test.mjs` reprova
 // quem re-implementar.
 //
 // Recurso novo entra por uma função PRÓPRIA que delega (ver `podeRenomearAqui`),
 // nunca chamando esta direto: são decisões de produto que hoje COINCIDEM, e se
 // um dia o owner separar uma delas, o call site não muda.
-function podeAgirComoL6Aqui() {
+//
+// Nível mínimo pro destrutivo, COMO O EDITOR VÊ (Waze é 0-indexed — gotcha #15;
+// 4 aqui é o L5 que o editor vê). Baixado de L6+AM pra L5+AM em 2026-11-21,
+// decisão do owner. NOMEADA de propósito (ao contrário do `MIN_RANK_WAZE` do
+// core, que é da ENTRADA): esta é a única leitura do número no app inteiro —
+// `test/gates.test.mjs` reprova quem copiar a comparação em vez de ler daqui.
+const MIN_RANK_DESTRUTIVO = 4;
+function podeAgirDestrutivoAqui() {
     const p = AppState.profile;
     if (!p) return false;
     if (p.isStaff) return true;
-    // Rank CRU do Waze, 0-indexed: 5 aqui é o L6 que o editor vê (gotcha #15).
     const rank = Number.isInteger(p.rank) ? p.rank : parseInt(p.rank, 10);
-    return rank >= 5 && !!p.isAreaManager;
+    return rank >= MIN_RANK_DESTRUTIVO && !!p.isAreaManager;
 }
 
 // Excluir foto: o primeiro recurso a usar o portão, e agora um delegador como
 // os outros dois. Existir como função própria — em vez de o call site chamar a
 // base — é o que mantém a invariante que o teste cobra: NENHUM recurso fala
-// direto com `podeAgirComoL6Aqui`, cada um tem o seu nome. Assim, separar um
+// direto com `podeAgirDestrutivoAqui`, cada um tem o seu nome. Assim, separar um
 // deles um dia é editar uma função, não caçar call sites.
 function podeExcluirFotoAqui() {
-    return podeAgirComoL6Aqui();
+    return podeAgirDestrutivoAqui();
 }
 
 // A RODA do mouse e o trackpad, como ZOOM da foto e do mapa ampliados.
@@ -5328,7 +5334,7 @@ function pedirExclusaoDaFoto() {
 
 // ── Aprovar a foto pendente ───────────────────────────────────────────────
 //
-// Espelho da lixeira, e de propósito: mesmo portão (L6+AM ou staff), mesma
+// Espelho da lixeira, e de propósito: mesmo portão (L5+AM ou staff), mesma
 // janela de Desfazer, mesma regra de que o envio só sai quando a janela fecha
 // SOZINHA. O que muda é o sentido — aqui a foto passa a valer no mapa.
 //
@@ -5772,7 +5778,7 @@ function aprovarFotoAtual() {
         removeUndoBanner();
         Lightbox.desmarcarAprovada(alvo);
         // Volta a ser só um pedido da fila — no Desfazer E no cancelamento da
-        // queda/"Sair" (L6 passa por aqui): a marca de "em andamento" não pode
+        // queda/"Sair" (L5 passa por aqui): a marca de "em andamento" não pode
         // sobrar, senão a busca nunca mais o traz.
         marcarEmAndamento(place, false);
         refazerSelosSeOutroNaTela(place);
@@ -5796,7 +5802,7 @@ function aprovarFotoAtual() {
 // lá: o WME não busca duplicado, não valida convenção, não confere nada. Manda
 // `{id, name}`.
 //
-// Portão: o mesmo dos outros destrutivos (`podeAgirComoL6Aqui`), e só do
+// Portão: o mesmo dos outros destrutivos (`podeAgirDestrutivoAqui`), e só do
 // CLIENTE — o Waze valida `permissions`/`lockRank` na gravação, então quem não
 // pode por aqui também não consegue por lá.
 let renomeacaoPendente = null;   // { timer, enviar, desfazer }
@@ -5820,7 +5826,7 @@ function podeRenomearAqui() {
     // Mesmo portão da foto. Função própria (em vez de chamar a outra direto)
     // porque são DUAS decisões de produto que hoje coincidem: se um dia o owner
     // separar, o call site não muda.
-    if (!podeAgirComoL6Aqui()) return false;
+    if (!podeAgirDestrutivoAqui()) return false;
     const p = Lightbox.place;
     // v1 só CORRIGE nome existente. Batizar local sem nome é outra decisão (e
     // outra conversa) — sem isto, um toque acidental nomearia um lugar anônimo.
@@ -5842,7 +5848,7 @@ function mostrarNomeNoLightbox() {
     const pode = podeRenomearAqui() && !Treino.ativo;
     cx.classList.toggle('hidden', !pode);
     // A dica de zoom mora no mesmo canto. Some pra quem tem a pílula — é editor
-    // L6+AM, que já sabe dar zoom; pro resto ela fica o tempo que o `open` dá.
+    // L5+AM, que já sabe dar zoom; pro resto ela fica o tempo que o `open` dá.
     // Daqui ela só SAI: quem a mostra é o `open`, que tem o relógio que a tira
     // em 4 s. Esta função passou a rodar também com o perfil chegando com a foto
     // aberta (`reavaliarFotoAbertaPeloPerfil`, R6-3-07) — o perfil atrasado, a
@@ -7781,7 +7787,7 @@ async function loadProfileAndAuxData() {
     // o app reaberto sem resposta da API, com a rede voltando em menos de um
     // minuto, não pedia o perfil nas provas de rede que vinham (as respostas do
     // esvaziamento da fila de saída), e sem ele faltavam o nome, os portões de
-    // L6, a recusa automática, a presença — e o "invisível" que esperava o perfil
+    // L5, a recusa automática, a presença — e o "invisível" que esperava o perfil
     // não saía, contra o "assim que o sinal volta" (auditoria da rodada 12,
     // R12-5-04, MEDIDO). Só se nenhuma carga começou depois desta.
     if ((!profileRes || typeof profileRes._motivo === 'string') && carga === cargasDoPerfil) perfilPedidoEm = pedidoAntes;
@@ -7924,7 +7930,7 @@ function definirPerfil(res) {
         AppState.contaEmDuvida = false;
         aplicarTravaDeAcao();
     }
-    // E o ponto do botão de Filtros, que também lê o portão: a conquista de L6
+    // E o ponto do botão de Filtros, que também lê o portão: a conquista de L5
     // ganha e não vista só passa a contar quando a vitrine pode mostrá-la — e o
     // perfil de quem não pode a tira da conta (R13-7-02).
     atualizarSeloDeConquista();
@@ -7933,9 +7939,9 @@ function definirPerfil(res) {
 
 // O PERFIL chegou com a foto ampliada ABERTA — o `/Session` é a chamada mais
 // lenta da abertura, e a renovação da sessão o zera até o novo chegar. O portão
-// das três ações da foto (`podeAgirComoL6Aqui`) só era reavaliado ao abrir,
+// das três ações da foto (`podeAgirDestrutivoAqui`) só era reavaliado ao abrir,
 // trocar de foto ou a imagem carregar: o "Aprovar", a lixeira e a pílula do nome
-// seguiam escondidos pra um L6+AM até fechar e abrir a foto de novo (R6-3-07,
+// seguiam escondidos pra um L5+AM até fechar e abrir a foto de novo (R6-3-07,
 // auditoria de 2026-10-01, MEDIDO). Fecha também o caminho oposto: o perfil de
 // quem não pode tira a pílula e fecha a edição.
 function reavaliarFotoAbertaPeloPerfil() {
@@ -7949,7 +7955,7 @@ function reavaliarFotoAbertaPeloPerfil() {
 // segundo caminho, quem teve o 1º perfil barrado por um 401 passageiro ficava
 // sem o país, sem a presença e sem a recusa automática até recarregar.
 async function completarPerfilChegado(perfil, epoca) {
-    // A recusa automática (é de L6+AM, e a fila costuma chegar primeiro) e a
+    // A recusa automática (é de L5+AM, e a fila costuma chegar primeiro) e a
     // ordem por casa/trabalho (as referências vêm com o perfil). Sem isto, os
     // dois só valiam na próxima busca.
     aplicarRecusaAutomatica();
@@ -8059,7 +8065,7 @@ async function completarPerfilChegado(perfil, epoca) {
     if (epoca === epocaDaSessao) window.Presenca?.sincronizar?.();
 }
 
-// O perfil que falhou na abertura (rede, 5xx) não era pedido de novo: o L6
+// O perfil que falhou na abertura (rede, 5xx) não era pedido de novo: o L5
 // perdia a lixeira, o aprovar, o renomear e a recusa automática, e a presença
 // não subia (ela precisa do id), até recarregar. Refaz na próxima PROVA de rede
 // (`API.aoProvarRede`) — nunca por relógio — e no máximo uma vez por minuto.
@@ -14699,7 +14705,7 @@ async function aoTrocarOrdenacao() {
 // `definirPerfil`, a porta única do perfil.
 //
 // E as outras duas abas do MESMO modal, que também leem o perfil: a cota do
-// Desfazer (Preferências) e o portão de L6 da vitrine e do "Rejeitar sozinho"
+// Desfazer (Preferências) e o portão de L5 da vitrine e do "Rejeitar sozinho"
 // (Histórico). Só a aba Filtros era redesenhada, e as outras ficavam velhas até
 // fechar e abrir: o Desfazer travado com "Disponível depois de você logar…", a
 // vitrine "1 de 14" sem o "Curador" já ganho, a lista de autores sem o
@@ -20737,7 +20743,7 @@ const PATENTES = [
 // aproximadamente a de dificuldade, então na prática preenche de cima pra
 // baixo sozinha.
 //
-// `l6` marca as que dependem do portão destrutivo (aprovar foto, renomear).
+// `destrutivo` marca as que dependem do portão destrutivo (aprovar foto, renomear).
 // Elas ficam no FIM de propósito: escondidas de quem não passa no portão, não
 // deixam buraco na grade. Cadeado que NUNCA abre é beco sem saída — a mesma
 // régua que tirou a extensão de Chrome da frente no celular.
@@ -20761,8 +20767,8 @@ const CONQUISTAS = [
     { id: 'viajante',       emoji: '🌍' },
     { id: 'poliglota',      emoji: '🗣️' },
     { id: 'semanaCheia',    emoji: '📅' },
-    { id: 'curador',        emoji: '📸', l6: true },
-    { id: 'corretor',       emoji: '✏️', l6: true },
+    { id: 'curador',        emoji: '📸', destrutivo: true },
+    { id: 'corretor',       emoji: '✏️', destrutivo: true },
 ];
 
 // PURAS — é o que o teste exercita sem browser.
@@ -20796,7 +20802,7 @@ function avaliarConquistas(ctx, jaTem) {
     };
     // Na ORDEM da lista: é ela que decide qual anunciar quando duas caem juntas.
     return CONQUISTAS
-        .filter((x) => (!x.l6 || c.gateL6) && cond[x.id] && !tem[x.id])
+        .filter((x) => (!x.destrutivo || c.gateDestrutivo) && cond[x.id] && !tem[x.id])
         .map((x) => x.id);
 }
 
@@ -21056,11 +21062,11 @@ function maiorSequenciaDeDias(h) {
 // Função PRÓPRIA que delega à base, como manda o padrão dos outros destrutivos
 // (`podeExcluirFotoAqui`, `podeRenomearAqui`): nunca chamar a base direto nem
 // copiar `rank >= 5`.
-function conquistasComPortaoAqui() { return podeAgirComoL6Aqui(); }
+function conquistasComPortaoAqui() { return podeAgirDestrutivoAqui(); }
 // O que a pessoa VÊ. Sem portão, as duas últimas não existem — nem na grade
 // nem no "de 16", que vira "de 14".
 function conquistasVisiveis() {
-    return CONQUISTAS.filter((x) => !x.l6 || conquistasComPortaoAqui());
+    return CONQUISTAS.filter((x) => !x.destrutivo || conquistasComPortaoAqui());
 }
 
 // Sem guarda do treino: quem chama aqui é trabalho REAL (a confirmação de uma
@@ -21085,7 +21091,7 @@ function checarConquistas(extra) {
         estados: geo.estados.size,
         paises: geo.paises.size,
         diasSeguidos: maiorSequenciaDeDias(h),
-        gateL6: conquistasComPortaoAqui(),
+        gateDestrutivo: conquistasComPortaoAqui(),
     }, extra || {});
 
     const novas = avaliarConquistas(ctx, g.c);
@@ -21182,7 +21188,7 @@ function garantirLinhaDeBaseDasConquistas() {
 // nada — isto é estado de quem entrou.
 //
 // E conta só o que a vitrine MOSTRA agora (`novasNaVitrine`): o "Curador" e o
-// "Corretor" são de L6, e sem o perfil — o `/Session` é a chamada mais lenta da
+// "Corretor" são de L5, e sem o perfil — o `/Session` é a chamada mais lenta da
 // abertura, e pendura no sinal ruim — o portão os esconde. O ponto acendia por
 // eles, e o toque levava ao Histórico "1 de 14", sem a célula e sem alvo
 // (R13-7-02, MEDIDO no navegador; auditoria de 2026-10-07). O perfil que chega
@@ -21193,7 +21199,7 @@ function temConquistaNova() {
     return !!g && (novasNaVitrine(g).length > 0 || g.patenteNova);
 }
 
-// As novas que a vitrine MOSTRA agora: as de portão (`l6`) só com ele. A
+// As novas que a vitrine MOSTRA agora: as de portão (`destrutivo`) só com ele. A
 // patente não entra — o cartão dela está sempre na tela.
 function novasNaVitrine(g) {
     const mostra = new Set(conquistasVisiveis().map((x) => x.id));
@@ -21232,7 +21238,7 @@ function rotuloDoPerfil(tem = temConquistaNova()) {
 // com ela aberta (ação que pousa, troca de idioma, toque numa célula), e sem
 // isso o anel sumia no primeiro redesenho, antes de ser visto.
 //
-// Visto é só o que a vitrine MOSTROU (`novasNaVitrine`): a de L6 escondida pelo
+// Visto é só o que a vitrine MOSTROU (`novasNaVitrine`): a de L5 escondida pelo
 // portão sem o perfil seguia pra "vista" sem nunca ter aparecido — no toque do
 // ponto, e no Histórico aberto que a OUTRA aba redesenha (R13-7-02). Ela fica
 // nova, e é vista quando o perfil a puser na tela.
@@ -21814,7 +21820,7 @@ function baixarResumo() {
 // É o único recurso do app que decide sobre pedido que ainda não existia quando
 // o editor escolheu. Duas coisas foram desenhadas contra o instinto:
 //
-// 1. PORTÃO. Só L6+AM ou staff — champs e staff do Waze, não qualquer editor.
+// 1. PORTÃO. Só L5+AM ou staff — champs e staff do Waze, não qualquer editor.
 //    Foi a condição do owner pra o recurso existir, e é ela que sustenta o
 //    resto: quem marca alguém aqui está fazendo julgamento informado sobre um
 //    spammer persistente, não um toque apressado.
@@ -21836,7 +21842,7 @@ function baixarResumo() {
 function podeRecusarAutomaticoAqui() {
     // Função própria que delega, como os outros destrutivos: são decisões de
     // produto que hoje coincidem, e se o owner separar uma o call site não muda.
-    return podeAgirComoL6Aqui();
+    return podeAgirDestrutivoAqui();
 }
 
 // O interruptor mora no MESMO registro da contagem: a poda de 30 dias vale pros
@@ -21941,7 +21947,7 @@ async function aplicarRecusaAutomatica() {
     // (auditoria de 2026-10-03, R8-7-03 = R8-2-03, MEDIDO no navegador).
     // Anotada só quando HÁ o que recusar na fila REAL (com o card que volta à
     // frente no "Sair" de fora, como lá): o perfil que chega no treino pede a
-    // recusa a todo L6+AM, e o relatório dizia "a recusa automática pedida com o
+    // recusa a todo L5+AM, e o relatório dizia "a recusa automática pedida com o
     // treino aberto roda no Sair" sem autor nenhum marcado (R10-4-06; auditoria
     // da rodada 10).
     if (Treino.ativo) {
@@ -24355,7 +24361,7 @@ function esquecerOutraConta(id, { soMemoria = false } = {}) {
 //     a limpeza de cada uma e devolve o voltar de uma vez (gotcha #65). Com a
 //     fila trocando (`comAFila`), TODAS: a foto e o mapa ampliados são de um
 //     pedido dela — a foto da anterior ficava aberta por cima da fila nova, com
-//     o "Aprovar" de L6 à mostra pra um L2 (R6-1-06). Com a fila desta sessão,
+//     o "Aprovar" de L5 à mostra pra um L2 (R6-1-06). Com a fila desta sessão,
 //     só os diálogos: a foto e o mapa são de um pedido de quem entrou, e ficam;
 //   · e, ANTES de fechar a foto, a aprovação que POUSOU esperando ela fechar
 //     (`placeResolvidoPorAprovacao`) é esquecida: o pedido é da fila que sai, e
@@ -25410,7 +25416,7 @@ API.aoProvarRede = () => {
     // pelo `online` e decisões esperando envio, as respostas do esvaziamento
     // eram as únicas provas de rede, todas engolidas, e o fim dele não chama
     // nada — o perfil que faltava seguia faltando (sem nome, sem os portões de
-    // L6, sem a recusa automática e a presença) e o "invisível" pendente não
+    // L5, sem a recusa automática e a presença) e o "invisível" pendente não
     // saía, até a próxima resposta FORA de um esvaziamento: o próximo gesto
     // (auditoria da rodada 11, R11-4-01 = R11-2-07 = R11-5-02, MEDIDO nos dois
     // motores: duas decisões saindo e o perfil `null` 3 s depois do fim).

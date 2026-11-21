@@ -148,7 +148,7 @@ function abrirAba(comp, { naTela = true, visivel = true, tratados = 9 } = {}) {
     getHistoryStats: () => ({ total: { read: historico.total, rejected: 0 }, today: { read: 0, rejected: 0 } }),
     geografiaDoHistorico: () => ({ paises: new Set(), estados: new Set() }),
     maiorSequenciaDeDias: () => 0, historyTodayKey: () => '2026-10-07',
-    podeAgirComoL6Aqui: () => false,
+    podeAgirDestrutivoAqui: () => false,
     renderHistory: () => { aba.desenhos.push({ aneis: aneis(aba.h.htmlConquistas()), patente: patenteComAnel(aba.h.htmlPatente()) }); },
   };
   aba.h = rodar(deps, [lista('PATENTES'), lista('CONQUISTAS'), ...fontes(FUNCOES_DAS_CONQUISTAS)], FUNCOES_DAS_CONQUISTAS);
@@ -320,7 +320,7 @@ function montarPerfil({ aba = 'prefs', modalAberto = true } = {}) {
   const fns = ['definirPerfil', 'redesenharFiltrosComOPerfil', 'renderUndoGateUI', 'initUndoGateSeen', 'undoGateAtingido',
     'canDisableUndo', 'getUndoTreatedCount', 'getUndoUnlockThreshold', 'perfilDoPortao', 'guardarPerfilDoPortao',
     'agendarRedesenhoDoHistorico', 'historicoNaTela', 'verConquistasNaTela', 'conquistasVisiveis',
-    'conquistasComPortaoAqui', 'podeAgirComoL6Aqui', 'podeRecusarAutomaticoAqui'];
+    'conquistasComPortaoAqui', 'podeAgirDestrutivoAqui', 'podeRecusarAutomaticoAqui'];
   const h = rodar(deps, [lista('CONQUISTAS'), ...fontes(fns)], fns);
   return { h, els, desenhos, deps, AppState };
 }

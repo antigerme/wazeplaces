@@ -351,7 +351,7 @@ const FUNCOES_DAS_CONQUISTAS = ['copiaEmDia', 'lembrarTextoDaCopia', 'carregarCo
   'avaliarConquistas', 'conquistasComPortaoAqui', 'conquistasVisiveis', 'checarConquistas', 'contagemDoHistorico', 'temConquistaNova',
   'novasNaVitrine', 'atualizarSeloDeConquista', 'marcarConquistasVistas', 'historicoNaTela', 'agendarRedesenhoDoHistorico',
   'verConquistasNaTela', 'verConquistasAoVoltar', 'htmlConquistas', 'htmlPatente', 'aoGravarEmOutraAba',
-  'podeAgirComoL6Aqui', 'definirPerfil', 'abrirConquistaNova', 'abrirModalNaAba', 'switchFilterTab',
+  'podeAgirDestrutivoAqui', 'definirPerfil', 'abrirConquistaNova', 'abrirModalNaAba', 'switchFilterTab',
   // Desde v2026.10.26 o ponto mora no crachá do perfil, e o toque nele abre o
   // Histórico pelo `abrirPerfil` (o modo "perfil" do diálogo); o nome do crachá
   // sai do `rotuloDoPerfil`.
@@ -400,7 +400,7 @@ function abrirAba(comp, { perfil = null, naTela = false, visivel = true } = {}) 
     ABA_DOS_FILTROS: 'filtersTabFilters',
     FILTER_TABS: [{ tab: 'filtersTabHistory', panel: 'filtersPanelHistory' }, { tab: 'filtersTabPrefs', panel: 'filtersPanelPrefs' }],
   };
-  aba.h = rodar(deps, [lista('PATENTES'), lista('CONQUISTAS'), ...fontes(FUNCOES_DAS_CONQUISTAS)],
+  aba.h = rodar(deps, [lista('PATENTES'), lista('CONQUISTAS'), declaracao('MIN_RANK_DESTRUTIVO'), ...fontes(FUNCOES_DAS_CONQUISTAS)],
     ['temConquistaNova', 'atualizarSeloDeConquista', 'marcarConquistasVistas', 'checarConquistas', 'aoGravarEmOutraAba',
       'definirPerfil', 'abrirConquistaNova', 'agendarRedesenhoDoHistorico', 'htmlConquistas']);
   Object.assign(aba, { els, doc, AppState, deps, ponto: () => !els.conqSelo.classList.contains('hidden') });
@@ -446,12 +446,12 @@ test('R13-7-02: o perfil que CHEGA acende o ponto (`definirPerfil`) — e o toqu
   assert.equal(a.desenhos.at(-1)?.curador, 'conq-cel on nova', 'o toque não levou ao "Curador" novo');
   assert.deepEqual(comp.ler().novas, [], 'o "Curador" mostrado ficou "novo" — o ponto voltaria');
   assert.equal(a.ponto(), false);
-  // E o perfil de quem NÃO pode (um L5) apaga o ponto que só o "Curador" acendia.
+  // E o perfil de quem NÃO pode (um L4, abaixo do portão L5+AM) apaga o ponto que só o "Curador" acendia.
   const comp2 = aparelho(CURADOR_NOVO());
   const b = abrirAba(comp2, { perfil: L6 });
   b.h.atualizarSeloDeConquista();
   assert.equal(b.ponto(), true, 'PRÉ-CONDIÇÃO');
-  b.h.definirPerfil({ success: true, profile: { ...L6, rank: 4 } });
+  b.h.definirPerfil({ success: true, profile: { ...L6, rank: 3 } });
   assert.equal(b.ponto(), false, 'o perfil sem o portão deixou o ponto aceso por uma conquista escondida');
 });
 
