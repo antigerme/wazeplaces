@@ -26,6 +26,7 @@ css/tailwind.src.css
 # com 73 comentários de decisão (o gerado tem 113). Mesmo motivo do
 # `tailwind.src.css` logo acima: entrada de build não é asset.
 index.src.html
+status.src.html
 
 # ── Nada disto é frontend: são ferramentas de DEV e a suíte de testes. ────────
 # Estavam sendo publicados: 23 arquivos em `tools/` (680 KB) e 47 em `test/`

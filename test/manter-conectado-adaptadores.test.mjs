@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { webcrypto, createHash } from 'node:crypto';
 if (!globalThis.crypto) globalThis.crypto = webcrypto;
-import { mkdtempSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -65,9 +65,14 @@ test('Worker: o `scheduled` pagina o list do KV, renova as sessões devidas pelo
     assert.equal(esperas.length, 1, 'o scheduled não entregou a tarefa ao ctx.waitUntil (o runtime a cortaria)');
     assert.equal(resumo.renovadas, 5);
     assert.equal(amb.chamadas.length, 5);
-    assert.ok(kv.listagens.length >= 3, `o list não paginou (${kv.listagens.length} chamadas pra 5 entradas em páginas de 2)`);
-    assert.ok(kv.listagens.every((l) => l.prefix === 'sess_ka_'), 'o prefixo do list tem que levar o sess_ do store');
-    assert.ok(kv.listagens.some((l) => l.cursor), 'o cursor da página seguinte não foi usado');
+    // O `scheduled` agora também conta as sessões pro /status.html, DEPOIS da
+    // renovação (ver atualizarStatusPublico): um list `sess_` a mais, sem
+    // prefixo `ka_`. Separa os dois antes de medir a paginação do «Manter
+    // conectado» — senão o list da contagem pública entra na conta errada.
+    const listagensManter = kv.listagens.filter((l) => l.prefix === 'sess_ka_');
+    assert.ok(listagensManter.length >= 3, `o list não paginou (${listagensManter.length} chamadas pra 5 entradas em páginas de 2)`);
+    assert.ok(listagensManter.some((l) => l.cursor), 'o cursor da página seguinte não foi usado');
+    assert.ok(kv.listagens.some((l) => l.prefix === 'sess_'), 'a contagem pública (/status.html) não listou as sessões depois da renovação');
     for (const t of tokens) {
       assert.match((/_web_session\t(\S+)/.exec(await makeSessions({ store: storeKv, keyBytes }).loadSession(t)) || [])[1], /^ROT/, 'o cookie guardado não mudou');
     }
@@ -156,6 +161,46 @@ test('VM: o temporizador do «Manter conectado» renova a sessão devida do disc
     const store = { get: async (h) => readFileSync(join(sessDir, 'sess_' + h), 'utf8') };
     const guardado = await makeSessions({ store, keyBytes: Buffer.alloc(32, 7) }).loadSession(token);
     assert.match(/_web_session\t(\S+)/.exec(guardado)[1], /^VM\d+$/, 'o cookie guardado não mudou');
+  } finally {
+    vm.parar();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('VM: o temporizador também atualiza o /status.html — sequencial, num arquivo PRÓPRIO (STATUS_ARQUIVO), sem regravar quando nada muda', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'wp-status-'));
+  const log = join(dir, 'waze.log');
+  writeFileSync(log, '');
+  const statusArquivo = join(dir, 'status.json');
+  const vm = await subirVM({
+    SESSION_DIR: join(dir, 'sessoes'), SESSION_KEY_FILE: join(dir, 'k'), WAZE_STUB_LOG: log, WAZE_STUB_SALTO: join(dir, 'salto'),
+    STATUS_ARQUIVO: statusArquivo,
+    NODE_OPTIONS: `--import=${join(AQUI, 'manter-conectado-vm.mjs')}`,
+    MANTER_PRIMEIRA_MS: '400', MANTER_INTERVALO_MS: '100000', MANTER_PAUSA_MS: '0',
+  });
+  try {
+    const login = await pedir(vm, 'testar-cookies', { cookies: cookiesCom('STATUS-1'), region: 'row' });
+    await pedir(vm, 'perfil', { sessionToken: login.corpo.sessionToken, region: 'row', manter: true });
+
+    await esperarAte(() => existsSync(statusArquivo), 'a 1ª execução do temporizador não gravou status.json');
+    const primeiro = JSON.parse(readFileSync(statusArquivo, 'utf8'));
+    assert.equal(primeiro.sessoesAtivas, 1);
+    assert.equal(primeiro.manterConectado, 1);
+    assert.ok(primeiro.historico.length >= 1);
+    const mtime1 = statSync(statusArquivo).mtimeMs;
+
+    // A rota pública devolve o MESMO blob, mais `agora` (relógio do servidor) e a capacidade.
+    const r = await pedir(vm, 'status', {});
+    assert.equal(r.status, 200);
+    assert.equal(r.corpo.sessoesAtivas, 1);
+    assert.equal(r.corpo.manterConectado, 1);
+    assert.ok(Number.isFinite(r.corpo.agora));
+    assert.ok(r.corpo.capacidade && Number.isFinite(r.corpo.capacidade.tetoMedido));
+
+    // NADA mudou (mesma sessão, mesmo dia): a próxima execução NÃO regrava o arquivo.
+    writeFileSync(join(dir, 'salto'), ''); // dispara outra rodada do temporizador, sem mudar a população
+    await new Promise((ok) => setTimeout(ok, 700));
+    assert.equal(statSync(statusArquivo).mtimeMs, mtime1, 'regravou o status.json sem nada ter mudado — gasta cota de escrita à toa');
   } finally {
     vm.parar();
     rmSync(dir, { recursive: true, force: true });

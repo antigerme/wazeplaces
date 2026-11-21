@@ -33,6 +33,7 @@ import { dirname, join, normalize, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dispatch, makeSessions, chaveDoSecret, varrerMantidosDoStore, SESSION_TTL, PAIR_TTL, RELEITURA_TTL_STORE } from './core.mjs';
 import { KA_TTL, MANTER_CRON_MIN, pausaPadrao } from './manter-conectado.mjs';
+import { calcularStatusPublico } from './status.mjs';
 import { readBody } from './corpo.mjs';
 
 // Rede de segurança pra VM: um erro não capturado não pode derrubar o processo.
@@ -180,6 +181,30 @@ function apagarNoPrazo(arquivo, ateMs) {
 }
 const sessions = makeSessions({ store: fsStore, keyBytes });
 
+// ── Status público (/status.html) — arquivo PRÓPRIO, fora do SESSION_DIR ──
+// Fora de propósito, não por sorte: se morasse dentro do SESSION_DIR, o
+// `fsStore.list('')` (que a contagem usa pra listar as sessões) o leria de
+// volta na PRÓXIMA execução — o blob tentando se contar a si mesmo. Por
+// padrão mora em BASE_ESTADO, ao lado da pasta de sessões, nunca entra nessa
+// lista — mas BASE_ESTADO é fixo (STATE_DIRECTORY ou ~/.waze-places) e NÃO
+// segue o SESSION_DIR/SESSION_KEY_FILE quando eles são sobrepostos (é como os
+// testes rodam, numa pasta temporária): sem este env próprio, o teste
+// escreveria status.json no ~/.waze-places de quem roda a suíte.
+const STATUS_ARQUIVO = process.env.STATUS_ARQUIVO || join(BASE_ESTADO, 'status.json');
+async function statusGet() {
+  try { return await readFile(STATUS_ARQUIVO, 'utf8'); } catch { return null; }
+}
+// Mesma gravação ATÔMICA das sessões (arquivo temp + rename): um processo
+// derrubado no meio não pode deixar o blob truncado (ilegível na leitura
+// seguinte, só isso — nunca derruba a página, ver `handleStatusPublico`).
+async function statusPut(json) {
+  await mkdir(dirname(STATUS_ARQUIVO), { recursive: true, mode: 0o700 });
+  const temp = STATUS_ARQUIVO + '.tmp_' + process.pid + '_' + randomBytes(4).toString('hex');
+  await writeFile(temp, json, { mode: 0o600 });
+  try { await rename(temp, STATUS_ARQUIVO); } catch (e) { await unlink(temp).catch(() => {}); throw e; }
+}
+const statusStore = { get: statusGet };
+
 // ── GC de sessões órfãs ─────────────────────────────────────────────────────
 // O fsStore só apaga uma sessão quando ela é reacessada (mtime no .get). Quem
 // nunca mais volta deixa o blob no disco pra sempre → cresce sem limite. Varre
@@ -278,6 +303,17 @@ async function manterConectado() {
       ...(MANTER_PAUSA_FIXA_MS !== null ? { pausa: () => new Promise((ok) => setTimeout(ok, MANTER_PAUSA_FIXA_MS)) } : { pausa: pausaPadrao }),
     });
     console.log('manter-conectado', JSON.stringify(resumo));
+    // SEQUENCIAL, depois da renovação (nunca em paralelo — ver o comentário
+    // em worker/index.mjs: a mesma regra vale aqui, mesmo sem o teto de
+    // subrequisições do Cloudflare, pra o comportamento ser IGUAL nos dois
+    // adaptadores). Roda mesmo se a renovação acima falhou.
+    try {
+      const anterior = JSON.parse((await statusGet()) || 'null');
+      const { blob, mudou } = await calcularStatusPublico({ listar: (p) => fsStore.list(p), anterior });
+      if (mudou) await statusPut(JSON.stringify(blob));
+    } catch (e) {
+      console.error('status-publico falhou:', e && e.message);
+    }
     return resumo;
   } catch (e) {
     console.error('manter-conectado falhou:', e && e.message); // nunca derruba o processo
@@ -389,6 +425,7 @@ const ALLOWED_ROOT_FILES = new Set([
   // arquivo de 178 KB com os comentários de decisão — duas URLs, dois
   // conteúdos, 67 KB de diferença. O `.assetsignore` faz o mesmo no Cloudflare.
   '/index.html',
+  '/status.html',
   '/manifest.json',
   '/service-worker.js',
   '/favicon.ico',
@@ -437,6 +474,16 @@ function isAllowedAsset(path) {
 // 2026-09-29): o mesmo endereço com duas respostas (gotcha #14).
 const APELIDOS_DO_INDICE = new Map([['/index.html', '/'], ['/index', '/'], ['/index/', '/index']]);
 
+// Página nova publicada SEM extensão na URL: o Cloudflare serve `/status` com
+// o conteúdo de `status.html` e manda `/status.html` com 307 pra `/status` —
+// o MESMO `html_handling: auto-trailing-slash` padrão que já faz isso com
+// `/index.html` (ver APELIDOS_DO_INDICE e o comentário dele), generalizado por
+// ANALOGIA (mesmo mecanismo do Cloudflare, não medido de novo página a
+// página). `bonito → arquivo`: `bonito` é servido com 200 (o conteúdo de
+// `arquivo`), e `/arquivo` redireciona pra `bonito`. `test/vm-estaticos.test.mjs`
+// cobra os dois sentidos.
+const PAGINAS_SEM_EXTENSAO = new Map([['/status', '/status.html']]);
+
 // Resolve o caminho pedido: `{ safe, file }` (o arquivo a servir),
 // `{ redirecionar }` (um apelido do índice) ou `null` (nada aqui). Fonte única
 // do GET e da decisão 405 × 404 dos outros métodos.
@@ -456,6 +503,10 @@ function resolverEstatico(urlPath) {
   const normal = normalize(rel);
   const isRoot = rel === '' || normal === '/';
   if (!isRoot && APELIDOS_DO_INDICE.has(normal)) return { redirecionar: APELIDOS_DO_INDICE.get(normal) };
+  for (const [bonito, arquivo] of PAGINAS_SEM_EXTENSAO) {
+    if (normal === arquivo) return { redirecionar: bonito };
+    if (normal === bonito) { rel = arquivo; break; }
+  }
   // A raiz resolve pro índice do diretório, como qualquer servidor estático.
   // NÃO há mais remapeamento: o `index.html` JÁ É o minificado (o fonte é o
   // `index.src.html`), então a raiz serve o arquivo que o Cloudflare serve em
@@ -586,7 +637,7 @@ const server = createServer(async (req, res) => {
       // No Node o processo segue vivo depois da resposta: o que o handler deixa
       // correndo termina sozinho. Só não pode virar rejeição sem dono.
       const aoFundo = (p) => { Promise.resolve(p).catch(() => {}); };
-      const { status, body } = await dispatch(route, data, { sessions, aoFundo });
+      const { status, body } = await dispatch(route, data, { sessions, aoFundo, statusStore });
       res.writeHead(status, API_HEADERS);
       res.end(JSON.stringify(body));
       return;

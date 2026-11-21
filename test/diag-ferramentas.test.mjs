@@ -32,7 +32,7 @@ const CORE = readFileSync(join(ROOT, 'server/core.mjs'), 'utf8');
 // com o core de verdade —, e estava na lista de leitura da ferramenta até a
 // auditoria de 2026-09-26. A lista sai do ROUTES do core, então rota nova sem
 // classificação reprova aqui em vez de passar despercebida.
-const SO_LE = new Set(['buscar-places', 'lista-paises', 'lista-estados']);
+const SO_LE = new Set(['buscar-places', 'lista-paises', 'lista-estados', 'status']);
 const RECUSADAS = new Set(['sessao', 'parear', 'testar-cookies', 'perfil', 'marcar-lido', 'guardar-pedido',
   'validar-place', 'excluir-foto', 'renomear-local', 'presenca-waze', 'presenca-app', 'chat']);
 const conjunto = (nome) => {

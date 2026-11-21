@@ -53,43 +53,59 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..');
-const FONTE = join(RAIZ, 'index.src.html');
-const SAIDA = join(RAIZ, 'index.html');
 const MINIFICADOR = 'html-minifier-terser@7.2.0';   // fixo: versão que muda, saída que muda
+
+// `index.html` tem o script inline do tema (hash na CSP); `status.html` não
+// tem inline NENHUM — só `<script src>`. O mesmo gerador serve as duas, e o
+// confere do hash abaixo é condicional: só EXIGE bater quando o FONTE tem
+// algum inline pra começo. Página sem inline que ganhasse um por acidente
+// seria pega pelo `!hSaida` também ficando preenchido sem par no fonte.
+const PAGINAS = [
+  { fonte: 'index.src.html', saida: 'index.html' },
+  { fonte: 'status.src.html', saida: 'status.html' },
+];
 
 const hashDoInline = (html) => {
   const m = /<script>([\s\S]*?)<\/script>/.exec(html);
   return m ? createHash('sha256').update(m[1], 'utf8').digest('base64') : null;
 };
 
-const r = spawnSync('npx', ['--yes', MINIFICADOR,
-  '--remove-comments',
-  '--collapse-whitespace',
-  // `conservative` mantém UM espaço onde havia espaço: sem ele, `<b>a</b> <i>b</i>`
-  // vira `<b>a</b><i>b</i>` e as palavras colam na tela.
-  '--conservative-collapse',
-  // O bloco inline inteiro sai intocado — ver a nota do hash acima.
-  '--ignore-custom-fragments', '<script>[\\s\\S]*?</script>',
-  '-o', SAIDA, FONTE], { stdio: ['ignore', 'ignore', 'pipe'] });
-if (r.status !== 0) {
-  console.error(`✗ minificação falhou:\n${r.stderr?.toString() || '(sem stderr)'}`);
-  process.exit(1);
-}
-
-const fonte = readFileSync(FONTE, 'utf8');
-const saida = readFileSync(SAIDA, 'utf8');
-
-const hFonte = hashDoInline(fonte), hSaida = hashDoInline(saida);
-if (!hFonte || hFonte !== hSaida) {
-  console.error(`✗ o hash do script inline mudou (${hFonte} → ${hSaida}).`
-    + '\n  A CSP bloquearia o script do tema EM SILÊNCIO. Saída descartada.');
-  // NÃO escrevemos o fonte na saída: `SAIDA` agora é o `index.html` que a raiz
-  // serve, e gravar o cru ali seria voltar a servir 67 KB a mais COM o diff do
-  // CI passando (regenerar daria o mesmo cru). Falhar sem escrever deixa o
-  // arquivo commitado intacto, e o guard de "está minificado" pega o resto.
-  process.exit(1);
-}
-
 const kb = (s) => (Buffer.byteLength(s) / 1024).toFixed(1) + ' KB';
-console.log(`✓ index.html: ${kb(fonte)} → ${kb(saida)}`
-  + ` (-${Math.round(100 * (fonte.length - saida.length) / fonte.length)}%) · hash do inline preservado`);
+
+for (const { fonte: nomeFonte, saida: nomeSaida } of PAGINAS) {
+  const FONTE = join(RAIZ, nomeFonte);
+  const SAIDA = join(RAIZ, nomeSaida);
+
+  const r = spawnSync('npx', ['--yes', MINIFICADOR,
+    '--remove-comments',
+    '--collapse-whitespace',
+    // `conservative` mantém UM espaço onde havia espaço: sem ele, `<b>a</b> <i>b</i>`
+    // vira `<b>a</b><i>b</i>` e as palavras colam na tela.
+    '--conservative-collapse',
+    // O bloco inline inteiro sai intocado — ver a nota do hash acima.
+    '--ignore-custom-fragments', '<script>[\\s\\S]*?</script>',
+    '-o', SAIDA, FONTE], { stdio: ['ignore', 'ignore', 'pipe'] });
+  if (r.status !== 0) {
+    console.error(`✗ minificação de ${nomeFonte} falhou:\n${r.stderr?.toString() || '(sem stderr)'}`);
+    process.exit(1);
+  }
+
+  const fonte = readFileSync(FONTE, 'utf8');
+  const saida = readFileSync(SAIDA, 'utf8');
+
+  const hFonte = hashDoInline(fonte), hSaida = hashDoInline(saida);
+  if (hFonte !== hSaida) {
+    console.error(`✗ ${nomeSaida}: o hash do script inline mudou (${hFonte} → ${hSaida}).`
+      + '\n  A CSP bloquearia o script do tema EM SILÊNCIO. Saída descartada.');
+    // NÃO escrevemos o fonte na saída: `SAIDA` agora é o arquivo que a raiz
+    // serve, e gravar o cru ali seria voltar a servir o fonte comentado COM o
+    // diff do CI passando (regenerar daria o mesmo cru). Falhar sem escrever
+    // deixa o arquivo commitado intacto, e o guard de "está minificado" pega o
+    // resto.
+    process.exit(1);
+  }
+
+  console.log(`✓ ${nomeSaida}: ${kb(fonte)} → ${kb(saida)}`
+    + ` (-${Math.round(100 * (fonte.length - saida.length) / fonte.length)}%)`
+    + (hFonte ? ' · hash do inline preservado' : ''));
+}
