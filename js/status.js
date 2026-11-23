@@ -14,6 +14,21 @@
 // confere a paridade com o servidor, pelo MESMO padrão.
 const MANTER_CRON_MIN_EXIBIDO = 30;
 
+// Espelha STATUS_ATUALIZACAO_MAX_MIN (server/status.mjs), MESMO padrão acima.
+const STATUS_ATUALIZACAO_MAX_MIN_EXIBIDO = 240;
+
+// Além do heartbeat (STATUS_ATUALIZACAO_MAX_MIN_EXIBIDO), uma folga de DOIS
+// ciclos do cron — UM só apertava demais: o carimbo é gravado DEPOIS da
+// varredura (0-20 s de duração), então o teto do heartbeat pode só fechar no
+// ciclo SEGUINTE a quando a idade realmente passou dele, e mais o atraso de
+// leitura do KV (até ~60 s) e o arredondamento de `minutosDesde`. Com folga
+// de um ciclo só, uma página SAUDÁVEL passava por "desatualizado" nos
+// minutos antes do heartbeat — o falso positivo que a sentinela do projeto
+// proíbe (ver docs/gotchas.md #28). Depois disso, nem o heartbeat gravou —
+// sinal de que a varredura pode ter parado, não só que a contagem está
+// estável.
+const STATUS_DESATUALIZADO_APOS_MIN = STATUS_ATUALIZACAO_MAX_MIN_EXIBIDO + 2 * MANTER_CRON_MIN_EXIBIDO;
+
 // Zona de capacidade, por LIMIAR — pura, testável sem DOM.
 function zonaDaCapacidade(manterConectado, capacidade) {
   if (manterConectado <= capacidade.confortavel) return 'tranquila';
@@ -27,6 +42,19 @@ function zonaDaCapacidade(manterConectado, capacidade) {
 function minutosDesde(agoraServidor, atualizadoEm) {
   if (!Number.isFinite(agoraServidor) || !Number.isFinite(atualizadoEm)) return null;
   return Math.max(0, Math.round((agoraServidor - atualizadoEm) / 60000));
+}
+
+// A frase do "atualizado há": com o heartbeat (STATUS_ATUALIZACAO_MAX_MIN),
+// a idade normal pode passar de 1h — "atualizado há 243 min" lê mal; em horas
+// e minutos fica legível em qualquer faixa.
+function fraseDeAtualizacao(min) {
+  if (min < 1) return t('status.sessoes.atualizadoAgora');
+  if (min < 60) return t('status.sessoes.atualizado', { min });
+  const h = Math.floor(min / 60);
+  const resto = min % 60;
+  return resto === 0
+    ? t('status.sessoes.atualizadoHorasExatas', { h })
+    : t('status.sessoes.atualizadoHoras', { h, min: resto });
 }
 
 // 'YYYY-MM-DD' → Date ao meio-dia UTC (nunca a meia-noite: evita o dia vizinho
@@ -80,12 +108,33 @@ function montarGauge(manterConectado, capacidade) {
     + ZONA_COR[zona].texto + ' ' + ZONA_COR[zona].fundo;
 }
 
+// Alterna os DOIS selos "ao vivo" (cabeçalho e cartão, um por breakpoint —
+// nunca os dois juntos) pro estado desatualizado: cor E texto mudam junto
+// (WCAG 1.4.1 — a cor nunca é o único sinal), e o ponto some de pulsar.
+function marcarSeloAoVivo(idSelo, idPonto, idTexto, desatualizado) {
+  const selo = document.getElementById(idSelo);
+  const ponto = document.getElementById(idPonto);
+  selo.classList.toggle('text-emerald-700', !desatualizado);
+  selo.classList.toggle('bg-emerald-50', !desatualizado && idSelo === 'aoVivoHeader');
+  selo.classList.toggle('text-slate-500', desatualizado);
+  selo.classList.toggle('bg-slate-100', desatualizado && idSelo === 'aoVivoHeader');
+  ponto.classList.toggle('parada', desatualizado);
+  document.getElementById(idTexto).textContent = desatualizado
+    ? t(idSelo === 'aoVivoHeader' ? 'status.live.headerDesatualizado' : 'status.live.cardDesatualizado')
+    : t(idSelo === 'aoVivoHeader' ? 'status.live.header' : 'status.live.card');
+}
+
 function montarSessoes(blob) {
   document.getElementById('sessoesNumero').textContent = String(blob.sessoesAtivas);
   document.getElementById('sessoesManter').innerHTML = t('status.sessoes.manter', { n: blob.manterConectado });
   const min = minutosDesde(blob.agora, blob.atualizadoEm);
-  document.getElementById('sessoesAtualizado').textContent = min === null
-    ? '' : (min < 1 ? t('status.sessoes.atualizadoAgora') : t('status.sessoes.atualizado', { min }));
+  document.getElementById('sessoesAtualizado').textContent = min === null ? '' : fraseDeAtualizacao(min);
+  // Desatualizado = nem o heartbeat gravou no prazo dele (STATUS_DESATUALIZADO_APOS_MIN):
+  // sinal de que a varredura pode ter parado, não só que a contagem está estável
+  // (ver o comentário da constante em server/status.mjs).
+  const desatualizado = min !== null && min >= STATUS_DESATUALIZADO_APOS_MIN;
+  marcarSeloAoVivo('aoVivoHeader', 'pontoAoVivoHeader', 'textoAoVivoHeader', desatualizado);
+  marcarSeloAoVivo('aoVivoCard', 'pontoAoVivoCard', 'textoAoVivoCard', desatualizado);
 }
 
 function montarTendencia(historico) {

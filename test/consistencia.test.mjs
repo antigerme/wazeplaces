@@ -716,6 +716,19 @@ test('o "em até N minutos" do /status.html == MANTER_CRON_MIN, pela variável, 
   }
 });
 
+// O teto do heartbeat (STATUS_ATUALIZACAO_MAX_MIN, server/status.mjs) decide
+// quando a página /status.html passa pro estado "desatualizado" — achado
+// medindo em produção (2026-11-23): "atualizado há 413 min" ao lado do selo
+// "dados ao vivo" era dado incorreto com o cron parado OU só sem mudança.
+test('STATUS_ATUALIZACAO_MAX_MIN_EXIBIDO (js/status.js) == STATUS_ATUALIZACAO_MAX_MIN (server/status.mjs)', () => {
+  const m = /^const STATUS_ATUALIZACAO_MAX_MIN_EXIBIDO = (\d+);/m.exec(STATUS_JS);
+  assert.ok(m, 'sumiu a constante STATUS_ATUALIZACAO_MAX_MIN_EXIBIDO do js/status.js');
+  const min = Number(m[1]);
+  const doServidor = Number((/export const STATUS_ATUALIZACAO_MAX_MIN = (\d+);/.exec(read('server/status.mjs')) || [])[1]);
+  assert.ok(doServidor > 0, 'CONTROLE: não achei STATUS_ATUALIZACAO_MAX_MIN no servidor');
+  assert.equal(min, doServidor, `a página usa ${min} min e o heartbeat do servidor é de ${doServidor} min`);
+});
+
 // As três miniaturas da prévia existem e são as PEQUENAS. Apontar pras capturas
 // originais funciona igual na tela e custa 432 KB em vez de 63 KB — na tela de
 // entrada, muitas vezes em dado móvel. É o tipo de regressão que ninguém vê.
