@@ -138,11 +138,11 @@ function montarTendencia(historico) {
   svg.addEventListener('mouseleave', sair);
 }
 
-// 98 instalações no Chrome Web Store, medido em 2026-11-20 na página pública
+// 99 instalações no Chrome Web Store, medido em 2026-11-23 na página pública
 // da loja (https://chromewebstore.google.com/detail/.../dpinfpcoggnilplfgkpnkhbmfokhnhnn).
 // NÃO é dinâmico — não existe API pública pra isso (ver CLAUDE.md); atualizar
 // este número é um ato manual, deliberado, quando alguém medir de novo.
-const EXTENSAO_INSTALACOES_CHROME = 98;
+const EXTENSAO_INSTALACOES_CHROME = 99;
 
 function montarExtensao() {
   document.getElementById('extensaoInstalacoes').textContent = t('status.extensao.instalacoes', { n: EXTENSAO_INSTALACOES_CHROME });

@@ -8,6 +8,11 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.11.23-01
+**O número de instalações da extensão no `/status.html` foi atualizado** (98 → 99, medido de novo na página pública da Chrome Web Store). Continua sendo um valor manual: não existe API pública pra isso, e buscar esse número a cada build quebraria a reprodutibilidade do `npm run html` (o mesmo commit geraria páginas diferentes dependendo de quando o build rodou) e dependeria de uma página externa que pode mudar de estrutura sem aviso.
+
+---
+
 ## v2026.11.21-03
 **O portão dos recursos destrutivos baixou de L6+AM pra L5+AM.** Aprovar a foto nova, excluir uma foto do local, corrigir o nome e a recusa automática passam a exigir **L5 + Area Manager** (ou staff), em vez de L6. O resto não muda: a decisão continua inteira na tela (a foto ou a fachada ampliada é o dado completo), e quem não tem o nível simplesmente não vê os botões — as duas conquistas **Curador** e **Corretor** seguem com o mesmo portão.
 
