@@ -8,6 +8,11 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.11.23-02
+**O `/status.html` dizia "atualizado há 413 min" do lado do selo "dados ao vivo" — achado medindo em produção.** A contagem de sessões e de «Manter conectado» só era regravada quando o NÚMERO mudava; com a contagem estável por horas (madrugada, comunidade pequena), o carimbo `atualizadoEm` ficava congelado enquanto o relógio seguia andando — e o mesmo sintoma esconderia um cron de verdade MORTO, já que a página não distinguia os dois casos. Agora o cron regrava de novo depois de 4h sem mudança nenhuma (um "heartbeat", no máximo 6 escritas extras de KV por dia — bem dentro da cota de 1.000/dia), só pra provar que a varredura rodou; "atualizado há" formata em horas e minutos quando passa de 1h; e passando de 5h sem nenhuma gravação (nem o heartbeat — a folga extra evita acusar uma página saudável nos minutos antes do heartbeat fechar), os dois selos "ao vivo" viram "dados desatualizados" — cor e texto juntos, nunca só a cor.
+
+**O rótulo "Editores com sessão ativa" estava errado — vira "Sessões ativas".** É contagem de SESSÕES, não de pessoas (o próprio gráfico logo abaixo já dizia "Sessões ativas" pro mesmo número — duas nomenclaturas pro mesmo dado). Com a Passagem do computador (QR → celular), um editor comum hoje abre duas sessões pra uma só pessoa.
+
 ## v2026.11.23-01
 **O número de instalações da extensão no `/status.html` foi atualizado** (98 → 99, medido de novo na página pública da Chrome Web Store). Continua sendo um valor manual: não existe API pública pra isso, e buscar esse número a cada build quebraria a reprodutibilidade do `npm run html` (o mesmo commit geraria páginas diferentes dependendo de quando o build rodou) e dependeria de uma página externa que pode mudar de estrutura sem aviso.
 

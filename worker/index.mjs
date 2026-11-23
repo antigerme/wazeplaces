@@ -108,8 +108,11 @@ async function atualizarStatusPublico(env) {
     let anterior = null;
     try { anterior = brutoAnterior ? JSON.parse(brutoAnterior) : null; } catch { anterior = null; }
     const { blob, mudou } = await calcularStatusPublico({ listar: (p) => storeDoKv(env).list(p), anterior });
-    // Só grava quando algo mudou de verdade: a escrita de KV é cota escassa
-    // (1.000/dia), dividida com o app e com o «Manter conectado».
+    // Grava quando a contagem mudou OU faz tempo demais que não grava (o
+    // heartbeat de STATUS_ATUALIZACAO_MAX_MIN, ver server/status.mjs): a
+    // escrita de KV é cota escassa (1.000/dia), dividida com o app e com o
+    // «Manter conectado», mas pular SEMPRE que nada muda congela o
+    // "atualizado há" por horas numa página que promete "dados ao vivo".
     if (mudou) await env.SESSIONS.put(STATUS_CHAVE_KV, JSON.stringify(blob));
     return { sessoesAtivas: blob.sessoesAtivas, manterConectado: blob.manterConectado, gravou: mudou };
   } catch (err) {

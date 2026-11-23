@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
-import { contarChaves, diaChaveUTC, atualizarHistorico, calcularStatusPublico, STATUS_HISTORICO_DIAS } from '../server/status.mjs';
+import { contarChaves, diaChaveUTC, atualizarHistorico, calcularStatusPublico, STATUS_HISTORICO_DIAS, STATUS_ATUALIZACAO_MAX_MIN } from '../server/status.mjs';
 import { dispatch } from '../server/core.mjs';
 import { STATUS_CAPACIDADE_CONFORTAVEL, STATUS_CAPACIDADE_LIMITE, STATUS_CAPACIDADE_TETO_MEDIDO } from '../server/manter-conectado.mjs';
 import { PAISES_OBRIGATORIOS } from '../tools/paises-validacao.mjs';
@@ -107,6 +107,42 @@ test('calcularStatusPublico: primeira execução (sem anterior) sempre MUDA; exe
   const r4 = await calcularStatusPublico({ listar: async () => chaves, anterior: r1.blob, agoraMs: () => amanha });
   assert.equal(r4.mudou, true);
   assert.equal(r4.blob.historico.length, 2);
+});
+
+// Achado medindo em produção (2026-11-23): com a contagem estável por horas
+// (madrugada, comunidade pequena), `atualizadoEm` ficava congelado — mesmo
+// sintoma de um cron MORTO. O heartbeat força `mudou=true` depois de
+// STATUS_ATUALIZACAO_MAX_MIN, mesmo sem nenhuma mudança de contagem.
+test('calcularStatusPublico: heartbeat — sem mudança de contagem, grava de novo depois de STATUS_ATUALIZACAO_MAX_MIN (prova que a varredura rodou)', async () => {
+  const agora = Date.UTC(2026, 10, 23, 10, 0, 0);
+  const chaves = [HEX64, 'ka_' + HEX64];
+  const r1 = await calcularStatusPublico({ listar: async () => chaves, anterior: null, agoraMs: () => agora });
+  assert.equal(r1.mudou, true);
+
+  const tetoMs = STATUS_ATUALIZACAO_MAX_MIN * 60000;
+
+  // UM minuto ANTES do teto, mesma contagem: ainda não precisa gravar.
+  const antesDoTeto = await calcularStatusPublico({ listar: async () => chaves, anterior: r1.blob, agoraMs: () => agora + tetoMs - 60000 });
+  assert.equal(antesDoTeto.mudou, false, 'gravou antes do teto do heartbeat, sem mudança nenhuma — gasta cota à toa');
+
+  // EXATAMENTE no teto: grava, mesmo com a contagem idêntica.
+  const noTeto = await calcularStatusPublico({ listar: async () => chaves, anterior: r1.blob, agoraMs: () => agora + tetoMs });
+  assert.equal(noTeto.mudou, true, 'não gravou no teto do heartbeat — "atualizado há" ficaria congelado pra sempre com a contagem estável');
+  assert.equal(noTeto.blob.sessoesAtivas, 1); // a contagem em si não mudou
+  assert.equal(noTeto.blob.atualizadoEm, agora + tetoMs); // mas o carimbo é FRESCO
+
+  // DEPOIS do teto (ex.: o cron atrasou um ciclo): também grava.
+  const depoisDoTeto = await calcularStatusPublico({ listar: async () => chaves, anterior: r1.blob, agoraMs: () => agora + tetoMs + 5 * 60000 });
+  assert.equal(depoisDoTeto.mudou, true);
+});
+
+test('calcularStatusPublico: blob anterior com atualizadoEm ilegível (formato antigo) não lança — se autocura gravando de novo', async () => {
+  const agora = Date.UTC(2026, 10, 23, 10, 0, 0);
+  const chaves = [HEX64];
+  const anteriorQuebrado = { atualizadoEm: null, sessoesAtivas: 1, manterConectado: 0, historico: [{ dia: '2026-11-23', sessoesAtivas: 1, manterConectado: 0 }] };
+  const r = await calcularStatusPublico({ listar: async () => chaves, anterior: anteriorQuebrado, agoraMs: () => agora });
+  assert.equal(r.mudou, true, 'atualizadoEm ilegível devia se autocurar gravando de novo, não travar em false pra sempre');
+  assert.equal(r.blob.atualizadoEm, agora);
 });
 
 // ─── A rota `status` do core ────────────────────────────────────────────────

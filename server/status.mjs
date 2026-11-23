@@ -22,6 +22,21 @@ const EH_MANTER = /^ka_[0-9a-f]{64}$/;
 // é irrisório: 90 baldes pequenos no blob, nada por sessão).
 export const STATUS_HISTORICO_DIAS = 90;
 
+// Teto do "atualizado há": achado medindo em produção (2026-11-23) — com a
+// contagem estável por horas (madrugada, comunidade pequena), `atualizadoEm`
+// ficava congelado na última vez que o número MUDOU, enquanto `agora` seguia
+// andando (`atualizado há 413 min` ao lado do selo "dados ao vivo"). Mesmo
+// sintoma de um cron MORTO — a página não distinguia os dois. Por isso
+// `calcularStatusPublico` agora também marca `mudou=true` quando faz mais de
+// STATUS_ATUALIZACAO_MAX_MIN desde a última gravação, mesmo sem mudança de
+// contagem: o adaptador grava de novo, só pra provar que a varredura rodou.
+// Custo: no máximo 1 escrita extra a cada STATUS_ATUALIZACAO_MAX_MIN (6/dia
+// com 240 min), longe da cota de 1.000/dia (18 entradas «Manter conectado»
+// hoje, teto medido de 80-125 — ver server/manter-conectado.mjs). Escolhido
+// 4h (câmbio entre custo e provar vida): revise se a comunidade crescer perto
+// do teto medido.
+export const STATUS_ATUALIZACAO_MAX_MIN = 240;
+
 // Conta as chaves BRUTAS do store (como `store.list('')` devolve: sem o
 // prefixo de arquivo/KV, mas com os prefixos lógicos como `ka_`).
 export function contarChaves(chaves) {
@@ -69,8 +84,12 @@ export function atualizarHistorico(historicoAnterior, dia, contagem, { maxDias =
  *   anterior  o blob já gravado (ou null, no primeiro boot)
  *
  * Devolve `{ blob, mudou }`. `mudou` é falso quando a contagem E o histórico
- * são EXATAMENTE os de antes — o adaptador pula a gravação (o KV tem cota de
- * escrita, 1.000/dia, dividida com o app e com o «Manter conectado»).
+ * são EXATAMENTE os de antes E a última gravação é recente (dentro de
+ * STATUS_ATUALIZACAO_MAX_MIN) — só então o adaptador pula a gravação (o KV
+ * tem cota de escrita, 1.000/dia, dividida com o app e com o «Manter
+ * conectado»). Depois de STATUS_ATUALIZACAO_MAX_MIN sem gravar, `mudou` vira
+ * true mesmo com a contagem igual: é o "heartbeat" que prova que a varredura
+ * rodou, não só que o número mudou (ver o comentário da constante).
  */
 export async function calcularStatusPublico({ listar, agoraMs = () => Date.now(), anterior = null } = {}) {
   const agora = typeof agoraMs === 'function' ? agoraMs() : agoraMs;
@@ -83,9 +102,13 @@ export async function calcularStatusPublico({ listar, agoraMs = () => Date.now()
   const dia = diaChaveUTC(agora);
   const historico = atualizarHistorico(anterior && anterior.historico, dia, contagem);
   const blob = { atualizadoEm: agora, ...contagem, historico };
-  const mudou = !anterior
+  const conteudoMudou = !anterior
     || anterior.sessoesAtivas !== contagem.sessoesAtivas
     || anterior.manterConectado !== contagem.manterConectado
     || JSON.stringify(anterior.historico || []) !== JSON.stringify(historico);
+  // Sem carimbo anterior LEGÍVEL (blob de formato antigo, ou nenhum): idade
+  // infinita — força o heartbeat e se autocura, sem lançar.
+  const idadeMs = anterior && Number.isFinite(anterior.atualizadoEm) ? agora - anterior.atualizadoEm : Infinity;
+  const mudou = conteudoMudou || idadeMs >= STATUS_ATUALIZACAO_MAX_MIN * 60000;
   return { blob, mudou };
 }

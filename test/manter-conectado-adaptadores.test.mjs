@@ -167,7 +167,7 @@ test('VM: o temporizador do «Manter conectado» renova a sessão devida do disc
   }
 });
 
-test('VM: o temporizador também atualiza o /status.html — sequencial, num arquivo PRÓPRIO (STATUS_ARQUIVO), sem regravar quando nada muda', async () => {
+test('VM: o temporizador também atualiza o /status.html — sequencial, num arquivo PRÓPRIO (STATUS_ARQUIVO), sem regravar quando nada muda dentro do teto do heartbeat', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'wp-status-'));
   const log = join(dir, 'waze.log');
   writeFileSync(log, '');
@@ -197,7 +197,10 @@ test('VM: o temporizador também atualiza o /status.html — sequencial, num arq
     assert.ok(Number.isFinite(r.corpo.agora));
     assert.ok(r.corpo.capacidade && Number.isFinite(r.corpo.capacidade.tetoMedido));
 
-    // NADA mudou (mesma sessão, mesmo dia): a próxima execução NÃO regrava o arquivo.
+    // NADA mudou (mesma sessão, mesmo dia), e a 2ª rodada vem milissegundos
+    // depois — bem dentro do teto do heartbeat (STATUS_ATUALIZACAO_MAX_MIN,
+    // horas): a próxima execução NÃO regrava o arquivo. Passado o teto, regrava
+    // mesmo sem mudança — ver os testes do heartbeat em test/status.test.mjs.
     writeFileSync(join(dir, 'salto'), ''); // dispara outra rodada do temporizador, sem mudar a população
     await new Promise((ok) => setTimeout(ok, 700));
     assert.equal(statSync(statusArquivo).mtimeMs, mtime1, 'regravou o status.json sem nada ter mudado — gasta cota de escrita à toa');

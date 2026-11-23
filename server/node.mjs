@@ -309,6 +309,8 @@ async function manterConectado() {
     // adaptadores). Roda mesmo se a renovação acima falhou.
     try {
       const anterior = JSON.parse((await statusGet()) || 'null');
+      // Grava quando a contagem mudou OU faz tempo demais que não grava (o
+      // heartbeat de STATUS_ATUALIZACAO_MAX_MIN, ver server/status.mjs).
       const { blob, mudou } = await calcularStatusPublico({ listar: (p) => fsStore.list(p), anterior });
       if (mudou) await statusPut(JSON.stringify(blob));
     } catch (e) {
