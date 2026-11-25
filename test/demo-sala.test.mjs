@@ -257,8 +257,10 @@ test('referência: só se foi pedida; não conta como pessoa nem gasta vaga', ()
   assert.equal(est.ordem.includes('ref'), true);
   assert.equal(visao(est, 'host', null, TA + 2).naSala, 2, 'o apresentador não é "pessoa na sala"');
   assert.equal(resultado(est).pessoas.length, 2);
-  assert.equal(resultado(est).ref, 'R---');
+  assert.equal(resultado(est).ref, '*---', 'o palco projeta: o voto de referência só diz que foi dado, nunca qual');
   assert.equal(aplicar(est, host('votarRef', { idx: 1, voto: 'L' }), TA + 3).repetido, true, 'a referência também vale a primeira');
+  aplicar(est, host('encerrar'), TA + 4);
+  assert.equal(resultado(est).ref, 'R---', 'no fim, o voto de verdade');
 });
 
 test('referência: ESCONDIDA do convidado até a revelação; o apresentador sempre vê a dele', () => {
@@ -268,9 +270,11 @@ test('referência: ESCONDIDA do convidado até a revelação; o apresentador sem
   const antes = visao(est, 'convidado', pid(1), TA + 3);
   assert.ok(!('refAtual' in antes), 'antes da revelação o convidado não pode saber');
   assert.ok(!JSON.stringify(antes).includes('"ref"'));
-  assert.equal(visao(est, 'host', null, TA + 3).ref, 'P---');
+  assert.equal(visao(est, 'host', null, TA + 3).ref, '*---', 'o apresentador vota numa tela que a sala vê: a confirmação é neutra');
+  assert.ok(!JSON.stringify(visao(est, 'host', null, TA + 3)).includes('P---'), 'o voto de verdade não pode estar em lugar nenhum da visão antes da revelação');
   aplicar(est, host('revelar'), TA + 4);
   assert.equal(visao(est, 'convidado', pid(1), TA + 5).refAtual, 'P');
+  assert.equal(visao(est, 'host', null, TA + 5).ref, 'P---', 'revelado, o pedido mostra a referência');
 });
 
 // ── o que cada um VÊ ────────────────────────────────────────────────────────
@@ -295,10 +299,14 @@ test('visão do apresentador: no sincronizado a barra do pedido em foco espera a
   assert.deepEqual(visao(est, 'host', null, TA + 2).pedidos[0], { n: 1 });
   aplicar(est, host('revelar'), TA + 3);
   assert.deepEqual(visao(est, 'host', null, TA + 4).pedidos[0], { R: 1, L: 0, P: 0, n: 1 });
+  // No livre a divisão NÃO enche ao vivo (a barra colorida orientaria quem ainda vota): só a contagem, e a
+  // divisão sai quando a demo acaba.
   const livre = emAndamento({ modo: 'livre' });
   aplicar(livre, { tipo: 'votar', parte: pid(1), idx: 2, voto: 'P' }, TA + 1);
-  assert.deepEqual(visao(livre, 'host', null, TA + 2).pedidos[1], { R: 0, L: 0, P: 1, n: 1 });
-  assert.deepEqual(visao(livre, 'host', null, TA + 2).pessoas[0], { nome: 'Pessoa1', feitos: 1, terminou: false });
+  assert.deepEqual(visao(livre, 'host', null, TA + 2).pedidos[1], { n: 1 });
+  assert.deepEqual(visao(livre, 'host', null, TA + 2).pessoas[0], { nome: 'Pessoa1', pais: null, feitos: 1, terminou: false });
+  aplicar(livre, host('encerrar'), TA + 3);
+  assert.deepEqual(visao(livre, 'host', null, TA + 4).pedidos[1], { R: 0, L: 0, P: 1, n: 1 });
 });
 
 test('visão: o saguão mostra os nomes (a sala enche); depois a lista sai do caminho', () => {
@@ -372,8 +380,15 @@ test('resultado: contagens por pedido e a matriz completa por pessoa', () => {
   for (const [n, votos] of [[1, ['R', 'L', 'P']], [2, ['R', 'R', 'P']]]) {
     votos.forEach((v, i) => aplicar(est, { tipo: 'votar', parte: pid(n), idx: i + 1, voto: v }, TA + i));
   }
+  // No meio da demo o resultado NÃO entrega a divisão nem quem votou o quê (é a mesma regra da visão).
+  const meio = resultado(est);
+  assert.deepEqual(meio.pedidos, [{ n: 2 }, { n: 2 }, { n: 2 }]);
+  assert.ok(meio.pessoas.every((p) => !('votos' in p) && !('palpites' in p)), 'quem votou o quê é do fim');
+  assert.equal(meio.analise, null);
+  aplicar(est, host('encerrar'), TA + 9);
   const r = resultado(est);
   assert.deepEqual(r.pedidos.map((c) => [c.R, c.L, c.P]), [[2, 0, 0], [1, 1, 0], [0, 0, 2]]);
   assert.deepEqual(r.pessoas.map((p) => p.votos), ['RLP', 'RRP']);
   assert.equal(r.pessoas[0].terminouEm, TA + 2);
+  assert.ok(r.analise && Array.isArray(r.analise.premios), 'o fim traz a análise');
 });

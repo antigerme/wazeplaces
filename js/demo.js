@@ -28,8 +28,6 @@
   const APELIDO_MAX = 20;
   const PAIS_MAX = 40;
   const RECADO_MS = 6000;
-  const SEM_BYTES_MS = 45000;          // o servidor manda um batimento a cada 20 s
-  const RECUO_MS = [1000, 2000, 4000, 8000];
   const VOTO_TENTATIVAS = 20;
   const CHAVE_PARTICIPANTE = 'demo_participante';   // só nesta página; sem login, sem "Sair"
 
@@ -62,28 +60,6 @@
     let bin = '';
     for (const x of b) bin += String.fromCharCode(x);
     return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  }
-
-  // Partes de uma resposta SSE já acumulada no texto: devolve os eventos
-  // COMPLETOS e o resto que ainda não fechou. Linha que começa com ':' é batimento.
-  function lerEventos(texto) {
-    const eventos = [];
-    const blocos = texto.split(/\r?\n\r?\n/);
-    const resto = blocos.pop();
-    for (const b of blocos) {
-      let nome = 'message';
-      const dados = [];
-      for (const linha of b.split(/\r?\n/)) {
-        if (!linha || linha[0] === ':') continue;
-        const i = linha.indexOf(':');
-        const campo = i < 0 ? linha : linha.slice(0, i);
-        const valor = i < 0 ? '' : linha.slice(i + 1).replace(/^ /, '');
-        if (campo === 'event') nome = valor;
-        else if (campo === 'data') dados.push(valor);
-      }
-      if (dados.length) eventos.push({ nome, dados: dados.join('\n') });
-    }
-    return { eventos, resto };
   }
 
   // O voto de uma pessoa no pedido `idx` (1-based): a palavra do SERVIDOR vale;
@@ -146,7 +122,7 @@
   };
 
   window.DemoPuro = {
-    formatarCodigo, codigoPronto, segredoDoHash, cortar, lerEventos, votoEm, pedidoDaVez, telaDaVisao, percentuais, contarVotos,
+    formatarCodigo, codigoPronto, segredoDoHash, cortar, votoEm, pedidoDaVez, telaDaVisao, percentuais, contarVotos,
     SEGREDO_LEN, CODIGO_LEN, APELIDO_MAX, PAIS_MAX, ALFABETO, RECADO_MS,
   };
 
@@ -175,7 +151,6 @@
     card: null,
     tela: null,
     recadoVisto: -1,
-    fluxo: { abort: null, vivo: false, tentativa: 0, timer: null, ultimoByte: 0 },
     encerrou: false,
   };
 
@@ -332,70 +307,28 @@
     aplicarVisao(r.body.visao);
   }
 
-  // ── o fluxo (SSE por fetch) ──────────────────────────────────────────────
-  function pararFluxo() {
-    const f = E.fluxo;
-    f.vivo = false;
-    if (f.timer) { clearTimeout(f.timer); f.timer = null; }
-    if (f.abort) { try { f.abort.abort(); } catch (e) { /* já parado */ } f.abort = null; }
+  // ── o fluxo (SSE por fetch): o leitor é o js/demo-fluxo.js, o MESMO do palco ──
+  let fluxo = null;
+  function fluxoDaSala() {
+    if (!fluxo) {
+      fluxo = window.DemoFluxo.criar({
+        corpo: () => ({ demo: E.demo, parte: E.parte }),
+        aoEstado: aplicarVisao,
+        encerrou: () => E.encerrou,
+        aoRecusa: (corpo) => {
+          if (corpo.motivo === 'fora-da-sala') { reentrar(); return 'parar'; }
+          if (corpo.motivo === 'cheia') avisarRede(t('srv.err.demoCheia'), true);
+          return 'religar';
+        },
+        aoRede: (e) => { if (e === 'caiu') avisarRede(t('demo.rede.caiu'), true); else avisarRede(t('demo.rede.voltou'), false, 1500); },
+      });
+    }
+    return fluxo;
   }
+  function pararFluxo() { if (fluxo) fluxo.parar(); }
   function conectar() {
     if (E.encerrou || !E.demo || !E.parte) return;
-    const f = E.fluxo;
-    if (f.vivo) return;
-    pararFluxo();
-    f.vivo = true;
-    f.abort = new AbortController();
-    f.ultimoByte = Date.now();
-    lerFluxo(f.abort).catch(() => {}).then(() => {
-      if (!f.vivo || f.abort === null) return;
-      f.vivo = false;
-      reconectarDepois();
-    });
-  }
-  function reconectarDepois() {
-    const f = E.fluxo;
-    if (E.encerrou || f.timer) return;
-    f.tentativa++;
-    if (f.tentativa >= 2) avisarRede(t('demo.rede.caiu'), true);
-    const base = RECUO_MS[Math.min(f.tentativa - 1, RECUO_MS.length - 1)];
-    f.timer = setTimeout(() => { f.timer = null; conectar(); }, base + Math.random() * 500);
-  }
-  async function lerFluxo(ctl) {
-    const f = E.fluxo;
-    const vigia = setInterval(() => { if (Date.now() - f.ultimoByte > SEM_BYTES_MS) { try { ctl.abort(); } catch (e) { /* já */ } } }, 5000);
-    try {
-      const r = await fetch('/api/demo-ao-vivo', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ demo: E.demo, parte: E.parte }), signal: ctl.signal,
-      });
-      const tipo = r.headers.get('Content-Type') || '';
-      if (!r.ok || !tipo.includes('text/event-stream') || !r.body) {
-        let corpo = {};
-        try { corpo = await r.json(); } catch (e) { corpo = {}; }
-        if (corpo.motivo === 'fora-da-sala') { await reentrar(); return; }
-        if (corpo.motivo === 'cheia') { avisarRede(t('srv.err.demoCheia'), true); return; }
-        return;
-      }
-      const dec = new TextDecoder();
-      const leitor = r.body.getReader();
-      let acumulado = '';
-      for (;;) {
-        const { value, done } = await leitor.read();
-        if (done) break;
-        f.ultimoByte = Date.now();
-        acumulado += dec.decode(value, { stream: true });
-        const { eventos, resto } = lerEventos(acumulado);
-        acumulado = resto;
-        for (const ev of eventos) {
-          if (ev.nome !== 'estado') continue;
-          let v = null;
-          try { v = JSON.parse(ev.dados); } catch (e) { v = null; }
-          if (!v) continue;
-          if (f.tentativa > 0) { f.tentativa = 0; avisarRede(t('demo.rede.voltou'), false, 1500); }
-          aplicarVisao(v);
-        }
-      }
-    } finally { clearInterval(vigia); }
+    fluxoDaSala().conectar();
   }
   // O servidor não conhece mais esta parte (a sala foi refeita, ou a pessoa nunca
   // entrou): volta à entrada, com o apelido que ela já tinha.
@@ -788,7 +721,7 @@
     }
     // Sem rede ou servidor ruim: tenta de novo (o voto é idempotente), com recuo.
     if (tentativa >= VOTO_TENTATIVAS) { E.pendentes.delete(idx); toast(t('demo.voto.falhou')); desenhar(); return; }
-    setTimeout(() => enviarVoto(idx, voto, tentativa + 1), RECUO_MS[Math.min(tentativa, RECUO_MS.length - 1)] + Math.random() * 400);
+    setTimeout(() => enviarVoto(idx, voto, tentativa + 1), window.DemoFluxo.recuoDaTentativa(tentativa + 1));
   }
   async function enviarPalpite(idx, palpite, tentativa) {
     if (!E.palpitesPendentes.has(idx)) return;
@@ -993,18 +926,13 @@
 
     // Voltou pra aba (celular desbloqueado, outra aba): a conexão pode ter morrido calada.
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState !== 'visible' || E.encerrou || !E.parte) return;
-      const f = E.fluxo;
-      if (!f.vivo || Date.now() - f.ultimoByte > SEM_BYTES_MS) { pararFluxo(); conectar(); }
+      if (document.visibilityState !== 'visible' || E.encerrou || !E.parte || !fluxo) return;
+      fluxo.acordar();
     });
     // O navegador diz que a rede foi embora (ou voltou). A conexão aberta pode demorar a morrer
     // (celular entrando em túnel): avisa já, e ao voltar reabre sem esperar o recuo.
-    window.addEventListener('offline', () => { if (E.encerrou || !E.parte) return; E.fluxo.tentativa = Math.max(E.fluxo.tentativa, 1); avisarRede(t('demo.rede.caiu'), true); });
-    window.addEventListener('online', () => {
-      if (E.encerrou || !E.parte) return;
-      E.fluxo.tentativa = Math.max(E.fluxo.tentativa, 1);
-      pararFluxo(); conectar();
-    });
+    window.addEventListener('offline', () => { if (!E.encerrou && E.parte) fluxoDaSala().caiu(); });
+    window.addEventListener('online', () => { if (!E.encerrou && E.parte) fluxoDaSala().voltouARede(); });
 
     // Entrada: o link traz o segredo no fragmento; sem ele, o código.
     E.segredo = segredoDoHash(location.hash);

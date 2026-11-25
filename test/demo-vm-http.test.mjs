@@ -137,8 +137,8 @@ test('VM: o apresentador começa, a sala conta 3 s e TODOS recebem a triagem abe
     assert.equal(aberta.modo, 'livre');
     const v = await post(vm, 'demo-votar', { demo: ID, parte: pid(1), idx: 2, voto: 'R' });
     assert.equal(v.status, 200);
-    const visto = await host.esperar((e) => e.pedidos && e.pedidos[1].R === 1, 3000);
-    assert.equal(visto.pedidos[1].n, 1, 'a barra do apresentador encheu ao vivo');
+    const visto = await host.esperar((e) => e.pedidos && e.pedidos[1].n === 1, 3000);
+    assert.deepEqual(visto.pedidos[1], { n: 1 }, 'no livre o palco recebe só a CONTAGEM ao vivo: a divisão colorida orientaria quem ainda vota');
     const dele = await conv.esperar((e) => typeof e.votos === 'string' && e.votos[1] === 'R', 3000);
     assert.ok(!('pedidos' in dele) && !('pessoas' in dele), 'o convidado não recebe a lista nem as barras');
     host.parar(); conv.parar();
@@ -168,7 +168,7 @@ test('VM: SIGTERM grava o que estava pendente e a próxima VM continua de onde p
       const r = await post(b, 'demo-host', { demo: ID, hostKey: HOSTKEY, tipo: 'visao' });
       assert.equal(r.status, 200);
       assert.equal(r.body.visao.fase, 'andamento', 'a VM nova carregou a sala do arquivo');
-      assert.equal(r.body.visao.pedidos[0].L, 1);
+      assert.deepEqual(r.body.visao.pedidos[0], { n: 1 }, 'livre: sem divisão ao vivo');
     } finally { b.parar(); }
   } finally { await limpar(raiz); }
 });

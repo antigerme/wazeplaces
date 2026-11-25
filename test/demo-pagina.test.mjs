@@ -10,14 +10,16 @@ import { SALA_RECADO_MS } from '../server/demo-sala.mjs';
 import { SalaViva } from '../server/demo-sala-viva.mjs';
 
 const fonte = readFileSync(new URL('../js/demo.js', import.meta.url), 'utf8');
+const fonteFluxo = readFileSync(new URL('../js/demo-fluxo.js', import.meta.url), 'utf8');
 // Sem `document`, o script só expõe `window.DemoPuro` (é o que ele faz em Node).
 const janela = {};
+vm.runInNewContext(fonteFluxo, { window: janela });
 vm.runInNewContext(fonte, { window: janela, crypto: globalThis.crypto, btoa: globalThis.btoa });
 const P = janela.DemoPuro;
 const plano = (o) => ({ ...o });   // o objeto vem de OUTRO realm (o vm): o deepStrictEqual compara protótipo
 
 test('a página expõe as funções puras sem tocar no DOM', () => {
-  assert.ok(P && typeof P.telaDaVisao === 'function' && typeof P.lerEventos === 'function');
+  assert.ok(P && typeof P.telaDaVisao === 'function' && janela.DemoFluxo && typeof janela.DemoFluxo.lerEventos === 'function');
 });
 
 // ── paridade com o servidor (o que a tela ACEITA é o que o servidor aceita) ──
@@ -59,15 +61,15 @@ test('cortar conta PONTOS DE CÓDIGO (emoji não vira meio caractere)', () => {
 
 // ── o fluxo SSE: o cliente lê os BYTES que o servidor escreve ───────────────
 test('lerEventos: junta pedaços, ignora batimento e guarda o resto que ainda não fechou', () => {
-  const a = P.lerEventos(': ping\n\nevent: estado\nid: 3\ndata: {"seq":3}\n\nevent: esta');
+  const a = janela.DemoFluxo.lerEventos(': ping\n\nevent: estado\nid: 3\ndata: {"seq":3}\n\nevent: esta');
   assert.equal(a.eventos.length, 1);
   assert.equal(a.eventos[0].nome, 'estado');
   assert.equal(JSON.parse(a.eventos[0].dados).seq, 3);
   assert.equal(a.resto, 'event: esta', 'o evento que não fechou espera o próximo pedaço');
-  const b = P.lerEventos(a.resto + 'do\ndata: {"seq":4}\n\n');
+  const b = janela.DemoFluxo.lerEventos(a.resto + 'do\ndata: {"seq":4}\n\n');
   assert.equal(JSON.parse(b.eventos[0].dados).seq, 4);
-  assert.equal(P.lerEventos('event: estado\r\ndata: {"seq":5}\r\n\r\n').eventos.length, 1, 'CRLF também');
-  assert.equal(P.lerEventos(': so batimento\n\n').eventos.length, 0);
+  assert.equal(janela.DemoFluxo.lerEventos('event: estado\r\ndata: {"seq":5}\r\n\r\n').eventos.length, 1, 'CRLF também');
+  assert.equal(janela.DemoFluxo.lerEventos(': so batimento\n\n').eventos.length, 0);
 });
 
 test('lerEventos lê o que a SalaViva de verdade escreve no fluxo (o formato é um só)', async () => {
@@ -81,7 +83,7 @@ test('lerEventos lê o que a SalaViva de verdade escreve no fluxo (o formato é 
   const r = sala.fluxo({ parte: 'parte-de-teste-0001' });
   const leitor = r.body.getReader();
   const { value } = await leitor.read();
-  const { eventos } = P.lerEventos(new TextDecoder().decode(value));
+  const { eventos } = janela.DemoFluxo.lerEventos(new TextDecoder().decode(value));
   await leitor.cancel();
   assert.equal(eventos.length, 1);
   assert.equal(eventos[0].nome, 'estado');
@@ -166,7 +168,9 @@ test('o segredo da sala NUNCA vai em URL de requisição (só no corpo)', () => 
   const sem = fonte.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
   assert.ok(!/fetch\([^)]*(segredo|E\.segredo)/.test(sem), 'o segredo foi parar numa URL');
   assert.ok(!/EventSource/.test(sem), 'EventSource só faz GET: o segredo teria de ir na URL');
-  assert.ok(/fetch\('\/api\/demo-ao-vivo',\s*\{\s*method: 'POST'/.test(sem), 'o fluxo deixou de ser POST com o segredo no corpo');
+  const semFluxo = fonteFluxo.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  assert.ok(/fetch\('\/api\/demo-ao-vivo',\s*\{\s*method: 'POST'/.test(semFluxo), 'o fluxo deixou de ser POST com o segredo no corpo');
+  assert.ok(!/EventSource/.test(semFluxo));
 });
 
 test('a chave do armazenamento da demo não é de «waze*» (o Sair do app não a conhece, e não deve)', () => {

@@ -25,6 +25,7 @@
 //     revelação;
 //   · o teto de pessoas e a janela de votação são do servidor, não do cliente.
 import { limparApelido, limparPais, DEMO_APELIDO_MAX } from './demo.mjs';
+import { analisar, contarVotos as contar, contarPalpites, maioriaDe as maioria, pedidoVisivel } from './demo-resultado.mjs';
 
 export const SALA_CONTAGEM_MS = 3000;
 export const SALA_RECADO_MS = 6000;
@@ -77,6 +78,7 @@ export function novaSala(cfg, agora) {
     ordem: [],
     atual: 0, // sincronizado: o pedido em foco (1..total)
     abertoEm: null,
+    comecouEm: null, // o instante em que a contagem acabou e a triagem começou (a duração e o ritmo saem daqui)
     fimEm: null,
     revelados: [],
     restanteMs: null,
@@ -115,6 +117,7 @@ export function avancar(est, agora) {
   if (est.fase === 'contagem' && agora >= est.contagemAte) {
     est.fase = 'andamento';
     est.contagemAte = null;
+    est.comecouEm = agora;
     if (est.cfg.modo === 'sinc') abrirPedido(est, 1, agora);
     mudou = true;
   }
@@ -280,28 +283,6 @@ export function aplicar(est, req, agora) {
 }
 
 // ── o que cada um VÊ ────────────────────────────────────────────────────────
-function contar(est, idx) {
-  const c = { R: 0, L: 0, P: 0, n: 0 };
-  for (const p of pessoas(est)) {
-    const v = est.partes[p].votos[idx - 1];
-    if (v !== NADA) { c[v]++; c.n++; }
-  }
-  return c;
-}
-function contarPalpites(est, idx) {
-  const c = { R: 0, L: 0, P: 0, n: 0 };
-  for (const p of pessoas(est)) {
-    const v = est.partes[p].palpites[idx - 1];
-    if (v !== NADA) { c[v]++; c.n++; }
-  }
-  return c;
-}
-function maioria(c) {
-  const max = Math.max(c.R, c.L, c.P);
-  if (!max) return null;
-  return ['R', 'L', 'P'].filter((k) => c[k] === max).length === 1 ? ['R', 'L', 'P'].find((k) => c[k] === max) : null;
-}
-
 function base(est, agora) {
   const sinc = est.cfg.modo === 'sinc';
   return {
@@ -317,11 +298,21 @@ function base(est, agora) {
     atual: sinc ? est.atual : null,
     fimEm: sinc && est.fase === 'andamento' ? est.fimEm : null,
     restanteMs: est.fase === 'pausada' ? est.restanteMs : null,
+    comecouEm: est.comecouEm ?? null,
     revelado: sinc ? ehRevelado(est, est.atual) : null,
     votaram: sinc && est.atual ? contar(est, est.atual).n : null,
     recado: est.recado && agora < est.recado.ate ? { texto: est.recado.texto, n: est.recado.n } : null,
     encerrada: est.fase === 'encerrada' ? { motivo: est.motivoFim } : null,
   };
+}
+
+// O voto de referência do apresentador, como ELE o vê numa tela que a sala também vê: o que ele já
+// votou aparece como «*» (confirmação neutra, sem dizer qual), e o voto de verdade só sai quando o
+// pedido pode ser mostrado. Sem isto o palco projetaria a resposta antes da revelação.
+function refMascarada(est) {
+  const r = est.partes.ref;
+  if (!r) return null;
+  return r.votos.split('').map((c, i) => (c === NADA ? NADA : pedidoVisivel(est, i + 1) ? c : '*')).join('');
 }
 
 const apelidos = (est) => pessoas(est).map((p) => est.partes[p].nome);
@@ -336,17 +327,17 @@ export function visao(est, ator, parte, agora) {
     if (est.fase === 'saguao') v.nomes = apelidos(est);
     v.pessoas = pessoas(est).map((p) => {
       const x = est.partes[p];
-      return { nome: x.nome, feitos: x.votos.split('').filter((c) => c !== NADA).length, terminou: x.terminouEm !== null };
+      return { nome: x.nome, pais: x.pais, feitos: x.votos.split('').filter((c) => c !== NADA).length, terminou: x.terminouEm !== null };
     });
+    // A divisão dos votos só sai quando já pode ser MOSTRADA (`pedidoVisivel`): no sincronizado, depois
+    // da revelação; no livre, só no fim — a barra ao vivo orientaria quem ainda está votando.
     v.pedidos = Array.from({ length: est.cfg.total }, (_, i) => {
       const idx = i + 1;
-      if (!sinc) return contar(est, idx);
-      if (ehRevelado(est, idx)) return contar(est, idx);
-      return { n: contar(est, idx).n }; // a barra espera a revelação
+      return pedidoVisivel(est, idx) ? contar(est, idx) : { n: contar(est, idx).n };
     });
     if (sinc && est.atual && ehRevelado(est, est.atual)) v.palpites = contarPalpites(est, est.atual);
     else if (sinc && est.atual) v.palpites = { n: contarPalpites(est, est.atual).n };
-    v.ref = est.partes.ref ? est.partes.ref.votos : null; // ele sempre vê o próprio voto
+    v.ref = refMascarada(est);
     return v;
   }
   v.papel = 'convidado';
@@ -366,18 +357,30 @@ export function visao(est, ator, parte, agora) {
   return v;
 }
 
-// O resultado completo (a tela do apresentador depois — ou durante — a demo).
+// O resultado do apresentador. A divisão dos votos obedece à MESMA regra da visão (`pedidoVisivel`):
+// pedir o resultado no meio da demo não tira a barra que a visão esconde.
 export function resultado(est) {
+  const encerrada = est.fase === 'encerrada';
+  const a = analisar(est);
   return {
     cfg: { modo: est.cfg.modo, tempoMs: est.cfg.tempoMs, total: est.cfg.total, referencia: est.cfg.referencia, criadoEm: est.cfg.criadoEm, votosAte: est.cfg.votosAte, expiraEm: est.cfg.expiraEm },
     fase: est.fase,
+    comecouEm: est.comecouEm ?? null,
     encerradoEm: est.encerradoEm,
     motivoFim: est.motivoFim,
-    pedidos: Array.from({ length: est.cfg.total }, (_, i) => contar(est, i + 1)),
-    ref: est.partes.ref ? est.partes.ref.votos : null,
+    pedidos: Array.from({ length: est.cfg.total }, (_, i) => {
+      const idx = i + 1;
+      return pedidoVisivel(est, idx) ? { ...contar(est, idx), maioria: a.pedidos[i].maioria, classe: a.pedidos[i].classe, topo: a.pedidos[i].topo } : { n: contar(est, idx).n };
+    }),
+    ref: refMascarada(est),
     pessoas: pessoas(est).map((p) => {
       const x = est.partes[p];
-      return { nome: x.nome, pais: x.pais, votos: x.votos, palpites: x.palpites, entrouEm: x.em, terminouEm: x.terminouEm };
+      const feitos = x.votos.split('').filter((c) => c !== NADA).length;
+      // Quem votou o quê é do FIM: durante a demo o resultado diz só o avanço de cada um.
+      return encerrada
+        ? { nome: x.nome, pais: x.pais, votos: x.votos, palpites: x.palpites, feitos, entrouEm: x.em, terminouEm: x.terminouEm }
+        : { nome: x.nome, pais: x.pais, feitos, entrouEm: x.em, terminouEm: x.terminouEm };
     }),
+    analise: encerrada ? { premios: a.premios, resumo: a.resumo } : null,
   };
 }

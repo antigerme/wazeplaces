@@ -8,6 +8,9 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.11.25-02
+**Demo: bastidores da tela do apresentador.** A sala passou a guardar quando a triagem começou e a calcular, no servidor, o resultado que o palco vai projetar: pedidos «unânimes» e «divididos» (uma regra só pra etiqueta, pra ordem e pro resumo), prêmios leves sem ranking (cada pessoa ganha no máximo um, só entra quem votou em 2/3 dos pedidos e a sala precisa de 3 pessoas assim), países informados (sem caixa nem acento) e, no modo «cada um no seu ritmo», o ritmo da sala. **Duas coisas que a tela do apresentador não mostra mais**: o voto de referência do apresentador aparece só como «registrado» até o pedido ser revelado (a tela é projetada), e no modo livre a divisão colorida dos votos só aparece quando a demo acaba — ao vivo ela orientaria quem ainda está votando. O leitor do fluxo ao vivo virou um arquivo só, usado pela página do convidado e pela do palco.
+
 ## v2026.11.25-01
 **A página do convidado da demo (`/demo`).** Quem apresenta o app numa palestra passa a ter uma sala: os convidados abrem o link (ou digitam um código de 6 símbolos), escolhem um apelido — sem login — e triam, no próprio celular, os mesmos pedidos reais, com o card e o gesto do app (← ✕ · → ✓ · ↑ pular). **Nada vai ao Waze**: o voto vai pra sala, o Desfazer não existe (vale a primeira escolha) e o texto livre e o autor do pedido nunca chegam ao convidado. No modo *sincronizado* todos veem o mesmo pedido, com contagem 3-2-1, barra de tempo, palpite («adivinhe a sala») e a revelação de como a sala votou; no modo *livre* cada um vai no seu ritmo. Recado do apresentador, pausa e reconexão automática (a conexão ao vivo cai e volta sozinha, até com o servidor reiniciado) já funcionam. A tela do apresentador, dentro do app, é a próxima etapa.
 
