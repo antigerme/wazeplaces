@@ -8,6 +8,9 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.11.25-05
+**Demo: o palco cabe em janela de verdade, e a criação no celular fala a verdade.** O palco passou a ser medido também em 1366×650 (um laptop com a barra do navegador), 1280×720 e 1024×768 (espelhamento de projetor): a 650 de altura o painel lateral cortava ~60 px calado, e agora a janela baixa ou estreita compacta o painel (a 1366×768 inteira nada muda). Botão «Tela cheia» no topo do palco, e o **PageDown** do passador de slides avança como o Espaço (PageUp não faz nada: não há voltar). Quem cria a demo num **celular** lê, antes e depois, que o palco só abre naquele aparelho (a chave não sai dele) e que, pra projetar, a demo se cria no computador; o `/palco` numa janela estreita diz isso em vez de mostrar uma tela cortada.
+
 ## v2026.11.25-04
 **Demo: o palco do apresentador (`/palco`).** A tela que o apresentador projeta: o saguão com o QR grande (e o código de 6 símbolos sob demanda, que abre a mesma sala), a contagem, o pedido em foco com o mapa e a foto, quantos já votaram, o tempo, a revelação das barras com «a sala escolheu…» e quantos acertaram o palpite, a pausa, o recado pra sala e, no fim, o resultado em três quadros: pedidos (do mais unânime ao mais dividido, com o ↗ pro WME), pessoas e prêmios leves, e o resumo da sala em números. **Tudo pelo teclado**: Espaço ou → para revelar e avançar, P pausa, R manda um recado, 1·2·3 é o seu voto escondido. **Pensado pra ser projetado**: o seu voto aparece só como «registrado» até a revelação; no modo «cada um no seu ritmo» a divisão dos votos só aparece no fim (ao vivo ela orientaria quem ainda está votando); o apelido de quem entrou nunca vira código na tela; a chave da demo nunca é escrita na tela nem no endereço. O palco abre numa aba própria (por isso não mexe nas decisões do app) e solta o controle quando você dá «Sair» no app.
 

@@ -39,6 +39,9 @@ test('acaoPrincipal: começa no saguão (com gente), revela, passa, e o último 
 
 test('acaoDaTecla: Espaço, → e Enter são a principal; P pausa e retoma; R abre o recado; 1 2 3 votam a referência', () => {
   for (const k of [' ', 'ArrowRight', 'Enter']) assert.deepEqual({ ...P.acaoDaTecla(k, V({})) }, { tipo: 'revelar' }, k);
+  // O passador de slides (clicker) manda PageDown/PageUp: PageDown avança, PageUp não faz nada (não há voltar).
+  assert.deepEqual({ ...P.acaoDaTecla('PageDown', V({})) }, { tipo: 'revelar' });
+  assert.equal(P.acaoDaTecla('PageUp', V({})), null);
   assert.deepEqual({ ...P.acaoDaTecla('p', V({})) }, { tipo: 'pausar' });
   assert.deepEqual({ ...P.acaoDaTecla('P', V({ fase: 'pausada' })) }, { tipo: 'retomar' });
   assert.equal(P.acaoDaTecla('p', V({ fase: 'saguao' })), null, 'não se pausa o saguão');

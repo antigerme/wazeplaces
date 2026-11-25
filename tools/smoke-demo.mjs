@@ -475,6 +475,10 @@ if (rodar(9)) {
       if (c.cartao[0] < 0 || c.cartao[2] > c.janela[0] || c.cartao[3] > c.janela[1] + 1) achados.push('o cartão passa da janela ' + JSON.stringify(c.cartao) + ' em ' + JSON.stringify(c.janela));
       if (!c.ok || !c.ok.ok || !c.ok.dentro || c.ok.h < 44) achados.push('«Criar demo» não está à vista/tocável ' + JSON.stringify(c.ok));
       if (!c.cancelar || !c.cancelar.ok) achados.push('«Cancelar» coberto');
+      // Num CELULAR a chave do palco não sai do aparelho: o diálogo diz isso ANTES de criar (compara com o texto da chave, nas 4 línguas).
+      const dicaCel = await page.evaluate(() => ({ rodape: document.getElementById('demoCriarRodape').textContent, soAqui: t('demo.criar.soAqui'), largo: computadorDeTelaLarga() }));
+      if (dicaCel.largo) achados.push('o celular foi tomado por computador de tela larga');
+      if (!dicaCel.rodape.includes(dicaCel.soAqui)) achados.push('o diálogo de criar não avisa que o palco só abre neste aparelho: ' + dicaCel.rodape);
       const filtroTxt = await page.locator('#demoCriarFiltro').textContent();
       if (!/30/.test(filtroTxt)) achados.push('o resumo não diz «até 30»: ' + filtroTxt);
       // O tempo some no modo livre (e volta no sincronizado).
@@ -489,6 +493,8 @@ if (rodar(9)) {
       c = await caixaDoDialogo(page, 'demoProntaModal');
       if (!c.abrir || !c.abrir.ok || !c.abrir.dentro || c.abrir.h < 44) achados.push('«Abrir o palco» não está tocável ' + JSON.stringify(c.abrir));
       if (!c.ok || !c.ok.ok || !c.ok.dentro) achados.push('«Fechar» não está à vista');
+      const avisoCel = await page.evaluate(() => { const p = document.querySelector('#demoProntaModal [data-i18n^="demo.pronta.aviso"]'); return { chave: p.getAttribute('data-i18n'), texto: p.textContent, esperado: t('demo.pronta.avisoCelular') }; });
+      if (avisoCel.chave !== 'demo.pronta.avisoCelular' || avisoCel.texto !== avisoCel.esperado) achados.push('o «criada» no celular não diz que o palco só abre neste aparelho: ' + JSON.stringify(avisoCel));
       const href = await page.locator('#demoAbrirPalco').getAttribute('href');
       if (href !== '/palco') achados.push('o link do palco é ' + href + ' (a chave NÃO pode ir na URL)');
       const guardada = await page.evaluate(() => localStorage.getItem('waze_demo_palco'));
@@ -515,7 +521,9 @@ if (rodar(9)) {
 
 // ═════════════════════════════════════════════════════════════════════════════
 console.log('\n10) O PALCO (/palco): o saguão com o QR e o código, o jogo conduzido pelo teclado, a referência escondida, o livre sem barra ao vivo, o resultado');
-const PROJETORES = [{ nome: 'laptop 1366×768', viewport: { width: 1366, height: 768 } }, { nome: 'projetor 1920×1080', viewport: { width: 1920, height: 1080 } }];
+const PROJETORES = [{ nome: 'laptop 1366×768', viewport: { width: 1366, height: 768 } }, { nome: 'projetor 1920×1080', viewport: { width: 1920, height: 1080 } },
+  // Janelas de verdade: o Chrome de um laptop 1366×768 deixa ~650 de altura, e o espelhamento de projetor costuma cair em 1280×720 ou 1024×768.
+  { nome: 'janela 1366×650', viewport: { width: 1366, height: 650 } }, { nome: 'espelho 1280×720', viewport: { width: 1280, height: 720 } }, { nome: 'espelho 1024×768', viewport: { width: 1024, height: 768 } }];
 const parteDe = (n) => 'parte-do-palco-' + String(n).padStart(4, '0');
 async function convidar(sala, n, apelido, pais = 'Brasil') {
   const r = await fetch(BASE + '/api/demo-entrar', { method: 'POST', body: JSON.stringify({ demo: sala.id, parte: parteDe(n), apelido, pais }) });
@@ -705,7 +713,7 @@ if (rodar(10)) {
   }
 
   // O palco cabe nos DOIS tamanhos de projetor nas QUATRO línguas, claro e escuro (o texto mais largo está noutra língua).
-  for (const pr of PROJETORES) {
+  for (const pr of PROJETORES.filter((x) => !process.env.SMOKE_DEMO_JANELA || x.nome.includes(process.env.SMOKE_DEMO_JANELA))) {
     for (const [lingua, escuro] of [['pt-BR', false], ['en-US', true], ['es-ES', false], ['fr-FR', true]]) {
       const sala = semear({ modo: 'sinc', tempoMs: 20000, total: DECK.length, referencia: true });
       const { ctx, page, erros } = await abrirPalco(pr, lingua, sala, { escuro });
@@ -739,6 +747,41 @@ if (rodar(10)) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
+// CONTROLE do aviso do celular: num computador de tela larga o diálogo NÃO o diz, e o «criada» fala de abrir no computador que projeta.
+if (rodar(9)) {
+  const { ctx, page, erros } = await appComoApresentador({ viewport: { width: 1366, height: 768 } }, 'pt-BR', { userName: 'a', rank: 5, isAreaManager: true, isStaff: false, id: 4242 });
+  await page.evaluate(() => abrirPerfil('filtersTabPrefs'));
+  await page.evaluate(() => document.getElementById('prefDemoCriar').scrollIntoView({ block: 'center' }));
+  await page.locator('#prefDemoCriar').click();
+  await esperarOuExplodir(page, () => !document.getElementById('demoCriarModal').classList.contains('hidden'), 'o diálogo de criar (computador)');
+  const dica = await page.evaluate(() => ({ rodape: document.getElementById('demoCriarRodape').textContent, soAqui: t('demo.criar.soAqui'), largo: computadorDeTelaLarga() }));
+  checa(dica.largo === true, 'CONTROLE: 1366×768 de mouse é computador de tela larga');
+  checa(!dica.rodape.includes(dica.soAqui), 'CONTROLE: no computador o diálogo de criar NÃO diz «só abre neste aparelho»');
+  await page.locator('#demoCriarOk').click();
+  await esperarOuExplodir(page, () => !document.getElementById('demoProntaModal').classList.contains('hidden'), 'o diálogo «criada» (computador)');
+  const chave = await page.evaluate(() => document.querySelector('#demoProntaModal [data-i18n^="demo.pronta.aviso"]').getAttribute('data-i18n'));
+  checa(chave === 'demo.pronta.aviso', 'CONTROLE: no computador o «criada» usa a frase de abrir no computador que projeta', chave);
+  checa(erros.length === 0, 'computador: sem erro de página', erros.slice(0, 2).join(' | '));
+  await ctx.close();
+}
+
+// O palco numa janela de CELULAR não mostra uma tela cortada: diz que é pra computador, e não vai à rede.
+if (rodar(10)) {
+  const sala = semear({ modo: 'sinc', tempoMs: 0, total: 3, referencia: false });
+  for (const lingua of LINGUAS) {
+    const { ctx, page, erros } = await abrirPalco({ viewport: { width: 393, height: 852 } }, lingua, sala);
+    const pedidos = [];
+    page.on('request', (r) => { if (/\/api\//.test(r.url())) pedidos.push(r.url()); });
+    await esperarOuExplodir(page, () => !!document.getElementById('palcoMsg'), 'a mensagem do palco estreito');
+    const m = await page.evaluate(() => ({ msg: document.getElementById('palcoMsg').textContent, h1: document.querySelector('#palcoRaiz h1').textContent, esperado: t('palco.estreita'), titulo: t('palco.estreita.titulo'), rola: document.documentElement.scrollWidth - document.documentElement.clientWidth }));
+    checa(m.msg === m.esperado && m.h1 === m.titulo, `${lingua}: o palco numa janela de celular diz que é pra computador`, JSON.stringify(m));
+    checa(m.rola <= 0, `${lingua}: a mensagem do palco estreito cabe sem rolar de lado`, String(m.rola));
+    checa(pedidos.length === 0, `${lingua}: o palco estreito não vai à rede`, pedidos.join(','));
+    checa(erros.length === 0, `${lingua}: palco estreito sem erro de página`, erros.slice(0, 2).join(' | '));
+    await ctx.close();
+  }
+}
+
 await browser.close();
 await derrubar();
 await new Promise((r) => setTimeout(r, 300));

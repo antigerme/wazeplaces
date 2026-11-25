@@ -114,7 +114,8 @@
   // O que a tecla `key` faz com a visão `v` (o dono do teclado é quem chama; aqui só a tabela).
   function acaoDaTecla(key, v) {
     const k = String(key || '');
-    if (k === ' ' || k === 'ArrowRight' || k === 'Enter') return acaoPrincipal(v);
+    // PageDown: o passador de slides (clicker) manda PageDown/PageUp, não → nem Espaço. PageUp fica sem função (não há voltar).
+    if (k === ' ' || k === 'ArrowRight' || k === 'Enter' || k === 'PageDown') return acaoPrincipal(v);
     if (k === 'p' || k === 'P') {
       if (v && v.fase === 'andamento') return { tipo: 'pausar' };
       if (v && v.fase === 'pausada') return { tipo: 'retomar' };
@@ -231,15 +232,22 @@
   const esconderAviso = () => { clearTimeout(P.timers.aviso); $('palcoAviso').classList.add('hidden'); };
 
   // ── a abertura ──────────────────────────────────────────────────────────────────────────────────
+  // Abaixo disto o palco não cabe (a grade lateral tem 22–28 rem fixos): o celular é do convidado, o palco é do computador.
+  const PALCO_LARGURA_MIN_PX = 720;
+
   async function abrir() {
     P.chave = lerChave();
     if (!P.chave) { P.estado = 'semChave'; render(); return; }
+    // Janela estreita (celular): o palco é desenhado pra ser projetado e o que passa da caixa some calado. Diz isso
+    // em vez de mostrar uma tela cortada; nada vai à rede.
+    if (window.innerWidth < PALCO_LARGURA_MIN_PX) { P.estado = 'erro'; P.erroTitulo = T('palco.estreita.titulo'); P.erroTexto = T('palco.estreita'); render(); return; }
     P.estado = 'abrindo'; render();
     let a; let r;
     try {
       a = await api('demo-abrir', { segredo: P.chave.segredo });
       r = await host('resultado');
     } catch (e) { return falhar(window.t('palco.erro.rede')); }
+    P.erroTitulo = null;
     if (!a.ok) return falhar(frase(a.body));
     if (!r.ok) return falhar(frase(r.body));
     P.cfg = a.body.cfg;
@@ -386,12 +394,14 @@
   }
 
   function topo(faseTexto) {
-    return '<header class="flex-shrink-0 flex items-center gap-3 px-6 h-16 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">'
+    return '<header class="flex-shrink-0 flex items-center gap-3 px-6 h-16 palco-baixo:h-12 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">'
       + '<div class="w-10 h-10 rounded-xl bg-cyan-600 flex items-center justify-center flex-shrink-0"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="white" stroke-width="2" aria-hidden="true"><path d="M12 21s-7-5.5-7-11a7 7 0 0 1 14 0c0 5.5-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg></div>'
       + '<p class="font-black text-lg">Waze Places</p>'
       + '<span class="text-[0.6875rem] font-bold uppercase tracking-wider bg-amber-100 text-amber-800 dark:bg-amber-400/20 dark:text-amber-300 px-2.5 py-1 rounded-full">' + esc(T('palco.chip')) + '</span>'
       + '<span id="palcoFase" class="ml-2 text-sm font-semibold text-slate-500 dark:text-slate-400 truncate">' + esc(faseTexto || '') + '</span>'
       + '<div class="flex-1"></div>'
+      + (typeof document !== 'undefined' && document.fullscreenEnabled
+        ? '<button type="button" data-acao="telacheia" class="inline-flex items-center gap-2 rounded-full border border-slate-300 dark:border-slate-600 px-3.5 min-h-[40px] text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700">' + esc(document.fullscreenElement ? T('palco.telaCheiaSair') : T('palco.telaCheia')) + '</button>' : '')
       + '<span id="palcoNaSala" class="hidden items-center gap-2 rounded-full bg-cyan-50 dark:bg-cyan-500/15 text-cyan-800 dark:text-cyan-200 px-3.5 py-1.5 text-base font-bold tnum">' + SVG_PESSOA + '<span id="palcoNaSalaTxt"></span></span>'
       + '</header>';
   }
@@ -497,12 +507,12 @@
   // ── as barras ✕ ↑ ✓ ─────────────────────────────────────────────────────────────────────────────
   const COR_BARRA = { R: 'bg-rose-500', P: 'bg-amber-500', L: 'bg-emerald-500' };
   function barras(c, escondida) {
-    const lin = (k) => '<div class="flex flex-col gap-1"><div class="flex items-baseline justify-between"><span class="text-lg font-extrabold">' + esc(rotuloVoto(k)) + '</span>'
-      + '<span class="text-lg font-black tnum">' + (escondida ? '?' : esc((c[k] || 0) + ' · ' + pct(c, k) + '%')) + '</span></div>'
-      + '<div class="h-4 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">'
+    const lin = (k) => '<div class="flex flex-col gap-1"><div class="flex items-baseline justify-between"><span class="text-lg palco-baixo:text-base font-extrabold">' + esc(rotuloVoto(k)) + '</span>'
+      + '<span class="text-lg palco-baixo:text-base font-black tnum">' + (escondida ? '?' : esc((c[k] || 0) + ' · ' + pct(c, k) + '%')) + '</span></div>'
+      + '<div class="h-4 palco-baixo:h-3 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">'
       + (escondida ? '<div class="h-full w-full" style="background:repeating-linear-gradient(45deg,transparent 0 10px,rgba(148,163,184,.25) 10px 20px)"></div>'
         : '<div class="h-full rounded-full ' + COR_BARRA[k] + '" style="width:' + pct(c, k) + '%"></div>') + '</div></div>';
-    return '<div class="flex flex-col gap-2">' + ['R', 'P', 'L'].map(lin).join('') + '</div>';
+    return '<div class="flex flex-col gap-2 palco-baixo:gap-1">' + ['R', 'P', 'L'].map(lin).join('') + '</div>';
   }
 
   // ── montar: o esqueleto de cada tela (uma vez) ───────────────────────────────────────────────
@@ -513,7 +523,7 @@
       const msg = tela === 'semChave' ? T('palco.semChave') : tela === 'erro' ? P.erroTexto : T('palco.abrindo');
       raiz.innerHTML = topo('') + '<main class="flex-1 flex items-center justify-center p-8 text-center"><div class="max-w-xl flex flex-col items-center gap-4">'
         + '<p class="text-5xl" aria-hidden="true">' + (tela === 'abrindo' ? '⏳' : '🫥') + '</p>'
-        + '<h1 class="text-2xl font-extrabold">' + esc(tela === 'abrindo' ? T('palco.abrindo') : T('palco.erro.titulo')) + '</h1>'
+        + '<h1 class="text-2xl font-extrabold">' + esc(tela === 'abrindo' ? T('palco.abrindo') : (P.erroTitulo || T('palco.erro.titulo'))) + '</h1>'
         + (tela !== 'abrindo' ? '<p id="palcoMsg" class="text-lg text-slate-600 dark:text-slate-300" role="alert">' + esc(msg) + '</p>' : '')
         + '</div></main>';
       return;
@@ -594,12 +604,21 @@
       else if (a === 'encerrar') pedirEncerrar();
       else if (a === 'encerrar-sim') { cancelarEncerrar(); executar({ tipo: 'encerrar' }); }
       else if (a === 'encerrar-nao') cancelarEncerrar();
+      else if (a === 'telacheia') alternarTelaCheia();
       else if (a === 'pedido') abrirDetalhe(+b.dataset.idx);
     });
   }
 
+  // Tela cheia: só por gesto (clique), e a falha é calada (o navegador pode recusar). O texto do botão acompanha o estado.
+  function alternarTelaCheia() {
+    try {
+      const p = document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+      if (p && p.catch) p.catch(() => {});
+    } catch (e) { /* sem tela cheia aqui */ }
+  }
+
   function montarSinc(raiz) {
-    raiz.innerHTML = topo('') + '<main id="palcoMain" class="flex-1 min-h-0 grid grid-cols-[1fr_28rem] gap-6 px-8 py-4"><div id="palcoFoco" class="min-h-0 flex flex-col"></div><aside id="palcoLado" class="flex flex-col gap-3 min-w-0 min-h-0 overflow-hidden"></aside></main>' + rodape();
+    raiz.innerHTML = topo('') + '<main id="palcoMain" class="flex-1 min-h-0 grid grid-cols-[1fr_28rem] gap-6 px-8 py-4 palco-baixo:py-2"><div id="palcoFoco" class="min-h-0 flex flex-col"></div><aside id="palcoLado" class="flex flex-col gap-3 min-w-0 min-h-0 overflow-hidden"></aside></main>' + rodape();
     ligarRodape();
     P.focoMontado = null;
   }
@@ -685,11 +704,11 @@
     const revelado = v.revelado === true;
     const n = c.n || 0;
     const sala = v.naSala || 0;
-    let h = '<div class="' + CARTAO + ' p-4 flex items-center gap-4 flex-shrink-0"><div class="relative w-20 h-20 flex-shrink-0"><svg viewBox="0 0 100 100" class="w-20 h-20 -rotate-90" aria-hidden="true"><circle cx="50" cy="50" r="44" fill="none" stroke="currentColor" class="text-slate-200 dark:text-slate-700" stroke-width="10"/><circle id="palcoAnel" cx="50" cy="50" r="44" fill="none" stroke="#06b6d4" stroke-width="10" stroke-linecap="round" stroke-dasharray="276.5" stroke-dashoffset="0"/></svg>'
-      + '<span id="palcoSegundos" class="absolute inset-0 flex items-center justify-center text-3xl font-black tnum"></span></div>'
-      + '<div><p class="' + ROTULO + '">' + esc(T('palco.votaram')) + '</p><p class="text-4xl font-black tnum leading-none mt-0.5">' + n + '<span class="text-xl text-slate-400 font-bold"> / ' + sala + '</span></p>'
+    let h = '<div class="' + CARTAO + ' p-4 palco-baixo:p-3 flex items-center gap-4 flex-shrink-0"><div class="relative w-20 h-20 palco-baixo:w-14 palco-baixo:h-14 flex-shrink-0"><svg viewBox="0 0 100 100" class="w-20 h-20 palco-baixo:w-14 palco-baixo:h-14 -rotate-90" aria-hidden="true"><circle cx="50" cy="50" r="44" fill="none" stroke="currentColor" class="text-slate-200 dark:text-slate-700" stroke-width="10"/><circle id="palcoAnel" cx="50" cy="50" r="44" fill="none" stroke="#06b6d4" stroke-width="10" stroke-linecap="round" stroke-dasharray="276.5" stroke-dashoffset="0"/></svg>'
+      + '<span id="palcoSegundos" class="absolute inset-0 flex items-center justify-center text-3xl palco-baixo:text-xl font-black tnum"></span></div>'
+      + '<div><p class="' + ROTULO + '">' + esc(T('palco.votaram')) + '</p><p class="text-4xl palco-baixo:text-3xl font-black tnum leading-none mt-0.5">' + n + '<span class="text-xl text-slate-400 font-bold"> / ' + sala + '</span></p>'
       + '<p class="text-sm text-slate-500 dark:text-slate-400 mt-1.5">' + esc(T('palco.palpites', { n: (v.palpites && v.palpites.n) || 0 })) + '</p></div></div>';
-    h += '<div class="' + CARTAO + ' p-4 flex-shrink-0"><p class="' + ROTULO + ' mb-2">' + esc(revelado ? T('palco.comoVotou', { n }) : T('palco.escolheEscondido')) + '</p>' + barras(c, !revelado);
+    h += '<div class="' + CARTAO + ' p-4 palco-baixo:p-3 flex-shrink-0"><p class="' + ROTULO + ' mb-2">' + esc(revelado ? T('palco.comoVotou', { n }) : T('palco.escolheEscondido')) + '</p>' + barras(c, !revelado);
     if (revelado) {
       const m = maioriaDe(c);
       h += '<p class="mt-2 text-xl font-black ' + (m === 'R' ? 'text-rose-600 dark:text-rose-400' : m === 'L' ? 'text-emerald-600 dark:text-emerald-400' : m === 'P' ? 'text-amber-600 dark:text-amber-400' : '') + '">' + esc(m ? T('palco.salaEscolheu', { voto: rotuloVoto(m) }) : n ? T('palco.empate') : '') + '</p>';
@@ -955,6 +974,9 @@
     });
 
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && fluxoDoPalco && !P.perdeu) fluxoDoPalco.acordar(); });
+    document.addEventListener('fullscreenchange', () => {
+      for (const b of document.querySelectorAll('[data-acao="telacheia"]')) b.textContent = document.fullscreenElement ? T('palco.telaCheiaSair') : T('palco.telaCheia');
+    });
     window.addEventListener('offline', () => { if (fluxoDoPalco && !P.perdeu) fluxoDoPalco.caiu(); });
     window.addEventListener('online', () => { if (fluxoDoPalco && !P.perdeu) fluxoDoPalco.voltouARede(); });
     window.addEventListener('resize', () => { for (const b of document.querySelectorAll('[data-mapa]')) { const p = P.deck[+b.dataset.mapa - 1]; if (p) { b.dataset.pronto = ''; requestAnimationFrame(() => desenharMapa(b, p)); } } });

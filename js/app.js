@@ -4262,7 +4262,8 @@ function abrirCriarDemo() {
     if (!(AppState.countries || []).length) {
         pedirListaDePaises().then(() => { if (!document.getElementById('demoCriarModal').classList.contains('hidden')) escreverFiltro(); }).catch(() => {});
     }
-    document.getElementById('demoCriarRodape').textContent = t('demo.criar.rodape');
+    // A chave do palco mora SÓ no aparelho que cria: num celular, o palco não abre no computador que vai projetar.
+    document.getElementById('demoCriarRodape').textContent = t('demo.criar.rodape') + (computadorDeTelaLarga() ? '' : ' ' + t('demo.criar.soAqui'));
     document.getElementById('demoCriarJa').classList.toggle('hidden', !lerPalcoDaDemo());
     document.getElementById('demoCriarErro').classList.add('hidden');
     sincronizarTempoDaDemo();
@@ -4313,6 +4314,13 @@ async function criarDemo() {
     document.getElementById('demoProntaResumo').textContent = t(r.total === 1 ? 'demo.pronta.resumo1' : 'demo.pronta.resumo', {
         n: r.total, modo: t(r.modo === 'sinc' ? 'demo.criar.sinc' : 'demo.criar.livre'),
     });
+    // No computador, o palco abre aqui mesmo; no celular, a chave não sai do aparelho (data-i18n, pra a troca de idioma
+    // reescrever a frase certa).
+    const avisoPronta = document.querySelector('#demoProntaModal [data-i18n^="demo.pronta.aviso"]');
+    if (avisoPronta) {
+        avisoPronta.setAttribute('data-i18n', computadorDeTelaLarga() ? 'demo.pronta.aviso' : 'demo.pronta.avisoCelular');
+        avisoPronta.textContent = t(avisoPronta.getAttribute('data-i18n'));
+    }
     // Troca de camada: o `openModal` esconde o de criar (e roda a limpeza dele) — nunca fechar um e abrir o outro.
     openModal('demoProntaModal');
     setTimeout(() => { try { document.getElementById('demoAbrirPalco').focus({ preventScroll: true }); } catch (e) { /* sem foco */ } }, 0);
