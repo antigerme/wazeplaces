@@ -98,6 +98,7 @@ wazeplaces/
 │   ├── qr.js                # Gerador de QR, JS puro, só pro pareamento; sob demanda (`carregarQr()`); vetores em test/qr.test.mjs
 │   ├── status.js            # A página /status.html: busca /api/status UMA vez (zero polling) e monta o DOM
 │   ├── demo.js              # A página /demo (convidado): IIFE; fluxo SSE por fetch POST, voto otimista, telas. As funções puras saem em `window.DemoPuro`
+│   ├── demo-fluxo.js        # O leitor do fluxo ao vivo da demo (POST + SSE por fetch, recuo, vigia de 45 s): UM só, das páginas /demo e /palco
 │   ├── version.js           # FONTE ÚNICA da versão (APP_VERSION + verLabel). Carregado antes do app.js
 │   ├── i18n.js              # i18n pt/en/es/fr: I18N_DICT, t(), applyI18n(), setLang(), setI18nVars(). FONTE
 │   │                        #   ÚNICA de texto de tela; LANGS_SUPORTADOS = Object.keys(I18N_DICT)
@@ -119,6 +120,7 @@ wazeplaces/
 │   ├── status.mjs           # Contagem pública (/status.html): conta chaves sess_/ka_, PURA, nunca decifra
 │   ├── demo.mjs             # A DEMO, o que é puro: cota de pedidos, quem cria, o retrato (allowlist) e o apelido
 │   ├── demo-sala.mjs        # A máquina de estados da sala da demo (saguão, contagem, triagem, revelação), PURA
+│   ├── demo-resultado.mjs   # O RESULTADO da demo (unânime/dividido numa função só, prêmios com desempate, países, palpites, projeção), PURO
 │   ├── demo-sala-viva.mjs   # A sala no ar, comum ao Durable Object e à VM: conexões SSE, difusão, gravação, alarme
 │   ├── demo-salas-vm.mjs    # As salas da demo na VM: memória + um arquivo por sala
 │   ├── core.mjs             # Toda a lógica: sessões, cripto (AES-GCM), callWaze, categorizeWazeError,

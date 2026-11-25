@@ -197,6 +197,7 @@ wazeplaces/
 │   ├── qr.js               # Gerador de QR do pareamento (sob demanda)
 │   ├── status.js           # A página /status.html: busca /api/status uma vez, sem polling
 │   ├── demo.js             # A página /demo (convidado): triagem em sala, fluxo ao vivo, nada vai ao Waze
+│   ├── demo-fluxo.js       # O leitor do fluxo ao vivo da demo (um só, das páginas /demo e /palco)
 │   ├── swipe.js            # Gestos drag/swipe
 │   ├── version.js          # A versão (serial YYYYMMDDnn)
 │   ├── sw-register.js      # Registro e auto-update do service worker
@@ -209,6 +210,7 @@ wazeplaces/
 │   ├── status.mjs          # Contagem pública (/status.html): conta sessões sem decifrar nada
 │   ├── demo.mjs            # A demo (sala ao vivo): regras puras
 │   ├── demo-sala.mjs       # A máquina de estados da sala da demo
+│   ├── demo-resultado.mjs  # O resultado da demo (unânime/dividido, prêmios, países): puro
 │   ├── demo-sala-viva.mjs  # A sala no ar (SSE), comum ao Durable Object e à VM
 │   ├── demo-salas-vm.mjs   # As salas da demo na VM
 │   ├── corpo.mjs           # Leitura do corpo da requisição na VM (UTF-8 inteiro)

@@ -880,6 +880,22 @@
                             </label>
                         </div>
 
+
+                        <!-- DEMO PARA APRESENTAÇÃO — a última linha da aba, e SÓ para quem pode criar
+                             (L6+ com área gerenciada, ou staff; `podeCriarDemoAqui`, que o JS reavalia a
+                             cada abertura da aba: o perfil chega depois). Não é interruptor, é AÇÃO: abre
+                             o diálogo de criar. O link do palco só aparece com uma demo guardada neste
+                             aparelho (`waze_demo_palco`). Nada aqui roda sozinho nem gasta requisição. -->
+                        <div id="prefDemoRow" class="hidden">
+                            <div class="flex items-center justify-between gap-3 text-sm min-h-[44px]">
+                                <span class="min-w-0 break-words">
+                                    <span class="font-semibold text-slate-700 dark:text-slate-200" data-i18n="prefs.demo.label">Demo para apresentação</span>
+                                    <span class="block text-xs text-slate-600 dark:text-slate-300" data-i18n="prefs.demo.desc">Convidados triam pedidos reais no celular, sem login e sem enviar nada ao Waze.</span>
+                                </span>
+                                <button id="prefDemoCriar" type="button" class="flex-shrink-0 min-h-[44px] px-4 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-semibold text-sm transition" data-i18n="prefs.demo.criar">Criar…</button>
+                            </div>
+                            <a id="prefDemoPalco" href="/palco" target="_blank" rel="noopener" class="hidden mt-1 inline-flex items-center min-h-[44px] text-sm font-semibold text-cyan-700 dark:text-cyan-300 underline" data-i18n="prefs.demo.palco">Abrir o palco da demo no ar</a>
+                        </div>
                     </div>
 
                     <!-- ══ ABA HISTÓRICO (só leitura) ══ -->
@@ -958,6 +974,72 @@
                     <span class="min-w-0 break-words" data-i18n="pair.copyLink">Copiar link (abre direto no outro aparelho)</span>
                 </button>
                 <button id="pairShowClose" type="button" class="w-full min-h-[48px] bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-semibold py-2 px-4 rounded-lg transition" data-i18n="common.close">Fechar</button>
+            </div>
+        </div>
+
+        <!-- ── Demo: criar (só L6+ com área gerenciada). Dois estados no MESMO diálogo: o formulário e o
+             «criada», com o link do palco — um <a> de verdade, que nenhum bloqueador de popup barra. ── -->
+        <div id="demoCriarModal" role="dialog" aria-modal="true" aria-labelledby="demoCriarTitle" class="hidden fixed inset-0 modal-root pb-[calc(1rem+var(--kb-inset,0px))] bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
+            <div class="dialogo-cartao bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-lg w-full p-6 max-h-[calc(100dvh-2rem-var(--kb-inset,0px))] overflow-y-auto overscroll-contain">
+                <div id="demoCriarForm">
+                    <h3 id="demoCriarTitle" class="text-xl font-bold text-slate-800 dark:text-slate-100 mb-2 break-words" data-i18n="demo.criar.title">Criar demo para apresentação</h3>
+                    <p id="demoCriarFiltro" class="text-sm text-slate-600 dark:text-slate-300 mb-1 break-words"></p>
+                    <p class="text-sm text-slate-600 dark:text-slate-300 mb-1" data-i18n="demo.criar.nada">Nada é enviado ao Waze. Os convidados não veem quem enviou o pedido nem o texto do reporte.</p>
+                    <p class="mb-3"><button id="demoCriarMudar" type="button" class="text-sm font-semibold text-cyan-700 dark:text-cyan-300 underline min-h-[44px]" data-i18n="demo.criar.mudar">Mudar filtros</button></p>
+
+                    <fieldset class="mb-4">
+                        <legend class="text-[0.6875rem] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2" data-i18n="demo.criar.modo">Como a sala joga</legend>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                            <label class="flex items-start gap-3 rounded-xl border-2 border-slate-200 dark:border-slate-600 p-3 cursor-pointer has-[:checked]:border-cyan-600 has-[:checked]:bg-cyan-50 dark:has-[:checked]:bg-cyan-500/10 min-h-[44px]">
+                                <input type="radio" name="demoModo" value="sinc" checked class="mt-1 accent-cyan-600 w-5 h-5 flex-shrink-0">
+                                <span class="text-sm min-w-0"><b class="text-base text-slate-800 dark:text-slate-100" data-i18n="demo.criar.sinc">Todos juntos</b> <span class="text-[0.6875rem] font-bold uppercase text-cyan-700 dark:text-cyan-300 ml-1" data-i18n="demo.criar.recomendado">recomendado</span><br><span class="text-slate-600 dark:text-slate-300" data-i18n="demo.criar.sinc.desc">Um pedido por vez, com revelação e palpite. Rende no palco.</span></span>
+                            </label>
+                            <label class="flex items-start gap-3 rounded-xl border-2 border-slate-200 dark:border-slate-600 p-3 cursor-pointer has-[:checked]:border-cyan-600 has-[:checked]:bg-cyan-50 dark:has-[:checked]:bg-cyan-500/10 min-h-[44px]">
+                                <input type="radio" name="demoModo" value="livre" class="mt-1 accent-cyan-600 w-5 h-5 flex-shrink-0">
+                                <span class="text-sm min-w-0"><b class="text-base text-slate-800 dark:text-slate-100" data-i18n="demo.criar.livre">Cada um no seu ritmo</b><br><span class="text-slate-600 dark:text-slate-300" data-i18n="demo.criar.livre.desc">Cada convidado tria sozinho; você vê o resultado no fim.</span></span>
+                            </label>
+                        </div>
+                    </fieldset>
+
+                    <fieldset id="demoCriarTempo" class="mb-4">
+                        <legend class="text-[0.6875rem] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2" data-i18n="demo.criar.tempo">Tempo por pedido</legend>
+                        <div class="tema-opcoes" role="radiogroup">
+                            <label class="tema-opcao"><input type="radio" name="demoTempo" value="0" class="tema-opcao-input"><span class="tema-opcao-cara" data-i18n="demo.criar.semLimite">Sem limite</span></label>
+                            <label class="tema-opcao"><input type="radio" name="demoTempo" value="10000" class="tema-opcao-input"><span class="tema-opcao-cara">10 s</span></label>
+                            <label class="tema-opcao"><input type="radio" name="demoTempo" value="20000" checked class="tema-opcao-input"><span class="tema-opcao-cara">20 s</span></label>
+                            <label class="tema-opcao"><input type="radio" name="demoTempo" value="30000" class="tema-opcao-input"><span class="tema-opcao-cara">30 s</span></label>
+                        </div>
+                        <p class="text-xs text-slate-600 dark:text-slate-300 mt-1" data-i18n="demo.criar.tempo.dica">Acabou o tempo, a sala revela sozinha.</p>
+                    </fieldset>
+
+                    <label class="flex items-start gap-3 cursor-pointer mb-4 min-h-[44px]">
+                        <input id="demoCriarRef" type="checkbox" checked class="mt-1 accent-cyan-600 w-5 h-5 flex-shrink-0">
+                        <span class="text-sm min-w-0"><b class="text-base text-slate-800 dark:text-slate-100" data-i18n="demo.criar.ref">Eu também voto, escondido</b><br><span class="text-slate-600 dark:text-slate-300" data-i18n="demo.criar.ref.desc">Na revelação aparece o que você faria e quem pensa como você.</span></span>
+                    </label>
+
+                    <p id="demoCriarJa" class="hidden text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-400/10 border border-amber-200 dark:border-amber-400/30 rounded-lg px-2 py-1.5 mb-3" data-i18n="demo.criar.ja">Você já tem uma demo no ar. Criar outra troca a chave deste aparelho; a anterior segue até vencer.</p>
+                    <p id="demoCriarErro" class="hidden text-xs text-rose-600 dark:text-rose-400 mb-3" role="alert"></p>
+                    <p id="demoCriarRodape" class="text-xs text-slate-500 dark:text-slate-400 mb-4"></p>
+
+                    <div class="dialogo-acoes acoes-presas flex gap-3">
+                        <button id="demoCriarCancelar" type="button" class="flex-1 min-h-[48px] bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-semibold py-2 px-4 rounded-lg transition" data-i18n="common.cancel">Cancelar</button>
+                        <button id="demoCriarOk" type="button" class="flex-1 min-h-[48px] bg-cyan-600 hover:bg-cyan-700 disabled:opacity-60 text-white font-semibold py-2 px-4 rounded-lg transition" data-i18n="demo.criar.btn">Criar demo</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Demo criada: o link do palco é um <a> de verdade, que nenhum bloqueador de popup barra. Diálogo PRÓPRIO
+             (e não um segundo estado do de criar): um cartão, uma fileira presa. -->
+        <div id="demoProntaModal" role="dialog" aria-modal="true" aria-labelledby="demoProntaTitle" class="hidden fixed inset-0 modal-root pb-[calc(1rem+var(--kb-inset,0px))] bg-black bg-opacity-50 z-[60] flex items-center justify-center p-4">
+            <div class="dialogo-cartao bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-sm w-full p-6 max-h-[calc(100dvh-2rem-var(--kb-inset,0px))] overflow-y-auto overscroll-contain">
+                <h3 id="demoProntaTitle" class="text-xl font-bold text-slate-800 dark:text-slate-100 mb-2 break-words" data-i18n="demo.pronta.title">Demo criada</h3>
+                <p id="demoProntaResumo" class="text-sm text-slate-600 dark:text-slate-300 mb-4" role="status"></p>
+                <a id="demoAbrirPalco" href="/palco" target="_blank" rel="noopener" class="flex items-center justify-center w-full min-h-[56px] mb-3 bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-lg rounded-xl transition" data-i18n="demo.pronta.abrir">Abrir o palco</a>
+                <p class="text-xs text-slate-500 dark:text-slate-400 mb-4" data-i18n="demo.pronta.aviso">Abra no computador que vai projetar. O palco guarda a chave desta demo neste aparelho, e o «Sair» do app a apaga.</p>
+                <div class="acoes-presas">
+                    <button id="demoProntaFechar" type="button" class="w-full min-h-[48px] bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-semibold py-2 px-4 rounded-lg transition" data-i18n="common.close">Fechar</button>
+                </div>
             </div>
         </div>
 

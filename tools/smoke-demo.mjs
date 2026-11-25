@@ -407,6 +407,113 @@ if (rodar(8)) for (const ap of APARELHOS) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
+console.log('\n9) O APP cria a demo: a linha das Preferências, o diálogo (4 línguas × 2 aparelhos), a chave e o «Sair»');
+// A tela REAL do app com o estado injetado (a API é de mentira: nada fala com o Waze). O diálogo é o que tem
+// campo e botões presos, então o que se mede é caber, o toque e a fileira presa — e a chave guardada de verdade.
+const CRIAR_OK = { success: true, demo: 'd'.repeat(40), segredo: 'ABCDEFGHJKLMNPQRSTUV', hostKey: 'WXYZ2345679ABCDEFGHJ', total: 30, modo: 'sinc', tempoMs: 20000, referencia: true, max: 150, criadoEm: Date.now(), votosAte: Date.now() + 3 * 3600_000, expiraEm: Date.now() + 48 * 3600_000 };
+async function appComoApresentador(ap, lingua, perfil) {
+  const ctx = await browser.newContext({ viewport: ap.viewport, locale: lingua, serviceWorkers: 'block' });
+  const corpos = [];
+  await ctx.route('**/api/perfil', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, profile: perfil }) }));
+  await ctx.route('**/api/buscar-places', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, places: [], hasMore: false, total: 0 }) }));
+  await ctx.route('**/api/demo-criar', (r) => { corpos.push(JSON.parse(r.request().postData() || '{}')); return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ...CRIAR_OK, criadoEm: Date.now(), expiraEm: Date.now() + 48 * 3600_000 }) }); });
+  await ctx.route('**/api/sessao', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) }));
+  await ctx.route('**/api/parear', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) }));
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push(String(e.message || e).slice(0, 120)));
+  await page.addInitScript(() => localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true, passagemDispensada: true, undoGateSeen: true, presenca: false })));
+  await page.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+  await new Promise((r) => setTimeout(r, 500));
+  await page.evaluate(async (perfil) => {
+    applyI18n();
+    AppState.authenticated = true;
+    API.setSession('token-smoke');
+    AppState.profile = perfil;
+    document.getElementById('authScreen').classList.add('hidden');
+    document.getElementById('appScreen').classList.remove('hidden');
+    showLoading(false); renderProfileHeader(AppState.profile); updateStats();
+  }, perfil);
+  return { ctx, page, erros, corpos };
+}
+const caixaDoDialogo = (page, id) => page.evaluate((i) => {
+  const m = document.getElementById(i);
+  // O cartão ROLA onde não cabe (o Fold): a fileira de ações é alcançada rolando — ou já está presa, onde o navegador tem o
+  // portão de rolagem. O que se mede é que ela é ALCANÇÁVEL, não que nasça à vista.
+  const fila = m.querySelector('.dialogo-acoes, .acoes-presas');
+  if (fila) fila.scrollIntoView({ block: 'end' });
+  const c = m.querySelector('.dialogo-cartao').getBoundingClientRect();
+  const doc = document.documentElement;
+  const alvo = (sel) => { const e = m.querySelector(sel); if (!e) return null; const b = e.getBoundingClientRect(); const h = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return { ok: !!h && !!h.closest(sel), w: Math.round(b.width), h: Math.round(b.height), dentro: b.left >= 0 && b.right <= innerWidth && b.top >= 0 && b.bottom <= innerHeight + 1 }; };
+  return { cartao: [Math.round(c.left), Math.round(c.top), Math.round(c.right), Math.round(c.bottom)], janela: [innerWidth, innerHeight], horizontal: doc.scrollWidth - doc.clientWidth,
+    ok: alvo('#demoCriarOk') || alvo('#demoProntaFechar'), cancelar: alvo('#demoCriarCancelar'), abrir: alvo('#demoAbrirPalco') };
+}, id);
+if (rodar(9)) {
+  // CONTROLE 1: quem NÃO pode criar não vê a linha (L5 com área gerenciada é o portão do destrutivo, não o da demo).
+  {
+    const { ctx, page } = await appComoApresentador(APARELHOS[0], 'pt-BR', { userName: 'a', rank: 4, isAreaManager: true, isStaff: false });
+    await page.evaluate(() => abrirPerfil('filtersTabPrefs'));
+    const visivel = await page.evaluate(() => !document.getElementById('prefDemoRow').classList.contains('hidden'));
+    checa(visivel === false, 'CONTROLE: L5+AM não vê «Demo para apresentação» (o portão é L6+AM)');
+    await ctx.close();
+  }
+  for (const ap of APARELHOS) {
+    for (const lingua of LINGUAS) {
+      const { ctx, page, erros, corpos } = await appComoApresentador(ap, lingua, { userName: 'a', rank: 5, isAreaManager: true, isStaff: false, id: 4242 });
+      await page.evaluate(() => abrirPerfil('filtersTabPrefs'));
+      const achados = [];
+      const linha = await page.evaluate(() => { const l = document.getElementById('prefDemoRow'); const b = document.getElementById('prefDemoCriar').getBoundingClientRect(); return { visivel: !l.classList.contains('hidden'), palco: !document.getElementById('prefDemoPalco').classList.contains('hidden'), alvo: Math.round(b.height) }; });
+      if (!linha.visivel) achados.push('a linha não apareceu pra L6+AM');
+      if (linha.palco) achados.push('o link do palco apareceu sem demo guardada');
+      if (linha.alvo < 44) achados.push('o botão «Criar…» tem ' + linha.alvo + ' px');
+      await page.evaluate(() => document.getElementById('prefDemoCriar').scrollIntoView({ block: 'center' }));
+      await page.locator('#prefDemoCriar').click();
+      await esperarOuExplodir(page, () => !document.getElementById('demoCriarModal').classList.contains('hidden'), 'o diálogo de criar');
+      let c = await caixaDoDialogo(page, 'demoCriarModal');
+      if (PRINTS) { mkdirSync(PRINTS, { recursive: true }); await page.screenshot({ path: join(PRINTS, `criar-${ap.viewport.width}-${lingua}.png`) }); }
+      if (c.horizontal > 0) achados.push('rola de lado ' + c.horizontal);
+      if (c.cartao[0] < 0 || c.cartao[2] > c.janela[0] || c.cartao[3] > c.janela[1] + 1) achados.push('o cartão passa da janela ' + JSON.stringify(c.cartao) + ' em ' + JSON.stringify(c.janela));
+      if (!c.ok || !c.ok.ok || !c.ok.dentro || c.ok.h < 44) achados.push('«Criar demo» não está à vista/tocável ' + JSON.stringify(c.ok));
+      if (!c.cancelar || !c.cancelar.ok) achados.push('«Cancelar» coberto');
+      const filtroTxt = await page.locator('#demoCriarFiltro').textContent();
+      if (!/30/.test(filtroTxt)) achados.push('o resumo não diz «até 30»: ' + filtroTxt);
+      // O tempo some no modo livre (e volta no sincronizado).
+      await page.locator('input[name="demoModo"][value="livre"]').check({ force: true });
+      if (await page.locator('#demoCriarTempo').isVisible()) achados.push('«Tempo por pedido» ficou no modo livre');
+      await page.locator('input[name="demoModo"][value="sinc"]').check({ force: true });
+      if (!(await page.locator('#demoCriarTempo').isVisible())) achados.push('«Tempo por pedido» sumiu no sincronizado');
+      await page.locator('#demoCriarOk').scrollIntoViewIfNeeded();
+      await page.locator('#demoCriarOk').click();
+      await esperarOuExplodir(page, () => !document.getElementById('demoProntaModal').classList.contains('hidden'), 'o diálogo «criada»');
+      if (await page.locator('#demoCriarModal').isVisible()) achados.push('o diálogo de criar ficou por baixo do «criada»');
+      c = await caixaDoDialogo(page, 'demoProntaModal');
+      if (!c.abrir || !c.abrir.ok || !c.abrir.dentro || c.abrir.h < 44) achados.push('«Abrir o palco» não está tocável ' + JSON.stringify(c.abrir));
+      if (!c.ok || !c.ok.ok || !c.ok.dentro) achados.push('«Fechar» não está à vista');
+      const href = await page.locator('#demoAbrirPalco').getAttribute('href');
+      if (href !== '/palco') achados.push('o link do palco é ' + href + ' (a chave NÃO pode ir na URL)');
+      const guardada = await page.evaluate(() => localStorage.getItem('waze_demo_palco'));
+      const g = guardada ? JSON.parse(guardada) : null;
+      if (!g || g.hostKey !== 'WXYZ2345679ABCDEFGHJ' || String(g.conta) !== '4242') achados.push('a chave não foi guardada com a conta: ' + guardada);
+      const textoTela = await page.evaluate(() => document.body.innerText);
+      if (textoTela.includes('WXYZ2345679ABCDEFGHJ') || textoTela.includes('ABCDEFGHJKLMNPQRSTUV')) achados.push('a chave ou o segredo foi escrito na tela');
+      const c1 = corpos[0] || {};
+      if (c1.modo !== 'sinc' || c1.tempoMs !== 20000 || c1.referencia !== true || c1.unreadOnly !== true || !c1.sessionToken) achados.push('o corpo do pedido não leva as escolhas e os filtros: ' + JSON.stringify({ ...c1, sessionToken: !!c1.sessionToken }));
+      checa(achados.length === 0, `${ap.nome} · ${lingua}: a linha, o diálogo e a chave`, achados.slice(0, 4).join(' || '));
+      // O diagnóstico omite a chave; o «Sair» a apaga.
+      await page.evaluate(() => closeModal('demoProntaModal'));
+      const linha2 = await page.evaluate(() => { abrirPerfil('filtersTabPrefs'); return !document.getElementById('prefDemoPalco').classList.contains('hidden'); });
+      checa(linha2 === true, `${lingua}: com a demo guardada, o link do palco aparece nas Preferências`);
+      await page.evaluate(() => handleLogout());
+      await new Promise((r) => setTimeout(r, 300));
+      const depois = await page.evaluate(() => localStorage.getItem('waze_demo_palco'));
+      checa(depois === null, `${lingua}: o «Sair» apaga a chave da demo`);
+      checa(erros.length === 0, `${lingua}: sem erro de página`, erros.slice(0, 2).join(' | '));
+      await ctx.close();
+    }
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
 await browser.close();
 await derrubar();
 await new Promise((r) => setTimeout(r, 300));

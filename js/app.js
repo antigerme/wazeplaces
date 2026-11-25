@@ -1328,7 +1328,7 @@ function mostrarEntrandoPelaExtensao(ligado) {
 // abrir e volta pro elemento de origem ao fechar; Esc fecha o modal aberto
 // (via handleKeyDown); clique no scrim fecha; body trava o scroll.
 // Novo modal? Adicionar o id em MODAL_IDS e usar openModal/closeModal.
-const MODAL_IDS = ['pasteModal', 'logoutModal', 'accessDeniedModal', 'filtersModal', 'helpModal', 'batchReadModal', 'pairShowModal', 'pairEnterModal', 'comoFuncionaModal', 'treinoFimModal', 'presencaModal', 'conversaModal', 'pedidoModal', 'autorModal', 'resumoModal'];
+const MODAL_IDS = ['pasteModal', 'logoutModal', 'accessDeniedModal', 'filtersModal', 'helpModal', 'batchReadModal', 'pairShowModal', 'pairEnterModal', 'comoFuncionaModal', 'treinoFimModal', 'presencaModal', 'conversaModal', 'pedidoModal', 'autorModal', 'resumoModal', 'demoCriarModal', 'demoProntaModal'];
 
 // Os modais que só existem na tela de ENTRADA. Quem entra pela extensão entra
 // "de fora" — em silêncio, sem tocar em nada desta tela (ao voltar à aba, por
@@ -1519,6 +1519,16 @@ const LIMPEZA_AO_FECHAR = {
     accessDeniedModal() {
         const perfil = document.getElementById('accessDeniedProfile');
         if (perfil) { perfil.innerHTML = ''; perfil.classList.add('hidden'); }
+    },
+    // O diálogo da demo volta ao formulário: o «criada» não leva dado nenhum, mas a próxima abertura
+    // não pode nascer mostrando o resultado da anterior nem um erro velho.
+    demoCriarModal() {
+        const erro = document.getElementById('demoCriarErro');
+        if (erro) { erro.textContent = ''; erro.classList.add('hidden'); }
+    },
+    demoProntaModal() {
+        const resumo = document.getElementById('demoProntaResumo');
+        if (resumo) resumo.textContent = '';
     },
     pairShowModal() {
         // A resposta de um pedido de código que ainda voava é de um diálogo que
@@ -2879,6 +2889,7 @@ async function resgatarPareamento(code, { silencioso = false, peloTeclado = fals
 
 function setupModalListeners() {
     const $ = id => document.getElementById(id);
+    setupDemoDoApresentador();
     // O último foco FORA das camadas é a reserva do `devolverFoco`.
     document.addEventListener('focusin', (e) => {
         if (!dentroDeCamada(e.target)) ultimoFocoForaDasCamadas = e.target;
@@ -4153,6 +4164,169 @@ function podeCriarDemoAqui() {
     if (!p) return false;
     if (p.isStaff === true) return true;
     return Number.isInteger(p.rank) && p.rank >= MIN_RANK_DEMO && p.isAreaManager === true;
+}
+
+
+// ── A DEMO: criar (o PALCO é a página /palco, não uma tela do app) ──────────────────────────────────
+// O app só CRIA a demo e guarda a chave; quem projeta, conduz e mostra o resultado é outra página (`/palco`).
+// Por quê: o app liga ← → ↑ a decisões REAIS no Waze, e um palco por cima dele teria o → de «próximo» a um
+// toque de mandar um ✓ de verdade; a página própria também vai pra a tela do projetor sem levar o app junto,
+// e sobrevive à queda da sessão do Waze no meio da apresentação (a chave da demo basta).
+//
+// `waze_demo_palco` guarda `{ demo, segredo, hostKey, expiraEm, conta, … }`: a hostKey é CREDENCIAL (quem a
+// tem conduz a demo). Por isso: sai no "Sair" e na troca de conta, o diagnóstico a omite, e o palco nunca a
+// escreve na tela nem na URL. Quem lê não grava (a vencida só deixa de ser oferecida).
+const DEMO_PALCO_KEY = 'waze_demo_palco';
+// Espelhos do servidor (test/demo-app.test.mjs confere): o teto de pedidos (DEMO_PLACES), a janela pra entrar
+// (DEMO_VOTOS_JANELA_S) e a vida da demo (DEMO_TTL_S). Valor de constante NÃO se escreve na frase: vai por
+// `setI18nVars` (ver o fim do `initApp`).
+const DEMO_PEDIDOS_MAX = 30;
+const DEMO_JANELA_H = 3;
+const DEMO_TTL_H = 48;
+let demoCriando = false;
+if (typeof setI18nVars === 'function') {
+    setI18nVars({ demoJanelaH: () => DEMO_JANELA_H, demoTtlDias: () => DEMO_TTL_H / 24, demoMax: () => DEMO_PEDIDOS_MAX });
+}
+
+function lerPalcoDaDemo() {
+    const bruto = safeLS.get(DEMO_PALCO_KEY);
+    if (!bruto) return null;
+    try {
+        const d = JSON.parse(bruto);
+        const forma = d && typeof d === 'object' && typeof d.demo === 'string' && typeof d.segredo === 'string'
+            && typeof d.hostKey === 'string' && Number.isFinite(d.expiraEm);
+        if (!forma || d.expiraEm <= Date.now()) return null;
+        const conta = contaAgora();
+        if (d.conta != null && conta != null && String(d.conta) !== String(conta)) return null;
+        return d;
+    } catch (e) { return null; }
+}
+
+// Os filtros da demo são os da BUSCA, escritos pela mesma conta que `fetchNextPage` faz (o guard em
+// test/demo-app.test.mjs compara as duas, linha a linha, sem comentário): a demo mostra o que o filtro do
+// apresentador mostra, e dois lugares montando o mesmo corpo é como um deles se atrasa.
+function filtrosDaDemo() {
+    const filters = {
+        unreadOnly: AppState.filters.unreadOnly !== false
+    };
+    if (AppState.filters.types.length > 0 && AppState.filters.types.length < TYPES_ALL.length) {
+        filters.types = AppState.filters.types;
+    }
+    if (AppState.filters.residential === 'true') filters.residential = true;
+    if (AppState.filters.residential === 'false') filters.residential = false;
+    if (AppState.filters.myArea) {
+        filters.bbox = caixaDaMinhaAreaEm();
+    } else {
+        if (AppState.filters.stateId) filters.stateId = AppState.filters.stateId;
+        if (AppState.filters.managedAreaId) filters.managedAreaId = AppState.filters.managedAreaId;
+    }
+    if (Array.isArray(AppState.filters.categories) && AppState.filters.categories.length > 0) {
+        filters.categories = AppState.filters.categories;
+    }
+    const orderBy = ordemDoWaze();
+    if (orderBy !== 'SORTING_UPDATE_TIME_DESC') filters.orderBy = orderBy;
+    return filters;
+}
+
+// «Brasil · Não lidos · Todos os tipos» — o que a pessoa vai ver nos pedidos, dito antes de criar.
+function resumoDosFiltrosDaDemo() {
+    const f = AppState.filters;
+    const partes = [];
+    if (f.myArea) partes.push(t('demo.criar.minhaArea'));
+    else {
+        const id = API.getCountry();
+        const pais = (AppState.countries || []).find((c) => String(c.id) === String(id));
+        partes.push(pais ? pais.name : t('demo.criar.paisId', { id }));
+    }
+    partes.push(t(f.unreadOnly !== false ? 'demo.criar.naoLidos' : 'demo.criar.lidosTambem'));
+    const n = Array.isArray(f.types) ? f.types.length : 0;
+    partes.push(n > 0 && n < TYPES_ALL.length ? t('demo.criar.tiposN', { n }) : t('demo.criar.tiposTodos'));
+    return partes.join(' · ');
+}
+
+// A linha das Preferências: só aparece pra quem pode criar, e o link do palco só com uma demo guardada.
+function atualizarLinhaDaDemo() {
+    const linha = document.getElementById('prefDemoRow');
+    if (!linha) return;
+    linha.classList.toggle('hidden', !podeCriarDemoAqui());
+    const link = document.getElementById('prefDemoPalco');
+    if (link) link.classList.toggle('hidden', !lerPalcoDaDemo());
+}
+
+function abrirCriarDemo() {
+    if (!podeCriarDemoAqui()) return;
+    const escreverFiltro = () => { document.getElementById('demoCriarFiltro').textContent = t('demo.criar.filtro', { filtro: resumoDosFiltrosDaDemo() }); };
+    escreverFiltro();
+    // O nome do país só se sabe depois da lista (uma ida por sessão, a mesma dos Filtros): quem nunca abriu os
+    // Filtros veria «País 30». Quando ela chega, com o diálogo ainda aberto, a frase se corrige.
+    if (!(AppState.countries || []).length) {
+        pedirListaDePaises().then(() => { if (!document.getElementById('demoCriarModal').classList.contains('hidden')) escreverFiltro(); }).catch(() => {});
+    }
+    document.getElementById('demoCriarRodape').textContent = t('demo.criar.rodape');
+    document.getElementById('demoCriarJa').classList.toggle('hidden', !lerPalcoDaDemo());
+    document.getElementById('demoCriarErro').classList.add('hidden');
+    sincronizarTempoDaDemo();
+    openModal('demoCriarModal');
+}
+
+// «Tempo por pedido» só vale no «todos juntos»: no livre cada um tem o seu ritmo.
+function sincronizarTempoDaDemo() {
+    const livre = document.querySelector('input[name="demoModo"]:checked')?.value === 'livre';
+    document.getElementById('demoCriarTempo').classList.toggle('hidden', livre);
+}
+
+async function criarDemo() {
+    if (demoCriando || !podeCriarDemoAqui()) return;
+    const erro = document.getElementById('demoCriarErro');
+    erro.classList.add('hidden');
+    if (AppState.filters.myArea && !caixaDaMinhaAreaEm()) {
+        erro.textContent = t('demo.criar.areaAinda');
+        erro.classList.remove('hidden');
+        return;
+    }
+    const modo = document.querySelector('input[name="demoModo"]:checked')?.value === 'livre' ? 'livre' : 'sinc';
+    const tempoMs = modo === 'livre' ? 0 : Number(document.querySelector('input[name="demoTempo"]:checked')?.value ?? 20000);
+    const referencia = document.getElementById('demoCriarRef').checked === true;
+    const botao = document.getElementById('demoCriarOk');
+    demoCriando = true;
+    botao.disabled = true;
+    botao.textContent = t('demo.criar.criando');
+    const epoca = epocaDaSessao;
+    let r;
+    try { r = await API.criarDemo({ modo, tempoMs, referencia, filtros: filtrosDaDemo() }); }
+    catch (e) { r = { success: false }; }
+    demoCriando = false;
+    botao.disabled = false;
+    botao.textContent = t('demo.criar.btn');
+    // Saiu (ou caiu) enquanto o pedido voava: a chave não pode ser guardada pra outra conta.
+    if (epoca !== epocaDaSessao) return;
+    if (!r || r.success !== true) {
+        erro.textContent = msgDoServidor(r || {}) || t('demo.criar.falhou');
+        erro.classList.remove('hidden');
+        return;
+    }
+    safeLS.set(DEMO_PALCO_KEY, JSON.stringify({
+        demo: r.demo, segredo: r.segredo, hostKey: r.hostKey, expiraEm: r.expiraEm, criadoEm: r.criadoEm,
+        total: r.total, modo: r.modo, tempoMs: r.tempoMs, referencia: r.referencia, conta: contaAgora(),
+    }));
+    atualizarLinhaDaDemo();
+    document.getElementById('demoProntaResumo').textContent = t(r.total === 1 ? 'demo.pronta.resumo1' : 'demo.pronta.resumo', {
+        n: r.total, modo: t(r.modo === 'sinc' ? 'demo.criar.sinc' : 'demo.criar.livre'),
+    });
+    // Troca de camada: o `openModal` esconde o de criar (e roda a limpeza dele) — nunca fechar um e abrir o outro.
+    openModal('demoProntaModal');
+    setTimeout(() => { try { document.getElementById('demoAbrirPalco').focus({ preventScroll: true }); } catch (e) { /* sem foco */ } }, 0);
+}
+
+function setupDemoDoApresentador() {
+    document.getElementById('prefDemoCriar')?.addEventListener('click', abrirCriarDemo);
+    document.getElementById('demoCriarCancelar')?.addEventListener('click', () => closeModal('demoCriarModal'));
+    document.getElementById('demoProntaFechar')?.addEventListener('click', () => closeModal('demoProntaModal'));
+    document.getElementById('demoCriarOk')?.addEventListener('click', criarDemo);
+    document.getElementById('demoCriarMudar')?.addEventListener('click', () => { openFiltersModal(); });
+    for (const r of document.querySelectorAll('input[name="demoModo"]')) r.addEventListener('change', sincronizarTempoDaDemo);
+    // Abrir o palco é um <a target=_blank>: o clique fecha o diálogo, e o palco lê a chave no aparelho.
+    document.getElementById('demoAbrirPalco')?.addEventListener('click', () => { setTimeout(() => closeModal('demoProntaModal'), 0); });
 }
 
 // A RODA do mouse e o trackpad, como ZOOM da foto e do mapa ampliados.
@@ -12878,7 +13052,7 @@ async function diagCorpo() {
     const offlinePromessa = lerLocal('offline (base e cache do mapa)', () => diagOffline());
 
     const ls = {}, ss = {};
-    try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); ls[k] = localStorage.getItem(k); } }
+    try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); ls[k] = k === DEMO_PALCO_KEY ? '[chave da demo omitida]' : localStorage.getItem(k); } }
     catch (e) { ls._erro = String(e); }
     try {
         for (let i = 0; i < sessionStorage.length; i++) {
@@ -14158,6 +14332,9 @@ async function handleLogout({ porOutraAba = false, outraConta = false, recusado 
         registrarEventoDeSessao('saiu');   // fica no anel até a linha seguinte apagá-lo
         safeLS.remove(SESSOES_KEY);
         safeLS.remove(NASCIMENTO_KEY);
+        // A chave da demo que esta conta criou (credencial de condução): sair é sair de tudo, e o palco aberto
+        // noutra aba vê a chave sumir (`storage`) e solta o controle.
+        safeLS.remove(DEMO_PALCO_KEY);
         // A fila de saída guarda venueID, updateRequestID e o creatorId de QUEM
         // MANDOU o pedido — dado de terceiro. Sai com o resto, e o efeito assumido
         // é que sair com a fila cheia descarta o que ainda não foi enviado: é
@@ -20673,6 +20850,7 @@ function desenharChavesDePreferencia() {
     marcar('prefPresenca', p.presenca !== false);
     marcar('prefOfflineDisponivel', p.offlineDisponivel === true);
     marcar('prefManterConectado', p.manterConectado !== false);
+    atualizarLinhaDaDemo();
 }
 
 // A página VOLTOU do cache de voltar/avançar (bfcache: Safari e Chrome do Android, ao voltar a
@@ -24236,6 +24414,7 @@ function esquecerOutraConta(id, { soMemoria = false } = {}) {
     if (!soMemoria) {
         safeLS.remove(HISTORY_KEY);
         safeLS.remove(CONQUISTAS_KEY);
+        safeLS.remove(DEMO_PALCO_KEY);   // a demo era da conta anterior
         // Os pedidos que o app estrelou eram estrelas DELA (R10-2-05): com o anel
         // da anterior, o ↑ de quem entrou não guardava esses pedidos.
         safeLS.remove(ESTRELADOS_KEY);
@@ -32269,6 +32448,7 @@ function abrirModalNaAba(aba) {
 // `abrirModalNaAba` garantia): o painel nasce desenhado, nunca a aba errada por
 // um quadro.
 function abrirPerfil(aba = 'filtersTabHistory') {
+    atualizarLinhaDaDemo();   // a linha da demo só existe pra quem pode criar, e o perfil chega depois da abertura
     renderDevModeSection();
     renderUndoGateUI();
     renderPresencaPref();

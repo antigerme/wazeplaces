@@ -8,6 +8,9 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.11.25-03
+**Demo: o apresentador cria a demo pelo app.** Quem é L6+ com área gerenciada (ou staff) ganha, no fim das Preferências, a linha «Demo para apresentação» com o botão «Criar…». O diálogo diz de onde vêm os pedidos (os do seu filtro atual, até 30, sem locais residenciais), deixa escolher «Todos juntos» (um pedido por vez, com revelação e palpite) ou «Cada um no seu ritmo», o tempo por pedido (sem limite, 10, 20 ou 30 s) e se você também vota, escondido. Criada, o diálogo mostra o botão **«Abrir o palco»** — um link comum, que nenhum bloqueador de popup barra. **A chave de condução da demo fica só neste aparelho**, nunca vai pra URL nem pra tela, o diagnóstico a omite, e o «Sair» (ou a troca de conta) a apaga. O palco em si é a próxima etapa.
+
 ## v2026.11.25-02
 **Demo: bastidores da tela do apresentador.** A sala passou a guardar quando a triagem começou e a calcular, no servidor, o resultado que o palco vai projetar: pedidos «unânimes» e «divididos» (uma regra só pra etiqueta, pra ordem e pro resumo), prêmios leves sem ranking (cada pessoa ganha no máximo um, só entra quem votou em 2/3 dos pedidos e a sala precisa de 3 pessoas assim), países informados (sem caixa nem acento) e, no modo «cada um no seu ritmo», o ritmo da sala. **Duas coisas que a tela do apresentador não mostra mais**: o voto de referência do apresentador aparece só como «registrado» até o pedido ser revelado (a tela é projetada), e no modo livre a divisão colorida dos votos só aparece quando a demo acaba — ao vivo ela orientaria quem ainda está votando. O leitor do fluxo ao vivo virou um arquivo só, usado pela página do convidado e pela do palco.
 

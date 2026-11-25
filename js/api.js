@@ -765,6 +765,16 @@ const API = {
         return this._post('parear', { action: 'create', sessionToken, comCodigo, ...(conta ? { conta } : {}) });
     },
 
+    // CRIAR uma demo (a sala triando pedidos reais, sem login). `filtros` é o corpo da busca do app (o MESMO
+    // que o `fetchPlaces` leva); o servidor confere o portão (L6+ com área gerenciada) e refaz a busca.
+    async criarDemo({ modo, tempoMs, referencia, filtros = {} } = {}) {
+        const sessionToken = this.sessionToken;
+        if (!sessionToken) return semSessao();
+        return this._post('demo-criar', {
+            sessionToken, region: this.getRegion(), countryId: this.getCountry(), modo, tempoMs, referencia, ...filtros,
+        });
+    },
+
     // O "Sair" cancela os códigos de pareamento que ESTE aparelho emitiu (ver o
     // `cancel` no core). Melhor esforço: sem rede, o código vence em 5 min.
     async cancelarPareamento(code) {
