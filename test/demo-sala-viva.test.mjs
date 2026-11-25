@@ -319,3 +319,32 @@ test('fechar: o que estava pendente é gravado antes de o adaptador sair', async
   await sala.fechar();
   assert.equal(gravacoes.length, n + 1, 'sem nada pendente não grava de novo');
 });
+
+// O workerd recusa `setTimeout` chamado com `this` que não seja o global ("Illegal invocation"); o Node não.
+// Só o `wrangler dev` mostrou isto. O teste faz o Node recusar também.
+test('timers padrão: não dependem de `this` (o workerd recusaria o setTimeout solto num objeto)', async () => {
+  const guardas = ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'];
+  const originais = Object.fromEntries(guardas.map((n) => [n, globalThis[n]]));
+  const usados = [];
+  for (const n of guardas) {
+    globalThis[n] = function (...args) {
+      if (this !== undefined && this !== globalThis) throw new TypeError(`Illegal invocation: ${n} com this errado`);
+      usados.push(n);
+      return originais[n](...args);
+    };
+  }
+  try {
+    const sala = new SalaViva({ salvar: async () => {}, agendar: () => {} }); // os timers do sistema
+    sala.criar({ cfg: CFG({ modo: 'livre' }), deck: DECK });
+    await sala.acao({ tipo: 'entrar', parte: pid(1), nome: 'Ana' });
+    await sala.acao({ tipo: 'entrar', parte: pid(2), nome: 'Bia' });
+    const res = sala.fluxo({ parte: pid(1) });
+    await sala.acao(host('comecar'));
+    await sala.acao({ tipo: 'recado', hostHash: HOST, texto: 'oi' });
+    await res.body.cancel();
+    await sala.fechar();
+    assert.ok(usados.includes('setTimeout') && usados.includes('setInterval'), 'o caminho dos timers não rodou: o teste não provaria nada');
+  } finally {
+    for (const n of guardas) globalThis[n] = originais[n];
+  }
+});

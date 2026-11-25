@@ -56,8 +56,18 @@ const ENC = new TextEncoder();
 const evento = (nome, dados, id) => ENC.encode(`event: ${nome}\n${id !== undefined ? `id: ${id}\n` : ''}data: ${JSON.stringify(dados)}\n\n`);
 const PING = ENC.encode(': ping\n\n');
 
+// Os timers do sistema, em FUNÇÕES: o `setTimeout` solto dentro de um objeto, chamado como
+// `this.timers.set(...)`, leva `this` = o objeto, e o workerd (e o navegador) recusam com
+// "Illegal invocation". O Node tolera, e é por isso que só o `wrangler dev` mostrou.
+const TIMERS_DO_SISTEMA = {
+  set: (fn, ms) => setTimeout(fn, ms),
+  clear: (h) => clearTimeout(h),
+  setIntervalo: (fn, ms) => setInterval(fn, ms),
+  clearIntervalo: (h) => clearInterval(h),
+};
+
 export class SalaViva {
-  constructor({ agora = Date.now, salvar = async () => {}, agendar = () => {}, apagar = async () => {}, timers = { set: setTimeout, clear: clearTimeout, setIntervalo: setInterval, clearIntervalo: clearInterval } } = {}) {
+  constructor({ agora = Date.now, salvar = async () => {}, agendar = () => {}, apagar = async () => {}, timers = TIMERS_DO_SISTEMA } = {}) {
     this.agora = agora;
     this.salvar = salvar;
     this.agendar = agendar;
