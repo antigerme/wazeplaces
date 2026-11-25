@@ -10,12 +10,14 @@ module.exports = {
   content: [
     './index.src.html',   // o FONTE — varrer o gerado criaria dependência de ordem
     './status.src.html',  // idem, pro /status.html
+    './demo.src.html',    // idem, pro /demo.html (a página do convidado da demo)
     './js/app.js',
     './js/api.js',
     './js/swipe.js',
     './js/i18n.js',
     './js/version.js',
     './js/status.js',
+    './js/demo.js',
   ],
   theme: { extend: {} },
   plugins: [],

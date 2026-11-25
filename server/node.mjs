@@ -435,6 +435,7 @@ const ALLOWED_ROOT_FILES = new Set([
   // conteúdos, 67 KB de diferença. O `.assetsignore` faz o mesmo no Cloudflare.
   '/index.html',
   '/status.html',
+  '/demo.html',
   '/manifest.json',
   '/service-worker.js',
   '/favicon.ico',
@@ -491,7 +492,7 @@ const APELIDOS_DO_INDICE = new Map([['/index.html', '/'], ['/index', '/'], ['/in
 // página). `bonito → arquivo`: `bonito` é servido com 200 (o conteúdo de
 // `arquivo`), e `/arquivo` redireciona pra `bonito`. `test/vm-estaticos.test.mjs`
 // cobra os dois sentidos.
-const PAGINAS_SEM_EXTENSAO = new Map([['/status', '/status.html']]);
+const PAGINAS_SEM_EXTENSAO = new Map([['/status', '/status.html'], ['/demo', '/demo.html']]);
 
 // Resolve o caminho pedido: `{ safe, file }` (o arquivo a servir),
 // `{ redirecionar }` (um apelido do índice) ou `null` (nada aqui). Fonte única

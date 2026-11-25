@@ -8,6 +8,9 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.11.25-01
+**A página do convidado da demo (`/demo`).** Quem apresenta o app numa palestra passa a ter uma sala: os convidados abrem o link (ou digitam um código de 6 símbolos), escolhem um apelido — sem login — e triam, no próprio celular, os mesmos pedidos reais, com o card e o gesto do app (← ✕ · → ✓ · ↑ pular). **Nada vai ao Waze**: o voto vai pra sala, o Desfazer não existe (vale a primeira escolha) e o texto livre e o autor do pedido nunca chegam ao convidado. No modo *sincronizado* todos veem o mesmo pedido, com contagem 3-2-1, barra de tempo, palpite («adivinhe a sala») e a revelação de como a sala votou; no modo *livre* cada um vai no seu ritmo. Recado do apresentador, pausa e reconexão automática (a conexão ao vivo cai e volta sozinha, até com o servidor reiniciado) já funcionam. A tela do apresentador, dentro do app, é a próxima etapa.
+
 ## v2026.11.23-02
 **O `/status.html` dizia "atualizado há 413 min" do lado do selo "dados ao vivo" — achado medindo em produção.** A contagem de sessões e de «Manter conectado» só era regravada quando o NÚMERO mudava; com a contagem estável por horas (madrugada, comunidade pequena), o carimbo `atualizadoEm` ficava congelado enquanto o relógio seguia andando — e o mesmo sintoma esconderia um cron de verdade MORTO, já que a página não distinguia os dois casos. Agora o cron regrava de novo depois de 4h sem mudança nenhuma (um "heartbeat", no máximo 6 escritas extras de KV por dia — bem dentro da cota de 1.000/dia), só pra provar que a varredura rodou; "atualizado há" formata em horas e minutos quando passa de 1h; e passando de 5h sem nenhuma gravação (nem o heartbeat — a folga extra evita acusar uma página saudável nos minutos antes do heartbeat fechar), os dois selos "ao vivo" viram "dados desatualizados" — cor e texto juntos, nunca só a cor.
 

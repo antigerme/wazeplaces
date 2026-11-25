@@ -169,6 +169,11 @@ jobs:
           # responder por tile que não tinha (o MAPA sumiu pra TODO MUNDO).
           # Os dois reprovam aqui hoje, provado por sabotagem.
           npm run test:offline
+          # A página do CONVIDADO da demo (/demo) contra a VM de verdade: os 41+
+          # pedidos reais dos seis países cabem no iPhone e no Fold, nas quatro
+          # línguas; o jogo sincronizado inteiro (palpite, revelação, pausa, recado);
+          # e o fluxo ao vivo que cai e volta, inclusive com o servidor reiniciado.
+          npm run test:demo
 
       - name: Boot smoke do adaptador Node
         run: |

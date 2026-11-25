@@ -156,7 +156,7 @@ export class SalaViva {
   }
   _info() {
     const c = this.est.cfg;
-    return { cfg: { modo: c.modo, tempoMs: c.tempoMs, total: c.total, referencia: c.referencia, max: c.max, votosAte: c.votosAte, expiraEm: c.expiraEm }, convidado: this.deck.convidado };
+    return { cfg: { modo: c.modo, tempoMs: c.tempoMs, total: c.total, referencia: c.referencia, max: c.max, votosAte: c.votosAte, expiraEm: c.expiraEm, regiao: this.deck.regiao }, convidado: this.deck.convidado };
   }
 
   // ── o fluxo (SSE) ──

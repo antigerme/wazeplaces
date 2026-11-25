@@ -172,6 +172,8 @@ wazeplaces/
 ├── index.html              # GERADO por `npm run html` — é ele que a raiz serve
 ├── status.src.html         # A página pública /status.html (transparência de uso) — o FONTE
 ├── status.html             # GERADO por `npm run html` — servido sem extensão (`/status`)
+├── demo.src.html           # A página do convidado da demo (`/demo#<segredo>`) — o FONTE
+├── demo.html               # GERADO por `npm run html` — servido sem extensão (`/demo`)
 ├── manifest.json           # PWA manifest
 ├── service-worker.js       # Service worker (cache + auto-update)
 ├── icons/
@@ -194,6 +196,7 @@ wazeplaces/
 │   ├── mapa.js             # Mini-mapa e mapa ampliado (tiles do Waze)
 │   ├── qr.js               # Gerador de QR do pareamento (sob demanda)
 │   ├── status.js           # A página /status.html: busca /api/status uma vez, sem polling
+│   ├── demo.js             # A página /demo (convidado): triagem em sala, fluxo ao vivo, nada vai ao Waze
 │   ├── swipe.js            # Gestos drag/swipe
 │   ├── version.js          # A versão (serial YYYYMMDDnn)
 │   ├── sw-register.js      # Registro e auto-update do service worker

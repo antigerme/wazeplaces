@@ -75,6 +75,8 @@ wazeplaces/
 │                            #   gerador confere o hash do script inline do tema e não grava se divergir.
 ├── status.src.html          # A página pública /status.html (transparência de uso). FONTE, mesmo tratamento do index.src.html.
 ├── status.html              # GERADO por `npm run html`. Servido SEM extensão (`/status`; `/status.html` redireciona).
+├── demo.src.html            # A página do CONVIDADO da demo (`/demo#<segredo>`). FONTE; o card é cópia do <template> do index.src.html.
+├── demo.html                # GERADO por `npm run html`. Servido SEM extensão (`/demo`).
 ├── manifest.json            # PWA manifest (ícones SVG em icons/)
 ├── service-worker.js        # Cache + auto-update (controllerchange + SKIP_WAITING)
 ├── icons/
@@ -95,6 +97,7 @@ wazeplaces/
 │   │                        #   fixo) e `mapaGrade` (o mapa ampliado). Tiles do Waze, camada `live/base`.
 │   ├── qr.js                # Gerador de QR, JS puro, só pro pareamento; sob demanda (`carregarQr()`); vetores em test/qr.test.mjs
 │   ├── status.js            # A página /status.html: busca /api/status UMA vez (zero polling) e monta o DOM
+│   ├── demo.js              # A página /demo (convidado): IIFE; fluxo SSE por fetch POST, voto otimista, telas. As funções puras saem em `window.DemoPuro`
 │   ├── version.js           # FONTE ÚNICA da versão (APP_VERSION + verLabel). Carregado antes do app.js
 │   ├── i18n.js              # i18n pt/en/es/fr: I18N_DICT, t(), applyI18n(), setLang(), setI18nVars(). FONTE
 │   │                        #   ÚNICA de texto de tela; LANGS_SUPORTADOS = Object.keys(I18N_DICT)
@@ -146,6 +149,7 @@ wazeplaces/
 │   ├── gerar-html.mjs       # Gera o index.html a partir do index.src.html (npm run html)
 │   ├── gerar-css.mjs        # Gera o css/app.css (npm run css): tailwind + styles.css, nessa ORDEM (é o contrato)
 │   ├── gerar-js.mjs         # Gera o js/min/*.js (npm run js): um arquivo por fonte, esbuild de versão FIXA
+│   ├── smoke-demo.mjs       # Smoke da /demo (npm run test:demo): VM de verdade, salas semeadas, 41+ pedidos reais × iPhone/Fold × 4 línguas, fluxo ao vivo, servidor reiniciado
 │   ├── smoke-offline.mjs    # Smoke do offline (npm run test:offline): o service worker no comando
 │   ├── cf-injecao.mjs       # Mede a injeção do Cloudflare no index.html (com controle: menção × tag)
 │   ├── csp-img.mjs          # FONTE ÚNICA do casamento do curinga `https://*.waze.com` da `img-src`
@@ -393,6 +397,18 @@ Decidido pelo owner (2026-09-23). Fase 1: só servidor (`server/wme-grpc.mjs`, r
 - **Fica de fora, aceito**: o «Sair» que não alcança o servidor deixa a sessão renovada por até 14 dias (o aviso diz); a sessão órfã sem token no aparelho idem; `renovadas` conta o 200 do Waze, não a gravação do cookie.
 - **Mexer aqui é mexer em cota e em privacidade** (ver a exceção da Ajuda na seção da chave).
 - **A prova de produção** (fora do repo): sessões novas COM e SEM a opção, sem NENHUM uso até a hora (qualquer uso renova o cookie e anula a prova), conferidas a +26 h e +38 h. É o único jeito de provar o Cron no Cloudflare de verdade.
+
+---
+
+## 🎤 A demo — convidados triam junto, nada vai ao Waze (v2026.11.25-01, em andamento)
+
+Pra Global Champs/apresentadores «venderem» o app. Quem cria: **L6+ com área gerenciada ou staff** (`podeCriarDemo`, `MIN_RANK_DEMO = 5`, só no SERVIDOR: lê o `/Session` direto, nunca o `handlePerfil`). Os convidados não têm login. **Feito**: servidor (`server/demo*.mjs`, `worker/demo-do.mjs`, rotas `demo-*`) e a página do convidado (`/demo`). **Falta**: a tela do apresentador dentro do app (criar, palco, resultados), constantes espelho com teste de paridade, «cartão de participação», reações.
+
+- **Os convidados recebem o MESMO que o apresentador veria** (a busca de página 1 do filtro dele, residencial fora), por ALLOWLIST (`montarRetrato`): sem autor, sem `creatorId`, sem texto livre (`flagComment`, `description`, `phone`…), ids sintéticos `demo-N`, foto só de host `*.waze.com`. O apresentador guarda os ids reais (o ↗). Campo novo do Waze nasce FORA.
+- **O voto é de sala, nunca do Waze**: ✕ R · ✓ L · ↑ P, **a primeira escolha vale** (sem Desfazer), e a repetição é idempotente (`repetido`). A regra do jogo é pura em `server/demo-sala.mjs` (fases saguão → contagem → andamento ⇄ pausada → encerrada; modos `livre`/`sinc`; revelação automática em `fimEm + SALA_GRACA_MS`); a sala viva (`demo-sala-viva.mjs`) só difunde e grava; o **Durable Object** (Cloudflare) e o **arquivo** (VM) são adaptadores da MESMA `SalaViva`. A demo escreve no DO/arquivo, **nunca no KV das sessões** (um link vazado esgotaria as 1.000 escritas/dia e derrubaria a renovação de todo editor).
+- **O fluxo ao vivo é POST + `text/event-stream` lido por `fetch`** (`/api/demo-ao-vivo`): o segredo vai no CORPO, nunca em URL (`EventSource` só faz GET — por isso não se usa). O estado é sempre o INTEIRO, então reconectar é só abrir de novo. Batimento a cada 20 s; coalescência de 250 ms; teto de 400 conexões com sonda antes de recusar. **A VM e o Worker respondem igual** (`test/demo-vm-http.test.mjs`, `test/demo-do.test.mjs`); no workerd o `setTimeout` solto num objeto dá «Illegal invocation» (os timers do sistema são FUNÇÕES) e o fechamento do cliente só chega ao `cancel` no batimento seguinte.
+- **A página `/demo` é pública e sem script inline** (a CSP só autoriza o do tema do app, por hash): o tema vem do sistema, posto pelo `js/demo.js`. Reusa o `swipe.js` (ganchos `cardDaFrente`, `acoesTravadas`, `onSwipe*`), o `mapa.js` e as chaves `card.*` do dicionário; texto próprio é `demo.*`. A chave de armazenamento (`demo_participante`) **não começa com `waze`** de propósito (o guard do «Sair» não a conhece — a página não tem login). O mesmo aparelho volta à mesma sala ao recarregar; outro contexto é outra pessoa.
+- **Mockup antes, dado que quebra depois**: o `npm run test:demo` mede os pedidos reais dos seis países no iPhone (393) e no Fold (280) nas 4 línguas (barra ✕↑✓ dentro da janela e tocável por `elementFromPoint`, sem rolagem lateral), o jogo inteiro e a reconexão — com CONTROLE do medidor. **Ainda NÃO validado**: o Durable Object (migração v3, binding `DEMO_SALA`) e o SSE pela borda de PRODUÇÃO (WAF, Bot Fight Mode, ociosidade de 100 s contra o batimento de 20 s) — só um deploy prova; não afirme que funciona em produção antes disso.
 
 ---
 
