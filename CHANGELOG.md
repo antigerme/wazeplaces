@@ -8,6 +8,9 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.11.25-04
+**Demo: o palco do apresentador (`/palco`).** A tela que o apresentador projeta: o saguão com o QR grande (e o código de 6 símbolos sob demanda, que abre a mesma sala), a contagem, o pedido em foco com o mapa e a foto, quantos já votaram, o tempo, a revelação das barras com «a sala escolheu…» e quantos acertaram o palpite, a pausa, o recado pra sala e, no fim, o resultado em três quadros: pedidos (do mais unânime ao mais dividido, com o ↗ pro WME), pessoas e prêmios leves, e o resumo da sala em números. **Tudo pelo teclado**: Espaço ou → para revelar e avançar, P pausa, R manda um recado, 1·2·3 é o seu voto escondido. **Pensado pra ser projetado**: o seu voto aparece só como «registrado» até a revelação; no modo «cada um no seu ritmo» a divisão dos votos só aparece no fim (ao vivo ela orientaria quem ainda está votando); o apelido de quem entrou nunca vira código na tela; a chave da demo nunca é escrita na tela nem no endereço. O palco abre numa aba própria (por isso não mexe nas decisões do app) e solta o controle quando você dá «Sair» no app.
+
 ## v2026.11.25-03
 **Demo: o apresentador cria a demo pelo app.** Quem é L6+ com área gerenciada (ou staff) ganha, no fim das Preferências, a linha «Demo para apresentação» com o botão «Criar…». O diálogo diz de onde vêm os pedidos (os do seu filtro atual, até 30, sem locais residenciais), deixa escolher «Todos juntos» (um pedido por vez, com revelação e palpite) ou «Cada um no seu ritmo», o tempo por pedido (sem limite, 10, 20 ou 30 s) e se você também vota, escondido. Criada, o diálogo mostra o botão **«Abrir o palco»** — um link comum, que nenhum bloqueador de popup barra. **A chave de condução da demo fica só neste aparelho**, nunca vai pra URL nem pra tela, o diagnóstico a omite, e o «Sair» (ou a troca de conta) a apaga. O palco em si é a próxima etapa.
 

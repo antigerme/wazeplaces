@@ -268,13 +268,13 @@ test('atalhos: a guarda é a PRIMEIRA instrução do handleKeyDown, e a regra mo
   for (const arq of readdirSync(new URL('../js/', import.meta.url)).filter((f) => f.endsWith('.js'))) {
     let txt = semComentario(readFileSync(new URL('../js/' + arq, import.meta.url), 'utf8'));
     if (arq === 'app.js') txt = txt.replace(regra, '');
-    // A página da demo (/demo) não compartilha escopo com o app.js: tem a PRÓPRIA
+    // As páginas da demo (/demo e /palco) não compartilham escopo com o app.js: tem a PRÓPRIA
     // `atalhoDoNavegador`, e o que se trava é que seja a MESMA regra, linha a linha.
-    if (arq === 'demo.js') {
+    if (arq === 'demo.js' || arq === 'palco.js') {
       const propria = /function atalhoDoNavegador\(e\) \{[\s\S]*?\n\s*\}/.exec(txt);
-      assert.ok(propria, 'a página da demo deixou de ter a sua `atalhoDoNavegador`');
+      assert.ok(propria, `${arq}: a página deixou de ter a sua \`atalhoDoNavegador\``);
       const normal = (s) => s.split('\n').map((l) => l.trim()).join('\n');
-      assert.equal(normal(propria[0]), normal(regra), 'a `atalhoDoNavegador` da demo divergiu da do app');
+      assert.equal(normal(propria[0]), normal(regra), `a \`atalhoDoNavegador\` de ${arq} divergiu da do app`);
       txt = txt.replace(propria[0], '');
     }
     for (const m of txt.matchAll(MOD)) fora.push(`${arq}: ${m[0]}`);

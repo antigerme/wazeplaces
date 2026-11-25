@@ -11,6 +11,7 @@ module.exports = {
     './index.src.html',   // o FONTE — varrer o gerado criaria dependência de ordem
     './status.src.html',  // idem, pro /status.html
     './demo.src.html',    // idem, pro /demo.html (a página do convidado da demo)
+    './palco.src.html',   // idem, pro /palco.html (a tela do apresentador)
     './js/app.js',
     './js/api.js',
     './js/swipe.js',
@@ -18,6 +19,7 @@ module.exports = {
     './js/version.js',
     './js/status.js',
     './js/demo.js',
+    './js/palco.js',
   ],
   theme: { extend: {} },
   plugins: [],

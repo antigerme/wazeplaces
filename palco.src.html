@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<!-- O PALCO da demo (/palco): a tela do apresentador, feita pra ser PROJETADA. É uma página própria, e não uma
+     camada do app, porque o app liga ← → ↑ a decisões REAIS no Waze (o → de «próximo» a um toque de mandar um ✓),
+     porque ela vai pra a tela do projetor sem levar o app junto e porque a queda da sessão do Waze no meio da
+     apresentação não a derruba: a chave da demo basta. A chave mora no aparelho (`waze_demo_palco`, gravada pelo
+     app) e NUNCA aparece aqui — nem na tela, nem na URL. Sem script inline (a CSP só autoriza o do tema do app). -->
+<html lang="pt-BR" class="tema-claro">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="description" content="Waze Places — o palco da demonstração ao vivo.">
+    <meta name="theme-color" content="#f8fafc" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
+    <meta name="referrer" content="no-referrer">
+    <meta name="robots" content="noindex">
+    <title data-i18n="palco.title">Waze Places — Palco da demo</title>
+    <link rel="icon" type="image/svg+xml" href="icons/icon-192.svg">
+    <link rel="stylesheet" href="css/app.css">
+    <script src="js/min/version.js"></script>
+    <script src="js/min/i18n.js"></script>
+    <script src="js/min/mapa.js"></script>
+    <script src="js/min/qr.js"></script>
+    <script src="js/min/demo-fluxo.js"></script>
+    <script src="js/min/palco.js" defer></script>
+</head>
+<body class="h-screen overflow-hidden bg-slate-50 text-slate-800 dark:bg-slate-900 dark:text-slate-200">
+  <div id="palcoRaiz" class="h-full flex flex-col"></div>
+  <!-- Aviso de conexão e de ação: fica sobre o palco, nunca empurra o conteúdo. -->
+  <div id="palcoAviso" role="status" aria-live="polite" class="hidden fixed inset-x-0 top-20 z-[70] flex justify-center px-4 pointer-events-none">
+    <p id="palcoAvisoTexto" class="bg-slate-800 text-white text-base font-semibold px-5 py-2.5 rounded-full shadow-lg"></p>
+  </div>
+</body>
+</html>

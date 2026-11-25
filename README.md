@@ -174,6 +174,8 @@ wazeplaces/
 ├── status.html             # GERADO por `npm run html` — servido sem extensão (`/status`)
 ├── demo.src.html           # A página do convidado da demo (`/demo#<segredo>`) — o FONTE
 ├── demo.html               # GERADO por `npm run html` — servido sem extensão (`/demo`)
+├── palco.src.html          # O palco da demo (`/palco`): a tela do apresentador, pra projetar — o FONTE
+├── palco.html              # GERADO por `npm run html` — servido sem extensão (`/palco`)
 ├── manifest.json           # PWA manifest
 ├── service-worker.js       # Service worker (cache + auto-update)
 ├── icons/
@@ -198,6 +200,7 @@ wazeplaces/
 │   ├── status.js           # A página /status.html: busca /api/status uma vez, sem polling
 │   ├── demo.js             # A página /demo (convidado): triagem em sala, fluxo ao vivo, nada vai ao Waze
 │   ├── demo-fluxo.js       # O leitor do fluxo ao vivo da demo (um só, das páginas /demo e /palco)
+│   ├── palco.js            # A página /palco: conduz a sala (teclado), mostra o jogo e o resultado
 │   ├── swipe.js            # Gestos drag/swipe
 │   ├── version.js          # A versão (serial YYYYMMDDnn)
 │   ├── sw-register.js      # Registro e auto-update do service worker

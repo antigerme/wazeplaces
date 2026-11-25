@@ -514,6 +514,231 @@ if (rodar(9)) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
+console.log('\n10) O PALCO (/palco): o saguão com o QR e o código, o jogo conduzido pelo teclado, a referência escondida, o livre sem barra ao vivo, o resultado');
+const PROJETORES = [{ nome: 'laptop 1366×768', viewport: { width: 1366, height: 768 } }, { nome: 'projetor 1920×1080', viewport: { width: 1920, height: 1080 } }];
+const parteDe = (n) => 'parte-do-palco-' + String(n).padStart(4, '0');
+async function convidar(sala, n, apelido, pais = 'Brasil') {
+  const r = await fetch(BASE + '/api/demo-entrar', { method: 'POST', body: JSON.stringify({ demo: sala.id, parte: parteDe(n), apelido, pais }) });
+  return r.json();
+}
+const votarComo = (sala, n, idx, voto) => fetch(BASE + '/api/demo-votar', { method: 'POST', body: JSON.stringify({ demo: sala.id, parte: parteDe(n), idx, voto }) }).then((r) => r.json());
+const palpitarComo = (sala, n, idx, palpite) => fetch(BASE + '/api/demo-palpitar', { method: 'POST', body: JSON.stringify({ demo: sala.id, parte: parteDe(n), idx, palpite }) }).then((r) => r.json());
+async function abrirPalco(pr, lingua, sala, { escuro = false } = {}) {
+  const ctx = await browser.newContext({ viewport: pr.viewport, locale: lingua, colorScheme: escuro ? 'dark' : 'light' });
+  const chave = sala ? JSON.stringify({ demo: sala.id, segredo: sala.segredo, hostKey: sala.hostKey, expiraEm: Date.now() + 48 * 3600_000, criadoEm: Date.now(), total: DECK.length, conta: '1' }) : null;
+  if (chave) await ctx.addInitScript((c) => localStorage.setItem('waze_demo_palco', c), chave);
+  const page = await ctx.newPage();
+  const erros = [];
+  page.on('pageerror', (e) => erros.push('pageerror: ' + String(e.message).slice(0, 160)));
+  page.on('console', (m) => { if (m.type() === 'error' && !/Failed to load resource|net::ERR|waze\.com/.test(m.text())) erros.push('console: ' + m.text().slice(0, 160)); });
+  await page.goto(BASE + '/palco', { waitUntil: 'domcontentloaded' });
+  return { ctx, page, erros };
+}
+const textoDe = (page, sel) => page.evaluate((s) => { const e = document.querySelector(s); return e ? e.textContent : null; }, sel);
+const palcoCabe = (page) => page.evaluate(() => {
+  const doc = document.documentElement;
+  const ruins = [];
+  for (const el of document.querySelectorAll('#palcoRaiz button, #palcoRaiz canvas, #palcoRaiz h1, #palcoRaiz h2')) {
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0 || el.closest('.hidden')) continue;
+    if (r.right > doc.clientWidth + 1 || r.left < -1) ruins.push('fora na horizontal: ' + (el.id || el.textContent.trim().slice(0, 20)));
+    if (el.tagName === 'BUTTON' && r.bottom > innerHeight + 1 && !el.closest('#palcoFimCorpo, #palcoGrade, #palcoDetalhe')) ruins.push('botão abaixo da janela: ' + el.textContent.trim().slice(0, 20));
+  }
+  // O que passa da própria caixa (o painel lateral e o cartão do pedido têm `overflow: hidden`: o que passa SOME, calado).
+  for (const id of ['palcoLado', 'palcoFoco', 'palcoAvanco', 'palcoDecisoes']) {
+    const el = document.getElementById(id);
+    if (el && el.scrollHeight > el.clientHeight + 1) ruins.push('cortado: #' + id + ' (' + el.scrollHeight + ' > ' + el.clientHeight + ')');
+  }
+  return { rolaDeLado: doc.scrollWidth - doc.clientWidth, rolaPraBaixo: document.body.scrollHeight - innerHeight, ruins };
+});
+
+if (rodar(10)) {
+  // CONTROLE: sem chave, o palco diz de onde abri-lo — e não tenta nada na rede.
+  {
+    const { ctx, page } = await abrirPalco(PROJETORES[0], 'pt-BR', null);
+    await esperarOuExplodir(page, () => !!document.getElementById('palcoMsg'), 'a mensagem sem chave');
+    checa(/Preferências/.test(await textoDe(page, '#palcoMsg')), 'sem chave, o palco diz de onde abri-lo (Preferências → Demo)');
+    await ctx.close();
+  }
+
+  // A volta completa, no laptop, em português, com a referência ligada.
+  {
+    const sala = semear({ modo: 'sinc', tempoMs: 0, total: 3, referencia: true });
+    const { ctx, page, erros } = await abrirPalco(PROJETORES[0], 'pt-BR', sala);
+    await esperarOuExplodir(page, () => !!document.getElementById('palcoQr'), 'o saguão do palco', 20000);
+    // XSS: o apelido é TEXTO de terceiro numa tela projetada.
+    await convidar(sala, 1, '<b id="xss1">Ana</b><img src=x onerror=window.__xss=1>', '<i>Brasil</i>');
+    await convidar(sala, 2, 'Beto', 'México');
+    await convidar(sala, 3, 'Carla', 'França');
+    await esperarOuExplodir(page, () => document.querySelectorAll('#palcoNomes li').length === 3, 'os 3 nomes no saguão');
+    const injetou = await page.evaluate(() => !!document.getElementById('xss1') || !!document.querySelector('#palcoNomes img') || window.__xss === 1);
+    checa(!injetou, 'o apelido com HTML aparece como TEXTO (nada é injetado na tela do projetor)');
+    checa((await textoDe(page, '#palcoNomes')).includes('<b id="xss1">'), 'o texto do apelido sai literal (escapado)');
+    checa(/3 na sala/.test(await textoDe(page, '#palcoNaSalaTxt')), 'a pílula conta quem entrou');
+    // O QR: desenhado (canvas com tinta de verdade) e o endereço SEM a chave.
+    const qr = await page.evaluate(() => { const c = document.getElementById('palcoQr'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let escuros = 0; for (let i = 0; i < d.length; i += 4) if (d[i] < 60) escuros++; return { w: c.clientWidth, escuros, total: d.length / 4 }; });
+    checa(qr.w >= 220 && qr.escuros > qr.total * 0.15, 'o QR está desenhado e grande o bastante pra ler de longe', JSON.stringify(qr));
+    const tela1 = await page.evaluate(() => document.body.innerText);
+    checa(!tela1.includes(sala.hostKey) && !tela1.includes(sala.segredo), 'a chave e o segredo NÃO estão escritos na tela');
+    // O código curto, sob demanda, e ele ABRE a sala do outro lado (a mesma da página do convidado).
+    await page.locator('#palcoCodigoBtn').click();
+    await esperarOuExplodir(page, () => !document.getElementById('palcoCodigo').classList.contains('hidden'), 'o código curto');
+    const codigo = (await textoDe(page, '#palcoCodigoTexto')).trim();
+    checa(/^[A-Z2-9]{3}-[A-Z2-9]{3}$/.test(codigo), 'o código aparece no formato que o convidado digita', codigo);
+    const abre = await (await fetch(BASE + '/api/demo-abrir', { method: 'POST', body: JSON.stringify({ codigo: codigo.replace('-', '') }) })).json();
+    checa(abre.success === true && abre.demo === sala.id, 'o código mostrado abre a MESMA sala');
+    const cab1 = await palcoCabe(page);
+    checa(cab1.rolaDeLado <= 0 && cab1.rolaPraBaixo <= 1 && cab1.ruins.length === 0, 'o saguão cabe no laptop (sem rolagem, nada fora da janela)', JSON.stringify(cab1));
+    // Começa pelo ESPAÇO.
+    await page.keyboard.press('Space');
+    await esperarOuExplodir(page, () => !!document.getElementById('palcoContagemNum'), 'a contagem 3-2-1', 8000);
+    checa(true, 'o Espaço começa a demo (contagem 3-2-1 na tela)');
+    await esperarOuExplodir(page, () => !!document.getElementById('palcoFoco') && !!document.querySelector('#palcoFoco [data-pedido]'), 'o pedido em foco', 15000);
+    checa((await textoDe(page, '#palcoFoco h2')) === (DECK[0].name || DECK[0].address), 'o pedido em foco é o 1º do baralho');
+    // A REFERÊNCIA: confirma sem dizer qual (a tela é projetada).
+    await page.keyboard.press('Digit1');   // ✕
+    await esperarOuExplodir(page, () => /Referência registrada/.test(document.getElementById('palcoLado').textContent), 'a referência registrada');
+    const lado = await textoDe(page, '#palcoLado');
+    const painelRef = await page.evaluate(() => { const t = [...document.querySelectorAll('#palcoLado > div')].find((d) => /Seu voto/.test(d.textContent)); return t ? t.textContent : ''; });
+    checa(!/[✕↑✓]/.test(painelRef), 'antes da revelação a tela NÃO diz qual foi o voto de referência', painelRef);
+    const bruto = await page.evaluate(() => document.documentElement.outerHTML);
+    checa(!/data-ref="R"[^>]*disabled|Rejeitar/.test((bruto.match(/id="palcoLado"[\s\S]*?<\/aside>/) || [''])[0].split('Seu voto')[1] || ''), 'o painel da referência não escreve o voto escolhido em lugar nenhum (nem em atributo)');
+    // Os convidados votam; o palco conta e a barra ESPERA.
+    await votarComo(sala, 1, 1, 'R'); await votarComo(sala, 2, 1, 'R'); await votarComo(sala, 3, 1, 'L');
+    await palpitarComo(sala, 1, 1, 'R'); await palpitarComo(sala, 2, 1, 'L');
+    await esperarOuExplodir(page, () => /3\s*\/\s*3/.test(document.getElementById('palcoLado').textContent.replace(/\s+/g, ' ')), 'os 3 votos contados');
+    checa((await textoDe(page, '#palcoLado')).includes('?'), 'antes de revelar a barra mostra «?» (a sala não é orientada)');
+    // Recado: o campo NÃO é apagado quando chega voto (a visão se refaz o tempo todo).
+    await page.keyboard.press('KeyR');
+    await esperarOuExplodir(page, () => !document.getElementById('palcoRecado').classList.contains('hidden'), 'o campo do recado');
+    await page.locator('#palcoRecadoCampo').fill('Olhem o mapa!');
+    await convidar(sala, 4, 'Dani'); await convidar(sala, 4, 'Dani');
+    await esperarOuExplodir(page, () => /4\s*na sala|4 na sala/.test(document.getElementById('palcoNaSalaTxt').textContent), 'o 4º convidado na pílula');
+    checa((await page.locator('#palcoRecadoCampo').inputValue()) === 'Olhem o mapa!', 'o que se digita no recado sobrevive às atualizações da sala');
+    await page.locator('#palcoRecadoCampo').press('Enter');
+    const vr = (await host(sala, 'visao')).body.visao;
+    checa(vr.recado && vr.recado.texto === 'Olhem o mapa!', 'o recado chegou à sala');
+    // Espaço DUPLO: revela uma vez, não pula o pedido.
+    await page.keyboard.press('Space'); await page.keyboard.press('Space');
+    await esperarOuExplodir(page, () => /Como a sala votou/.test(document.getElementById('palcoLado').textContent), 'a revelação');
+    await new Promise((r) => setTimeout(r, 400));
+    const vv = (await host(sala, 'visao')).body.visao;
+    checa(vv.atual === 1 && vv.revelado === true, 'dois Espaços seguidos revelam e NÃO pulam o pedido (atual=' + vv.atual + ')');
+    const barra = await textoDe(page, '#palcoLado');
+    checa(/✕ Rejeitar\s*2 · 67%/.test(barra.replace(/\s+/g, ' ')) && /✓ Lido\s*1 · 33%/.test(barra.replace(/\s+/g, ' ')), 'a revelação mostra a sala (2 ✕ · 1 ✓)', barra.replace(/\s+/g, ' ').slice(0, 200));
+    checa(/A sala escolheu: ✕/.test(barra), 'diz o que a sala escolheu');
+    checa(/✕ Rejeitar.*2 pensam como você/s.test(barra.replace(/\s+/g, ' ')) || /pensam como você/.test(barra), 'a referência aparece DEPOIS da revelação, com quem pensa igual');
+    checa(/1 de 2 acertaram/.test(barra.replace(/\s+/g, ' ')), 'o palpite da sala: 1 de 2 acertou');
+    // Ctrl+→ é do navegador: não avança.
+    await page.keyboard.press('Control+ArrowRight');
+    await new Promise((r) => setTimeout(r, 900));
+    checa((await host(sala, 'visao')).body.visao.atual === 1, 'Ctrl+→ não avança a demo (é atalho do navegador)');
+    // Pausa por teclado.
+    await page.keyboard.press('KeyP');
+    await esperarOuExplodir(page, () => /Pausada/i.test(document.getElementById('palcoFase').textContent), 'a pausa');
+    await page.keyboard.press('KeyP');
+    await esperarOuExplodir(page, () => !/Pausada/i.test(document.getElementById('palcoFase').textContent), 'o fim da pausa');
+    checa(true, 'P pausa e retoma, e a pausa fica dita na tela');
+    // → avança; no último, encerra.
+    await new Promise((r) => setTimeout(r, 800));
+    await page.keyboard.press('ArrowRight');
+    await esperarOuExplodir(page, () => /Pedido 2 de 3/.test(document.querySelector('#palcoFoco').textContent), 'o pedido 2');
+    checa(true, '→ passa para o próximo pedido');
+    const cab2 = await palcoCabe(page);
+    checa(cab2.rolaDeLado <= 0 && cab2.rolaPraBaixo <= 1 && cab2.ruins.length === 0, 'o jogo cabe no laptop', JSON.stringify(cab2));
+    checa(erros.length === 0, 'palco: sem erro de página', erros.slice(0, 2).join(' | '));
+    await ctx.close();
+  }
+
+  // O fim, o resultado e a REGRA DE «SAIR»: duas abas do mesmo aparelho.
+  {
+    const sala = semear({ modo: 'livre', total: 4, referencia: false });
+    const { ctx, page, erros } = await abrirPalco(PROJETORES[1], 'en-US', sala, { escuro: true });
+    await esperarOuExplodir(page, () => !!document.getElementById('palcoQr'), 'o saguão', 20000);
+    for (let n = 1; n <= 4; n++) await convidar(sala, n, 'Pessoa' + n, n % 2 ? 'Brasil' : 'brasil');
+    await esperarOuExplodir(page, () => document.querySelectorAll('#palcoNomes li').length === 4, 'os 4 nomes');
+    await page.keyboard.press('Space');
+    await esperarOuExplodir(page, () => !!document.getElementById('palcoGrade'), 'o painel do modo livre', 20000);
+    // Os votos chegam: o palco mostra SÓ contagens — nenhuma barra colorida ao vivo.
+    for (let n = 1; n <= 4; n++) for (let i = 1; i <= 4; i++) await votarComo(sala, n, i, n === 4 ? 'L' : 'R');
+    await esperarOuExplodir(page, () => /16/.test(document.getElementById('palcoDecisoesNum').textContent), 'as 16 decisões', 15000);
+    const aoVivo = await page.evaluate(() => document.getElementById('palcoGrade').innerHTML + document.getElementById('palcoAvanco').innerHTML);
+    checa(!/bg-rose-500|bg-emerald-500|bg-amber-500/.test(aoVivo.replace(/bg-emerald-500">/g, '')) || !/bg-rose-500|bg-amber-500/.test(aoVivo), 'no modo livre a divisão colorida dos votos NÃO aparece ao vivo');
+    checa(!/rose-500/.test(aoVivo), 'nenhuma barra de «rejeitar» na grade ao vivo');
+    const cab = await palcoCabe(page);
+    checa(cab.rolaDeLado <= 0 && cab.ruins.length === 0, 'o modo livre cabe no projetor 1920', JSON.stringify(cab));
+    // Encerrar pede confirmação NO botão.
+    await page.locator('[data-acao="encerrar"]').click();
+    await esperarOuExplodir(page, () => !!document.querySelector('[data-acao="encerrar-sim"]'), 'a confirmação de encerrar');
+    checa(!(await host(sala, 'visao')).body.visao.encerrada, 'o primeiro toque em «encerrar» NÃO encerra (pede confirmação)');
+    await page.locator('[data-acao="encerrar-sim"]').click();
+    await esperarOuExplodir(page, () => !!document.getElementById('palcoFimCorpo') && /Hive|Independent|Soft|Trigger|Fastest|Cautious/.test(document.getElementById('palcoFimCorpo').textContent + document.getElementById('palcoAbas').textContent) || !!document.querySelector('[data-pedido-abrir]'), 'o resultado', 20000);
+    checa(true, 'confirmado, o resultado aparece');
+    await page.locator('[data-aba="pessoas"]').click();
+    const pessoasTxt = await textoDe(page, '#palcoFimCorpo');
+    checa(/Fastest|Hive mind|Trigger finger|Independent soul|Soft heart/.test(pessoasTxt), 'a aba «Pessoas e prêmios» mostra os prêmios', pessoasTxt.slice(0, 160));
+    await page.locator('[data-aba="resumo"]').click();
+    const resumoTxt = (await textoDe(page, '#palcoFimCorpo')).replace(/\s+/g, ' ');
+    checa(/16\s*decisions/.test(resumoTxt) && /4 people × 4 requests/.test(resumoTxt), 'o resumo diz 16 decisões (4 × 4)', resumoTxt.slice(0, 200));
+    checa(/Countries named\s*1/.test(resumoTxt), '«Brasil» e «brasil» contam UM país', resumoTxt.slice(0, 260));
+    await page.locator('[data-aba="pedidos"]').click();
+    await page.locator('[data-ordem="divididos"]').click();
+    const itens = await page.locator('[data-pedido-abrir]').count();
+    checa(itens === 4, 'a lista de pedidos tem os 4');
+    await page.locator('[data-pedido-abrir]').first().click();
+    await esperarOuExplodir(page, () => !!document.getElementById('palcoDetalhe'), 'o detalhe do pedido');
+    checa(await page.locator('#palcoDetalhe a[href*="waze.com/editor"]').count() === 1, 'o detalhe tem o ↗ do WME');
+    const href = await page.locator('#palcoDetalhe a[href*="waze.com/editor"]').getAttribute('href');
+    checa(DECK_HOST.some((d) => href.includes('venues=' + encodeURIComponent(d.venueID))) && !/venues=demo-/.test(href) && /env=row/.test(href), 'o ↗ leva o id REAL do pedido (o sintético «demo-N» é do convidado)', href);
+    await page.keyboard.press('Escape');
+    checa(await page.locator('#palcoDetalhe').count() === 0, 'Esc fecha o detalhe');
+    // «Sair» no app apaga a chave: o palco de OUTRA aba solta o controle na hora.
+    const outra = await ctx.newPage();
+    await outra.goto(BASE + '/palco', { waitUntil: 'domcontentloaded' });
+    await outra.evaluate(() => localStorage.removeItem('waze_demo_palco'));
+    await esperarOuExplodir(page, () => !!document.getElementById('palcoMsg') && /Preferências|Preferences/.test(document.getElementById('palcoMsg').textContent), 'o palco soltar o controle', 8000);
+    checa(true, 'com a chave apagada («Sair» no app), o palco aberto solta o controle e some o resultado');
+    const sobrou = await page.evaluate(() => document.body.innerText);
+    checa(!/Pessoa1|Pessoa2/.test(sobrou), 'o palco não deixa nome de convidado na tela depois de perder a chave');
+    checa(erros.length === 0, 'palco (fim): sem erro de página', erros.slice(0, 2).join(' | '));
+    await ctx.close();
+  }
+
+  // O palco cabe nos DOIS tamanhos de projetor nas QUATRO línguas, claro e escuro (o texto mais largo está noutra língua).
+  for (const pr of PROJETORES) {
+    for (const [lingua, escuro] of [['pt-BR', false], ['en-US', true], ['es-ES', false], ['fr-FR', true]]) {
+      const sala = semear({ modo: 'sinc', tempoMs: 20000, total: DECK.length, referencia: true });
+      const { ctx, page, erros } = await abrirPalco(pr, lingua, sala, { escuro });
+      const achados = [];
+      await esperarOuExplodir(page, () => !!document.getElementById('palcoQr'), 'o saguão', 20000);
+      for (let n = 1; n <= 12; n++) await convidar(sala, n, 'Marina da Silva Gonçalves ' + n, ['Brasil', 'France', 'México', 'Reino Unido'][n % 4]);
+      await esperarOuExplodir(page, () => document.querySelectorAll('#palcoNomes li').length >= 12, 'os 12 nomes');
+      let c = await palcoCabe(page);
+      if (c.rolaDeLado > 0 || c.rolaPraBaixo > 1 || c.ruins.length) achados.push('saguão: ' + JSON.stringify(c));
+      await page.keyboard.press('Space');
+      await esperarOuExplodir(page, () => !!document.querySelector('#palcoFoco [data-pedido]'), 'o pedido em foco', 20000);
+      // O pior cartão: o de nome mais longo do baralho, aberto de verdade.
+      for (let k = 0; k < 3; k++) { await votarComo(sala, 1 + k, 1, 'R'); }
+      await palpitarComo(sala, 1, 1, 'R'); await palpitarComo(sala, 2, 1, 'L');
+      await page.keyboard.press('Digit2');
+      await esperarOuExplodir(page, () => /3\s*\/\s*12/.test(document.getElementById('palcoLado').textContent.replace(/\s+/g, ' ')), 'os votos');
+      c = await palcoCabe(page);
+      if (c.rolaDeLado > 0 || c.rolaPraBaixo > 1 || c.ruins.length) achados.push('jogo: ' + JSON.stringify(c));
+      await page.keyboard.press('Space');
+      await esperarOuExplodir(page, () => /\d+ · \d+%/.test(document.getElementById('palcoLado').textContent), 'a revelação');
+      c = await palcoCabe(page);
+      if (c.rolaDeLado > 0 || c.rolaPraBaixo > 1 || c.ruins.length) achados.push('revelado: ' + JSON.stringify(c));
+      const tinta = await page.evaluate(() => { const b = document.querySelector('[data-acao="principal"]'); if (!b) return 'sem botão principal'; const r = b.getBoundingClientRect(); const h = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return h && h.closest('[data-acao="principal"]') ? 'ok' : 'coberto'; });
+      if (tinta !== 'ok') achados.push('o botão principal: ' + tinta);
+      checa(achados.length === 0, `${pr.nome} · ${lingua}${escuro ? ' · escuro' : ''}: o palco cabe e o botão principal recebe o toque`, achados.slice(0, 3).join(' || '));
+      checa(erros.length === 0, `${lingua}: palco sem erro de página`, erros.slice(0, 2).join(' | '));
+      if (PRINTS && lingua === 'pt-BR') { mkdirSync(PRINTS, { recursive: true }); await page.screenshot({ path: join(PRINTS, `palco-${pr.viewport.width}-revelado.png`) }); }
+      await ctx.close();
+    }
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
 await browser.close();
 await derrubar();
 await new Promise((r) => setTimeout(r, 300));
