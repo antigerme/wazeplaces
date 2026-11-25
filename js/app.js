@@ -4140,6 +4140,21 @@ function podeExcluirFotoAqui() {
     return podeAgirDestrutivoAqui();
 }
 
+// CRIAR uma demo (a sala triando pedidos reais pelo celular, sem login): L6+ com
+// área gerenciada ou staff — decisão do owner, e nível PRÓPRIO: não é o do
+// destrutivo (L5), porque a demo não escreve no Waze; ela gasta cota de KV e
+// expõe pedidos reais a um link aberto. Rank 0-indexed (5 é o L6 que o editor
+// vê). O SERVIDOR confere de novo na criação (`podeCriarDemo` em
+// `server/demo.mjs`, que guarda a cópia deste número; o teste compara); isto
+// aqui só decide se a linha aparece nas Preferências.
+const MIN_RANK_DEMO = 5;
+function podeCriarDemoAqui() {
+    const p = AppState.profile;
+    if (!p) return false;
+    if (p.isStaff === true) return true;
+    return Number.isInteger(p.rank) && p.rank >= MIN_RANK_DEMO && p.isAreaManager === true;
+}
+
 // A RODA do mouse e o trackpad, como ZOOM da foto e do mapa ampliados.
 //
 // Os dois tratavam cada EVENTO como um passo: o trackpad manda dezenas de
