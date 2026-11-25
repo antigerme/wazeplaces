@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { subirVM } from './_vm.mjs';
 import { novaSala } from '../server/demo-sala.mjs';
+import { MAX_CLIENTES } from '../server/demo-sala-viva.mjs';
 
 // A VM, ao receber o sinal, ainda grava o pendente: espera um instante antes de apagar a pasta.
 const limpar = async (raiz) => { await new Promise((r) => setTimeout(r, 500)); rmSync(raiz, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); };
@@ -186,4 +187,24 @@ test('VM: a sala vencida some do disco no boot, e o apagamento não leva as outr
       assert.equal((await post(vm, 'demo-abrir', { segredo: SEGREDO })).status, 404);
     } finally { vm.parar(); }
   } finally { await limpar(raiz); }
+});
+
+// Celular que trava a tela, entra em túnel ou troca de rede ABANDONA o fluxo sem avisar a sala. Se a
+// VM não percebe, o cliente morto fica na lista e o teto (MAX_CLIENTES) é gasto por fantasmas: numa
+// hora de sala, ninguém mais entra — nem o apresentador.
+test('VM: fluxo abandonado SAI da lista — abrir e abortar mais que o teto não trava a sala', async () => {
+  await comVM(async ({ vm }) => {
+    await post(vm, 'demo-entrar', { demo: ID, parte: pid(1), apelido: 'Ana' });
+    const total = MAX_CLIENTES + 50;
+    for (let i = 0; i < total; i++) {
+      const ctl = new AbortController();
+      const res = await fetch(vm.url('/api/demo-ao-vivo'), { method: 'POST', body: JSON.stringify({ demo: ID, parte: pid(1) }), signal: ctl.signal });
+      assert.equal(res.status, 200, `a conexão ${i + 1} foi recusada: os abandonados não saíram da lista`);
+      ctl.abort();
+    }
+    await new Promise((r) => setTimeout(r, 300));
+    const ultimo = await fetch(vm.url('/api/demo-ao-vivo'), { method: 'POST', body: JSON.stringify({ demo: ID, hostKey: HOSTKEY }) });
+    assert.equal(ultimo.status, 200, 'o apresentador não consegue mais abrir o fluxo');
+    await ultimo.body.cancel();
+  });
 });

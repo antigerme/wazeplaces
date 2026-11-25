@@ -348,3 +348,32 @@ test('timers padrão: não dependem de `this` (o workerd recusaria o setTimeout 
     for (const n of guardas) globalThis[n] = originais[n];
   }
 });
+
+// No workerd, atrás do Worker, o `cancel` do fluxo abandonado só chega na escrita seguinte (medido: ~um
+// batimento depois). Sem a sondagem no teto, 400 celulares que saíram travariam a sala por 20 s.
+test('teto: antes de recusar a sala SONDA os clientes — o que o runtime já perdeu sai, o vivo recebe o batimento', async () => {
+  const { sala } = nova({ modo: 'livre', max: 300 });
+  await entrar(sala, 1);
+  const vivo = ouvir(sala.fluxo({ parte: pid(1) }));
+  const abertas = [];
+  for (let i = 0; i < MAX_CLIENTES - 1; i++) abertas.push(sala.fluxo({ parte: pid(1) }));
+  await cedo();
+  assert.equal(sala.clientes.size, MAX_CLIENTES);
+  const antes = vivo.comentarios.length;
+  // Os abandonados: o consumidor sumiu e o runtime só avisa quando tentamos escrever (enqueue lança).
+  const mortos = 100;
+  for (const c of [...sala.clientes].slice(1, 1 + mortos)) c.controller.error(new Error('conexão perdida')); // o 1º é o vivo
+  const recusada = sala.fluxo({ parte: pid(1) });
+  assert.equal(recusada instanceof Response, true, 'a sondagem tirou os mortos e abriu vaga NA MESMA tentativa');
+  await cedo();
+  assert.equal(vivo.comentarios.length, antes + 1, 'o cliente vivo recebeu o batimento da sondagem');
+  assert.equal(sala.clientes.size, MAX_CLIENTES - mortos + 1);
+  // E sem mortos de verdade, o teto continua valendo.
+  const cheia = nova({ modo: 'livre', max: 300 });
+  await entrar(cheia.sala, 1);
+  const seguras = [];
+  for (let i = 0; i < MAX_CLIENTES; i++) seguras.push(cheia.sala.fluxo({ parte: pid(1) }));
+  assert.equal(cheia.sala.fluxo({ parte: pid(1) }).status, 429, 'com todos vivos, o teto recusa');
+  vivo.parar();
+  await Promise.all([...abertas, ...seguras].filter((r) => r instanceof Response).map((r) => r.body.cancel().catch(() => {})));
+});

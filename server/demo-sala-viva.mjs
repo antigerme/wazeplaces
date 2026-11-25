@@ -165,6 +165,10 @@ export class SalaViva {
     const host = req.hostHash !== undefined;
     if (host && !this._ehHost(req)) return respostaDeRecusa('sem-permissao');
     if (!host && !this.est.partes[req.parte]) return respostaDeRecusa('fora-da-sala');
+    // No teto, ANTES de recusar: sonda todos (um batimento agora). Cliente que o runtime já perdeu só
+    // é percebido na escrita seguinte (no workerd, atrás do Worker, o `cancel` chega assim: ~um
+    // batimento depois) — e sem isto o teto seria gasto por celulares que já saíram.
+    if (this.clientes.size >= MAX_CLIENTES) this._sondar();
     if (this.clientes.size >= MAX_CLIENTES) return { status: 429, body: { success: false, error: 'Conexões demais', errorKey: 'srv.err.demoCheia', motivo: 'cheia' } };
     const cliente = { ator: host ? 'host' : 'convidado', parte: req.parte, controller: null, ultimoSeq: -1 };
     const corpo = new ReadableStream({
@@ -201,11 +205,13 @@ export class SalaViva {
   }
   _ligarPing() {
     if (this.timerPing) return;
-    this.timerPing = this.timers.setIntervalo(() => {
-      for (const c of [...this.clientes]) { try { c.controller.enqueue(PING); } catch { this.clientes.delete(c); } }
-      if (!this.clientes.size) this._desligarPing();
-    }, PING_MS);
+    this.timerPing = this.timers.setIntervalo(() => this._sondar(), PING_MS);
     if (this.timerPing && typeof this.timerPing.unref === 'function') this.timerPing.unref();
+  }
+  // Um batimento em todos: mantém a conexão viva na borda (ociosa, ela cai) e tira quem já saiu.
+  _sondar() {
+    for (const c of [...this.clientes]) { try { c.controller.enqueue(PING); } catch { this.clientes.delete(c); } }
+    if (!this.clientes.size) this._desligarPing();
   }
   _desligarPing() {
     if (this.timerPing) this.timers.clearIntervalo(this.timerPing);

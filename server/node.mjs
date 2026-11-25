@@ -636,15 +636,18 @@ async function servirFluxoDaDemo(req, res, r) {
   for (const [k, v] of r.headers) if (!jaTem.has(k.toLowerCase())) cabecalhos[k] = v;
   res.writeHead(200, cabecalhos);
   const leitor = r.body.getReader();
-  req.on('close', () => { leitor.cancel().catch(() => {}); });
+  // O `close` é do RES (a conexão), nunca do `req`: o `req` emite `close` quando o CORPO acaba de
+  // ser lido (já aconteceu, no `readBody`), então o ouvinte dele nunca via o celular sair — o
+  // cliente morto ficava na lista da sala e gastava o teto de conexões.
+  res.on('close', () => { leitor.cancel().catch(() => {}); });
   try {
     for (;;) {
       const { value, done } = await leitor.read();
-      if (done) break;
+      if (done || res.destroyed) break;
       res.write(value);
     }
   } catch { /* o cliente saiu */ }
-  res.end();
+  if (!res.destroyed) res.end();
 }
 
 const server = createServer(async (req, res) => {
