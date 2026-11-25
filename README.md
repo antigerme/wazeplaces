@@ -204,6 +204,10 @@ wazeplaces/
 │   ├── marca-app.mjs       # A marca de quem usa o app, na posição da presença
 │   ├── manter-conectado.mjs # A varredura do «Manter conectado» (renova o cookie de quem pediu)
 │   ├── status.mjs          # Contagem pública (/status.html): conta sessões sem decifrar nada
+│   ├── demo.mjs            # A demo (sala ao vivo): regras puras
+│   ├── demo-sala.mjs       # A máquina de estados da sala da demo
+│   ├── demo-sala-viva.mjs  # A sala no ar (SSE), comum ao Durable Object e à VM
+│   ├── demo-salas-vm.mjs   # As salas da demo na VM
 │   ├── corpo.mjs           # Leitura do corpo da requisição na VM (UTF-8 inteiro)
 │   └── node.mjs            # Adaptador VM/Node (http + estáticos + fs sessions)
 ├── worker/

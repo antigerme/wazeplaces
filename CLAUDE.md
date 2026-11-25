@@ -114,6 +114,10 @@ wazeplaces/
 │   │                        #   lon mod 1000 = país). PURO; quem escreve e quem lê importam daqui
 │   ├── manter-conectado.mjs # A varredura do «Manter conectado» (renova o cookie do Waze de quem pediu); PURA
 │   ├── status.mjs           # Contagem pública (/status.html): conta chaves sess_/ka_, PURA, nunca decifra
+│   ├── demo.mjs             # A DEMO, o que é puro: cota de pedidos, quem cria, o retrato (allowlist) e o apelido
+│   ├── demo-sala.mjs        # A máquina de estados da sala da demo (saguão, contagem, triagem, revelação), PURA
+│   ├── demo-sala-viva.mjs   # A sala no ar, comum ao Durable Object e à VM: conexões SSE, difusão, gravação, alarme
+│   ├── demo-salas-vm.mjs    # As salas da demo na VM: memória + um arquivo por sala
 │   ├── core.mjs             # Toda a lógica: sessões, cripto (AES-GCM), callWaze, categorizeWazeError,
 │   │                        #   categorizeGrpcError, isUserAllowed, os handlers e o dispatch()
 │   └── node.mjs             # Adaptador VM/Node: servidor http, estáticos, sessões em arquivo, chave

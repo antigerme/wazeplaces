@@ -34,7 +34,8 @@ const CORE = readFileSync(join(ROOT, 'server/core.mjs'), 'utf8');
 // classificação reprova aqui em vez de passar despercebida.
 const SO_LE = new Set(['buscar-places', 'lista-paises', 'lista-estados', 'status']);
 const RECUSADAS = new Set(['sessao', 'parear', 'testar-cookies', 'perfil', 'marcar-lido', 'guardar-pedido',
-  'validar-place', 'excluir-foto', 'renomear-local', 'presenca-waze', 'presenca-app', 'chat']);
+  'validar-place', 'excluir-foto', 'renomear-local', 'presenca-waze', 'presenca-app', 'chat',
+  'demo-criar', 'demo-abrir', 'demo-entrar', 'demo-votar', 'demo-palpitar', 'demo-host']);
 const conjunto = (nome) => {
   const bloco = API.match(new RegExp(`const ${nome} = new Set\\(\\[([^\\]]+)\\]\\)`));
   assert.ok(bloco, `a lista ${nome} sumiu da ferramenta`);

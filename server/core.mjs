@@ -20,6 +20,11 @@ import {
 } from './wme-grpc.mjs';
 import { marcarPosicao, paisValido, temMarcaDaApp, paisDaMarca } from './marca-app.mjs';
 import {
+  cotaDaDemo, podeCriarDemo, montarRetrato, gerarTexto, limparCodigo, ehSegredo, ehCodigoCurto,
+  DEMO_TTL_S, DEMO_VOTOS_JANELA_S, DEMO_MAX_PARTICIPANTES, DEMO_CODIGO_TTL_S, DEMO_SEGREDO_LEN, DEMO_CODIGO_LEN, DEMO_CHAVE_LEN, DEMO_ALFABETO,
+} from './demo.mjs';
+import { MODOS as DEMO_MODOS, TEMPOS_MS as DEMO_TEMPOS_MS } from './demo-sala.mjs';
+import {
   KA_PREFIXO, KA_TTL, KA_REGRAVA_APOS, MANTER_ESPERA_WAZE_MS, varrerMantidos,
   STATUS_CAPACIDADE_CONFORTAVEL, STATUS_CAPACIDADE_LIMITE, STATUS_CAPACIDADE_TETO_MEDIDO,
 } from './manter-conectado.mjs';
@@ -4190,6 +4195,168 @@ async function handleStatusPublico(data, { statusStore } = {}) {
   };
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// A DEMO — a sala triando pedidos reais pelo celular, sem login
+// ─────────────────────────────────────────────────────────────────────────
+//
+// O que mora aqui é a ENTRADA: validar o corpo, conferir quem pode criar,
+// montar o retrato e repassar à sala (`ctx.salas`, que cada adaptador
+// implementa: um Durable Object no Worker, memória + arquivo na VM). A regra do
+// jogo está em `demo-sala.mjs`; depois da criação nada daqui fala com o Waze.
+//
+// Quem é quem: o APRESENTADOR cria (L6+ com área gerenciada, conferido aqui,
+// no servidor, com o `/Session` dele) e recebe duas coisas que a sala nunca
+// guarda em claro — o `segredo` do link e a `hostKey`; o CONVIDADO só tem o
+// link (o segredo vira o id da sala: o servidor guarda o hash). O que age na
+// sala (votar, entrar) é anônimo de propósito: o convidado não tem sessão.
+const DEMO_PLACES = cotaDaDemo(MIN_RANK_WAZE);
+const DEMO_MIN_PEDIDOS = 3;
+
+const demoIdDoSegredo = async (segredo) => (await sha256hex('demo:' + segredo)).slice(0, 40);
+const demoHash = (rotulo, valor) => sha256hex('demo-' + rotulo + ':' + valor);
+const todoNoAlfabeto = (t) => [...t].every((c) => DEMO_ALFABETO.includes(c));
+
+function salasDaDemo(ctx) {
+  const salas = ctx && ctx.salas;
+  if (!salas) apiError('Demo indisponível neste servidor', 503, 'srv.err.demoUnavailable');
+  return salas;
+}
+function idDaDemo(data) {
+  const id = data.demo;
+  if (typeof id !== 'string' || !/^[0-9a-f]{40}$/.test(id)) apiError('Link da demo inválido', 400, 'srv.err.demoLinkInvalido');
+  return id;
+}
+function parteDaDemo(data) {
+  const parte = data.parte;
+  if (typeof parte !== 'string' || !/^[A-Za-z0-9_-]{16,40}$/.test(parte)) apiError('Participante inválido', 400, 'srv.err.demoPedido');
+  return parte;
+}
+// A chave do apresentador chega em claro no CORPO e vira hash antes de ir à sala.
+async function hashDaChaveDaDemo(data) {
+  const chave = limparCodigo(data.hostKey);
+  if (chave.length !== DEMO_CHAVE_LEN || !todoNoAlfabeto(chave)) apiError('Sem permissão', 403, 'srv.err.demoSemPermissao');
+  return demoHash('host', chave);
+}
+const curto = (v, max) => (typeof v === 'string' ? v.slice(0, max) : undefined);
+
+async function handleDemoCriar(data, ctx) {
+  const salas = salasDaDemo(ctx);
+  const sessions = ctx.sessions;
+  // As escolhas do apresentador: valor fora do contrato é 400, nunca "o mais próximo".
+  const modo = data.modo === undefined ? 'sinc' : data.modo;
+  const tempoMs = data.tempoMs === undefined ? 20000 : data.tempoMs;
+  const referencia = data.referencia === undefined ? false : data.referencia;
+  if (!DEMO_MODOS.includes(modo) || !DEMO_TEMPOS_MS.includes(tempoMs) || typeof referencia !== 'boolean') {
+    apiError('Pedido inválido', 400, 'srv.err.badRequest');
+  }
+
+  const cookies = await resolveCookies(data, sessions);
+  const region = requireRegion(data);
+  const { cookieHeader, csrf } = prepareAuth(cookies);
+
+  // O portão, NO SERVIDOR: o botão escondido no cliente não protege a cota do KV
+  // nem o link aberto. Lê o `/Session` direto (não pelo `handlePerfil`, que apaga
+  // a sessão de quem o portão do app recusa — aqui o 403 é só "não pode criar").
+  const sessao = await callWaze(wazeSessionEndpoint(region), cookieHeader, csrf, null, region, { data, sessions, cookies });
+  if (sessao.httpCode !== 200) {
+    const cat = categorizeWazeError(sessao.httpCode, sessao.response, sessao.error);
+    return {
+      status: cat.category === 'unauthorized' ? 401 : 500,
+      body: { success: false, error: cat.message, errorKey: cat.messageKey, errorVars: cat.messageVars, errorCategory: cat.category, httpCode: sessao.httpCode },
+    };
+  }
+  if (!podeCriarDemo(objetoDoWaze(sessao.response))) apiError('Só quem é L6+ com área gerenciada cria uma demo', 403, 'srv.err.demoSemPermissao');
+
+  // A busca é a MESMA do app, com os filtros do apresentador, página 1; o
+  // residencial sai pelo Waze e de novo no retrato.
+  const busca = await handleBuscarPlaces({ ...data, page: 1, residential: false }, ctx);
+  if (busca.status !== 200) return busca;
+  const { convidado, apresentador } = montarRetrato(busca.body.places, DEMO_PLACES);
+  if (convidado.length < DEMO_MIN_PEDIDOS) {
+    apiError('Poucos pedidos no filtro', 409, 'srv.err.demoPoucosPedidos', { n: convidado.length, min: DEMO_MIN_PEDIDOS });
+  }
+
+  const segredo = gerarTexto(DEMO_SEGREDO_LEN);
+  const hostKey = gerarTexto(DEMO_CHAVE_LEN);
+  const id = await demoIdDoSegredo(segredo);
+  const agora = Date.now();
+  const cfg = {
+    id, hostHash: await demoHash('host', hostKey), modo, tempoMs, referencia, total: convidado.length, max: DEMO_MAX_PARTICIPANTES,
+    criadoEm: agora, votosAte: agora + DEMO_VOTOS_JANELA_S * 1000, expiraEm: agora + DEMO_TTL_S * 1000,
+  };
+  const criada = await salas.criar(id, { cfg, deck: { convidado, apresentador, regiao: region } });
+  if (!criada || criada.ok !== true) apiError('Não foi possível criar a demo', 500, 'srv.err.internal');
+  return {
+    status: 200,
+    body: { success: true, demo: id, segredo, hostKey, total: convidado.length, modo, tempoMs, referencia, max: DEMO_MAX_PARTICIPANTES, criadoEm: agora, votosAte: cfg.votosAte, expiraEm: cfg.expiraEm },
+  };
+}
+
+// Abrir: o link (segredo) ou o código curto levam ao baralho e ao estado de agora.
+async function handleDemoAbrir(data, ctx) {
+  const salas = salasDaDemo(ctx);
+  let id;
+  if (data.segredo !== undefined) {
+    const segredo = limparCodigo(data.segredo);
+    if (!ehSegredo(segredo)) apiError('Link da demo inválido', 400, 'srv.err.demoLinkInvalido');
+    id = await demoIdDoSegredo(segredo);
+  } else if (data.codigo !== undefined) {
+    const codigo = limparCodigo(data.codigo);
+    if (!ehCodigoCurto(codigo)) apiError('Código inválido', 400, 'srv.err.demoLinkInvalido');
+    id = await salas.resolverCodigo(await demoHash('codigo', codigo));
+    if (!id) apiError('Demo não encontrada', 404, 'srv.err.demoNaoEncontrada');
+  } else {
+    apiError('Link da demo inválido', 400, 'srv.err.demoLinkInvalido');
+  }
+  const r = await salas.acao(id, { tipo: 'info', parte: typeof data.parte === 'string' ? data.parte : undefined });
+  return r.status === 200 ? { status: 200, body: { ...r.body, demo: id } } : r;
+}
+
+async function handleDemoEntrar(data, ctx) {
+  return salasDaDemo(ctx).acao(idDaDemo(data), { tipo: 'entrar', parte: parteDaDemo(data), nome: curto(data.apelido, 200), pais: curto(data.pais, 200) });
+}
+async function handleDemoVotar(data, ctx) {
+  return salasDaDemo(ctx).acao(idDaDemo(data), { tipo: 'votar', parte: parteDaDemo(data), idx: data.idx, voto: curto(data.voto, 4) });
+}
+async function handleDemoPalpitar(data, ctx) {
+  return salasDaDemo(ctx).acao(idDaDemo(data), { tipo: 'palpitar', parte: parteDaDemo(data), idx: data.idx, palpite: curto(data.palpite, 4) });
+}
+
+const DEMO_ACOES_DO_HOST = new Set(['comecar', 'revelar', 'proximo', 'pausar', 'retomar', 'recado', 'encerrar', 'votarRef', 'resultado', 'visao', 'codigo']);
+async function handleDemoHost(data, ctx) {
+  const salas = salasDaDemo(ctx);
+  const id = idDaDemo(data);
+  const tipo = data.tipo;
+  if (typeof tipo !== 'string' || !DEMO_ACOES_DO_HOST.has(tipo)) apiError('Pedido inválido', 400, 'srv.err.demoPedido');
+  const hostHash = await hashDaChaveDaDemo(data);
+  if (tipo !== 'codigo') return salas.acao(id, { tipo, hostHash, idx: data.idx, voto: curto(data.voto, 4), texto: curto(data.texto, 200) });
+  // O código curto, SÓ sob demanda (o digitável é ~30 bits: não existe até alguém pedir).
+  const quem = await salas.acao(id, { tipo: 'visao', hostHash });
+  if (quem.status !== 200) return quem;
+  const ate = Date.now() + DEMO_CODIGO_TTL_S * 1000;
+  for (let tentativa = 0; tentativa < 5; tentativa++) {
+    const codigo = gerarTexto(DEMO_CODIGO_LEN);
+    if (await salas.definirCodigo(await demoHash('codigo', codigo), id, ate)) return { status: 200, body: { success: true, codigo, ate } };
+  }
+  return apiError('Tente de novo', 503, 'srv.err.demoCodigo');
+}
+
+// O FLUXO (SSE): não passa pelo `dispatch` (que devolve JSON). Cada adaptador o
+// chama com o corpo já lido; a validação é a mesma das outras rotas. Devolve a
+// `Response` do fluxo, ou `{ status, body }` quando recusa.
+export async function fluxoDaDemo(data, ctx) {
+  try {
+    if (!corpoLegivel(data)) return { status: 400, body: { success: false, error: 'Pedido inválido', errorKey: 'srv.err.badRequest' } };
+    const salas = salasDaDemo(ctx);
+    const id = idDaDemo(data);
+    const req = data.hostKey !== undefined ? { hostHash: await hashDaChaveDaDemo(data) } : { parte: parteDaDemo(data) };
+    return await salas.fluxo(id, req);
+  } catch (e) {
+    if (e instanceof ApiError) return { status: e.status, body: e.body };
+    return { status: 500, body: { success: false, error: 'Erro interno', errorKey: 'srv.err.internal' } };
+  }
+}
+
 const ROUTES = {
   sessao: handleSessao,
   parear: handleParear,
@@ -4207,6 +4374,12 @@ const ROUTES = {
   'lista-paises': handleListaPaises,
   'lista-estados': handleListaEstados,
   status: handleStatusPublico,
+  'demo-criar': handleDemoCriar,
+  'demo-abrir': handleDemoAbrir,
+  'demo-entrar': handleDemoEntrar,
+  'demo-votar': handleDemoVotar,
+  'demo-palpitar': handleDemoPalpitar,
+  'demo-host': handleDemoHost,
 };
 
 // O corpo que a conversão pra texto ou número não consegue ler. `JSON.parse` dá
