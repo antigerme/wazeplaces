@@ -254,8 +254,9 @@ test('gravação: votos seguidos gravam UMA vez (com atraso); fase nova grava na
   const { sala, rel, gravacoes } = nova({ modo: 'livre', total: 30 });
   assert.equal(gravacoes.length, 1, 'criar grava na hora');
   await entrar(sala, 1);
+  assert.equal(gravacoes.length, 2, 'a ENTRADA grava na hora (rara; perdê-la numa eviction tiraria a pessoa da sala)');
   await sala.acao(host('comecar'));
-  assert.equal(gravacoes.length, 2, 'a contagem é fase nova: gravou na hora (a entrada que veio antes ficou pendente e foi junto)');
+  assert.equal(gravacoes.length, 3, 'a contagem é fase nova: gravou na hora');
   await rel.andar(SALA_CONTAGEM_MS);
   await sala.tick();
   const g = gravacoes.length;
@@ -308,10 +309,13 @@ test('expirar: a sala vence, fecha os fluxos, apaga tudo e passa a responder 404
 test('fechar: o que estava pendente é gravado antes de o adaptador sair', async () => {
   const { sala, gravacoes } = nova({ modo: 'livre' });
   await entrar(sala, 1);
+  await sala.acao(host('comecar'));
+  await sala.acao({ tipo: 'entrar', parte: pid(2), nome: 'Outro' });
   const n = gravacoes.length;
+  sala.sujo = true; // um voto agrupado que ainda esperava o atraso
   await sala.fechar();
   assert.equal(gravacoes.length, n + 1);
-  assert.equal(Object.keys(gravacoes.at(-1).est.partes).length, 1);
+  assert.equal(Object.keys(gravacoes.at(-1).est.partes).length, 2);
   await sala.fechar();
   assert.equal(gravacoes.length, n + 1, 'sem nada pendente não grava de novo');
 });

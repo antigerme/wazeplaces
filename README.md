@@ -211,7 +211,8 @@ wazeplaces/
 │   ├── corpo.mjs           # Leitura do corpo da requisição na VM (UTF-8 inteiro)
 │   └── node.mjs            # Adaptador VM/Node (http + estáticos + fs sessions)
 ├── worker/
-│   └── index.mjs           # Adaptador Cloudflare Workers (roteia /api/*, delega estáticos pro ASSETS)
+│   ├── index.mjs           # Adaptador Cloudflare Workers (roteia /api/*, delega estáticos pro ASSETS)
+│   └── demo-do.mjs         # O Durable Object da demo
 ├── extensao-chrome/        # A extensão "WazePlaces Rapid Access" (o README dela ensina a instalar)
 ├── _headers                # Headers/CSP no Cloudflare (substitui o antigo .htaccess)
 ├── wrangler.jsonc          # Config Cloudflare (binding do KV)

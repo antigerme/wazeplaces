@@ -29,9 +29,20 @@
   // procurar uma história que não bate com a do servidor. `exports` (a forma
   // nova, declarativa) não entra junto: os dois campos são mutuamente
   // exclusivos, e a configuração com os dois é recusada.
+  //
+  // A DEMO (v3): um Durable Object `DemoSalaDO` por sala e por código curto. Cada
+  // demo é uma sala ao vivo (conexões SSE, contagem de votos atômica), e é por
+  // isso que NÃO mora no KV: o voto é anônimo, e o KV é o das sessões (1.000
+  // escritas por dia: um link vazado as esgotaria e a renovação de sessão de todo
+  // editor pararia). Só SQLite (o plano grátis só aceita esse). Esta é a única
+  // classe de DO do projeto hoje; a antiga `SalaDO` (presença) saiu na `v2`.
+  "durable_objects": {
+    "bindings": [{ "name": "DEMO_SALA", "class_name": "DemoSalaDO" }]
+  },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["SalaDO"] },
-    { "tag": "v2", "deleted_classes": ["SalaDO"] }
+    { "tag": "v2", "deleted_classes": ["SalaDO"] },
+    { "tag": "v3", "new_sqlite_classes": ["DemoSalaDO"] }
   ],
   // «Manter conectado»: a cada 30 minutos o Worker renova o cookie do Waze das
   // sessões que ligaram isso (server/manter-conectado.mjs). Cada execução olha a

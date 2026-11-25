@@ -132,7 +132,9 @@ export class SalaViva {
     if (!doHost && !TIPOS_CONVIDADO.has(tipo)) return respostaDeRecusa('tipo');
     const r = aplicar(this.est, doHost ? { ...req, ator: 'host' } : { ...req, ator: 'convidado' }, agora);
     if (!r.ok) return respostaDeRecusa(r.motivo);
-    this._depoisDeMudar(URGENTES.has(tipo));
+    // A ENTRADA grava na hora (uma por pessoa: rara, e perdê-la numa eviction do DO tiraria a
+    // pessoa da sala); o voto não — esse é agrupado, porque é o que mais acontece.
+    this._depoisDeMudar(URGENTES.has(tipo), tipo === 'entrar');
     const { ok, ...resto } = r;
     return { status: 200, body: { success: true, ...resto, visao: this._visaoDe(req, agora) } };
   }
@@ -201,7 +203,7 @@ export class SalaViva {
   }
 
   // ── o que fazer depois de mudar o estado ──
-  _depoisDeMudar(urgente) {
+  _depoisDeMudar(urgente, gravarAgora = false) {
     this.sujo = true;
     if (urgente) {
       if (this.timerDifusao) { this.timers.clear(this.timerDifusao); this.timerDifusao = null; }
@@ -212,7 +214,8 @@ export class SalaViva {
         this.timerDifusao = this.timers.set(() => this._difundir(), COALESCER_MS);
         if (this.timerDifusao && typeof this.timerDifusao.unref === 'function') this.timerDifusao.unref();
       }
-      if (!this.timerSalvar) {
+      if (gravarAgora) this._gravarJa();
+      else if (!this.timerSalvar) {
         this.timerSalvar = this.timers.set(() => { this.timerSalvar = null; this._gravarJa(); }, SALVAR_MS);
         if (this.timerSalvar && typeof this.timerSalvar.unref === 'function') this.timerSalvar.unref();
       }

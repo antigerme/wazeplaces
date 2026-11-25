@@ -122,7 +122,8 @@ wazeplaces/
 │   │                        #   categorizeGrpcError, isUserAllowed, os handlers e o dispatch()
 │   └── node.mjs             # Adaptador VM/Node: servidor http, estáticos, sessões em arquivo, chave
 ├── worker/
-│   └── index.mjs            # Adaptador Cloudflare Workers: /api/* (KV, Secret) e estáticos pelo ASSETS
+│   ├── index.mjs            # Adaptador Cloudflare Workers: /api/* (KV, Secret) e estáticos pelo ASSETS
+│   └── demo-do.mjs          # O Durable Object da demo (`DemoSalaDO`): uma sala por instância, sobre a SalaViva
 ├── _headers                 # Cloudflare: cabeçalhos, CSP e cache dos estáticos
 ├── wrangler.jsonc           # Cloudflare: KV SESSIONS, compat date e o Cron `*/30 * * * *` do «Manter conectado»
 ├── .assetsignore            # O que o Cloudflare NÃO publica (o padrão é publicar: esquecer vaza calado). É SÓ
