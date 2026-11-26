@@ -44,7 +44,9 @@ test('a sala própria não existe mais — nem no cliente, nem nos servidores, n
   assert.notEqual(viva.status, 404, 'o controle falhou: presenca-app deu 404, e o 404 acima não prova nada');
 
   // Os dois adaptadores: nenhum atende o /sala nem sobe servidor WebSocket.
-  assert.doesNotMatch(semComentario(read('worker/index.mjs')), /['"]\/sala['"]|SalaDO|env\.SALA/,
+  // `\bSalaDO\b`: a sala de presença que saiu. O `DemoSalaDO` (a demo, v3, decisão do owner) é
+  // OUTRA coisa e não casa, porque não há fronteira de palavra dentro de "DemoSalaDO".
+  assert.doesNotMatch(semComentario(read('worker/index.mjs')), /['"]\/sala['"]|\bSalaDO\b|env\.SALA\b/,
     'o Worker voltou a atender a sala');
   assert.doesNotMatch(semComentario(read('server/node.mjs')), /\.on\('upgrade'|['"]\/sala['"]/,
     'o node.mjs voltou a atender a sala');
@@ -53,11 +55,15 @@ test('a sala própria não existe mais — nem no cliente, nem nos servidores, n
   // fica antes dela: as migrações são um HISTÓRICO, e a Cloudflare aplica só as
   // tags posteriores à última já aplicada no servidor.
   const cfg = JSON.parse(read('wrangler.jsonc').replace(/^\s*\/\/.*$/gm, ''));
-  assert.equal(cfg.durable_objects, undefined, 'o binding do Durable Object voltou');
+  // O único Durable Object do projeto é o da DEMO (a sala ao vivo, v3). O da presença não volta.
+  assert.deepEqual(cfg.durable_objects, { bindings: [{ name: 'DEMO_SALA', class_name: 'DemoSalaDO' }] },
+    'o binding do Durable Object da presença voltou (ou apareceu outro além do da demo)');
   assert.deepEqual((cfg.migrations || []).map((m) => m.tag).slice(0, 2), ['v1', 'v2'],
     'as migrações não começam mais em v1 → v2: a história não bate com a do servidor');
   assert.deepEqual(cfg.migrations[0].new_sqlite_classes, ['SalaDO'], 'a migração de criação sumiu ou mudou');
   assert.deepEqual(cfg.migrations[1].deleted_classes, ['SalaDO'], 'sumiu a migração que apaga o SalaDO');
+  assert.deepEqual(cfg.migrations[2], { tag: 'v3', new_sqlite_classes: ['DemoSalaDO'] }, 'a migração da demo mudou');
+  assert.equal(cfg.migrations.length, 3, 'migração nova sem decisão: o histórico tem v1, v2 e v3');
   assert.equal('exports' in cfg, false, '`exports` e `migrations` são mutuamente exclusivos: a Cloudflare recusa os dois');
 
   // E o cliente não fala com nada disso.

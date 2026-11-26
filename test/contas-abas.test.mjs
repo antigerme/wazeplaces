@@ -2516,6 +2516,7 @@ function montarTrocaNaMemoria({ aparelhoDiz = '5151', estaAbaConfirmou = '4242',
     safeLS: ap.safeLS, localStorage: ap.localStorage, AppState, API, presencaWme, CONTA_KEY,
     SAIDA_KEY: constante('SAIDA_KEY'), HISTORY_KEY: constante('HISTORY_KEY'), CONQUISTAS_KEY: constante('CONQUISTAS_KEY'),
     ESTRELADOS_KEY: constante('ESTRELADOS_KEY'),
+    DEMO_PALCO_KEY: constante('DEMO_PALCO_KEY'),
     contaConfirmadaNestaAba: estaAbaConfirmou ? { id: estaAbaConfirmou, s: marcaDe('tok-a') } : null,
     contaVistaNoAparelho: !!estaAbaConfirmou,   // a aba que confirmou uma conta a viu (ou gravou) no aparelho (R23-8-01)
     saidaEsperandoConta: false, filaAtravessouSessao: false, puladosNoInicioDaFila: 0,

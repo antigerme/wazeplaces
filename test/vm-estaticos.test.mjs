@@ -249,7 +249,7 @@ test('.assetsignore: toda entrada da raiz tem DECISÃO — frontend ou ignorada'
   // O que é frontend de verdade. Curto de propósito: crescer esta lista é um
   // ato deliberado, que é justamente o que faltou pro `tools/` e pro `test/`.
   const FRONTEND = new Set([
-    'index.html', 'status.html', 'manifest.json', 'service-worker.js',
+    'index.html', 'status.html', 'demo.html', 'palco.html', 'manifest.json', 'service-worker.js',
     'js', 'css', 'icons', 'fonts',
     '_headers',            // consumido pelo Cloudflare, nunca servido
     'LICENSE',             // licença do projeto: publicar é o certo
@@ -287,17 +287,23 @@ test('.assetsignore: nada que o app CARREGA pode estar ignorado', () => {
   // apaga o `js/min/` e o app morre inteiro — com o guard de cima passando.
   const html = readFileSync(join(RAIZ, 'index.html'), 'utf8');
   const statusHtml = readFileSync(join(RAIZ, 'status.html'), 'utf8');
+  const demoHtml = readFileSync(join(RAIZ, 'demo.html'), 'utf8');
+  const palcoHtml = readFileSync(join(RAIZ, 'palco.html'), 'utf8');
   const sw = readFileSync(join(RAIZ, 'service-worker.js'), 'utf8');
 
   const extrairRefs = (h) => [...h.matchAll(/(?:src|href)="((?!https?:|data:|\/\/)[^"]+\.(?:js|css))"/g)]
     .map((m) => m[1].replace(/^\.?\//, ''));
   const doHtml = extrairRefs(html);
   const doStatusHtml = extrairRefs(statusHtml);
+  const doDemoHtml = extrairRefs(demoHtml);
+  const doPalcoHtml = extrairRefs(palcoHtml);
   const doSw = [...sw.matchAll(/^\s*'\/((?:js|css)\/[^']+)',?\s*$/gm)].map((m) => m[1]);
-  const carregados = [...new Set([...doHtml, ...doStatusHtml, ...doSw, 'js/min/qr.js'])];   // qr entra sob demanda
+  const carregados = [...new Set([...doHtml, ...doStatusHtml, ...doDemoHtml, ...doPalcoHtml, ...doSw, 'js/min/qr.js'])];   // qr entra sob demanda
 
   assert.ok(carregados.length >= 9,
     `achei só ${carregados.length} recursos carregados — o extrator quebrou, não o .assetsignore`);
+  assert.ok(doPalcoHtml.includes('js/min/palco.js') && doPalcoHtml.includes('js/min/qr.js'), 'o extrator não achou os scripts do palco — instrumento errado');
+  assert.ok(doDemoHtml.includes('js/min/demo.js') && doDemoHtml.includes('js/min/swipe.js'), 'o extrator não achou os scripts da página da demo — instrumento errado');
   assert.ok(carregados.some((c) => c.startsWith('js/min/')) && carregados.includes('css/app.css'),
     'o extrator não achou nem os js/min nem o css/app.css — instrumento errado');
 

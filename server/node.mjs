@@ -31,7 +31,8 @@ import { randomBytes, createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { dirname, join, normalize, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { dispatch, makeSessions, chaveDoSecret, varrerMantidosDoStore, SESSION_TTL, PAIR_TTL, RELEITURA_TTL_STORE } from './core.mjs';
+import { dispatch, fluxoDaDemo, makeSessions, chaveDoSecret, varrerMantidosDoStore, SESSION_TTL, PAIR_TTL, RELEITURA_TTL_STORE } from './core.mjs';
+import { criarSalasVm } from './demo-salas-vm.mjs';
 import { KA_TTL, MANTER_CRON_MIN, pausaPadrao } from './manter-conectado.mjs';
 import { calcularStatusPublico } from './status.mjs';
 import { readBody } from './corpo.mjs';
@@ -191,6 +192,12 @@ const sessions = makeSessions({ store: fsStore, keyBytes });
 // testes rodam, numa pasta temporária): sem este env próprio, o teste
 // escreveria status.json no ~/.waze-places de quem roda a suíte.
 const STATUS_ARQUIVO = process.env.STATUS_ARQUIVO || join(BASE_ESTADO, 'status.json');
+
+// As salas da demo (server/demo-salas-vm.mjs): memória + um arquivo por sala. Fora
+// do diretório das sessões, como o status: a varredura das sessões não as vê.
+const DEMO_DIR = process.env.DEMO_DIR || join(BASE_ESTADO, 'demos');
+const salas = criarSalasVm({ dir: DEMO_DIR });
+
 async function statusGet() {
   try { return await readFile(STATUS_ARQUIVO, 'utf8'); } catch { return null; }
 }
@@ -428,6 +435,8 @@ const ALLOWED_ROOT_FILES = new Set([
   // conteúdos, 67 KB de diferença. O `.assetsignore` faz o mesmo no Cloudflare.
   '/index.html',
   '/status.html',
+  '/demo.html',
+  '/palco.html',
   '/manifest.json',
   '/service-worker.js',
   '/favicon.ico',
@@ -484,7 +493,7 @@ const APELIDOS_DO_INDICE = new Map([['/index.html', '/'], ['/index', '/'], ['/in
 // página). `bonito → arquivo`: `bonito` é servido com 200 (o conteúdo de
 // `arquivo`), e `/arquivo` redireciona pra `bonito`. `test/vm-estaticos.test.mjs`
 // cobra os dois sentidos.
-const PAGINAS_SEM_EXTENSAO = new Map([['/status', '/status.html']]);
+const PAGINAS_SEM_EXTENSAO = new Map([['/status', '/status.html'], ['/demo', '/demo.html'], ['/palco', '/palco.html']]);
 
 // Resolve o caminho pedido: `{ safe, file }` (o arquivo a servir),
 // `{ redirecionar }` (um apelido do índice) ou `null` (nada aqui). Fonte única
@@ -612,6 +621,37 @@ function notFound(res) {
 // de um JSON não (R31-1, medido em 29 casos).
 const API_HEADERS = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...SECURITY_HEADERS };
 
+// Entrega a Response do fluxo (SSE) ao `res` do Node, aos pedaços, até um dos dois
+// lados fechar. Recusa (`{ status, body }`) sai como JSON, igual às outras rotas.
+async function servirFluxoDaDemo(req, res, r) {
+  if (!(r instanceof Response)) {
+    res.writeHead(r.status, API_HEADERS);
+    res.end(JSON.stringify(r.body));
+    return;
+  }
+  if (res.socket) { res.socket.setTimeout(0); res.socket.setNoDelay(true); }
+  // Os cabeçalhos de segurança da VM, mais os do fluxo que NÃO repetem um deles: a
+  // `Response` os traz em minúsculo e o conjunto em maiúsculo, e o Node somaria os dois
+  // ("nosniff, nosniff"). Comparação sem caixa.
+  const cabecalhos = { ...SECURITY_HEADERS };
+  const jaTem = new Set(Object.keys(SECURITY_HEADERS).map((k) => k.toLowerCase()));
+  for (const [k, v] of r.headers) if (!jaTem.has(k.toLowerCase())) cabecalhos[k] = v;
+  res.writeHead(200, cabecalhos);
+  const leitor = r.body.getReader();
+  // O `close` é do RES (a conexão), nunca do `req`: o `req` emite `close` quando o CORPO acaba de
+  // ser lido (já aconteceu, no `readBody`), então o ouvinte dele nunca via o celular sair — o
+  // cliente morto ficava na lista da sala e gastava o teto de conexões.
+  res.on('close', () => { leitor.cancel().catch(() => {}); });
+  try {
+    for (;;) {
+      const { value, done } = await leitor.read();
+      if (done || res.destroyed) break;
+      res.write(value);
+    }
+  } catch { /* o cliente saiu */ }
+  if (!res.destroyed) res.end();
+}
+
 const server = createServer(async (req, res) => {
   const url = req.url || '/';
   // O caminho NORMALIZADO, como o Worker o vê (`new URL(request.url).pathname`):
@@ -639,7 +679,10 @@ const server = createServer(async (req, res) => {
       // No Node o processo segue vivo depois da resposta: o que o handler deixa
       // correndo termina sozinho. Só não pode virar rejeição sem dono.
       const aoFundo = (p) => { Promise.resolve(p).catch(() => {}); };
-      const { status, body } = await dispatch(route, data, { sessions, aoFundo, statusStore });
+      // O FLUXO da demo (SSE) é uma resposta que não termina: não passa pelo
+      // `dispatch` (que devolve JSON). A chave vem no corpo, como em toda rota.
+      if (route === 'demo-ao-vivo') return servirFluxoDaDemo(req, res, await fluxoDaDemo(data, { salas }));
+      const { status, body } = await dispatch(route, data, { sessions, aoFundo, statusStore, salas });
       res.writeHead(status, API_HEADERS);
       res.end(JSON.stringify(body));
       return;
@@ -682,6 +725,16 @@ server.on('error', (e) => {
   console.error('Waze Places não subiu:', e && e.message);
   process.exit(1);
 });
+
+// A varredura das salas vencidas: no boot e de hora em hora. `unref`: não segura o processo.
+void salas.varrer();
+setInterval(() => { void salas.varrer(); }, 3600_000).unref();
+// Ao receber o sinal, grava o que as salas têm pendente (a gravação é com atraso) e
+// REENVIA o mesmo sinal: o `once` já tirou o nosso ouvinte, então o processo
+// termina do jeito de sempre (a mesma causa de saída pra quem o supervisiona).
+for (const sinal of ['SIGTERM', 'SIGINT']) {
+  process.once(sinal, () => { salas.fechar().catch(() => {}).finally(() => process.kill(process.pid, sinal)); });
+}
 
 server.listen(PORT, HOST, () => {
   // A porta que o SISTEMA deu: com PORT=0 (os testes pedem uma livre), o

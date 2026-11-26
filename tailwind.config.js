@@ -10,14 +10,24 @@ module.exports = {
   content: [
     './index.src.html',   // o FONTE — varrer o gerado criaria dependência de ordem
     './status.src.html',  // idem, pro /status.html
+    './demo.src.html',    // idem, pro /demo.html (a página do convidado da demo)
+    './palco.src.html',   // idem, pro /palco.html (a tela do apresentador)
     './js/app.js',
     './js/api.js',
     './js/swipe.js',
     './js/i18n.js',
     './js/version.js',
     './js/status.js',
+    './js/demo.js',
+    './js/palco.js',
   ],
-  theme: { extend: {} },
+  theme: {
+    extend: {
+      // O palco (/palco) em janela baixa ou estreita: o laptop com a barra do navegador (~650 de altura) e o espelhamento
+      // de projetor em 1280×720 ou 1024×768. A 1366×768 inteira não compacta (o que cabe a 1× não muda um pixel).
+      screens: { 'palco-baixo': { raw: '(max-height: 740px), (max-width: 1100px)' } },
+    },
+  },
   plugins: [],
 };
 

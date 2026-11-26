@@ -303,7 +303,7 @@ test('{undoSeg} é registrado por setI18nVars a partir de UNDO_WINDOW_MS', () =>
 // idioma, exatamente o bug que a chave existe pra consertar. Nenhuma auditoria
 // de dicionário pega isso, porque a chave chega pela REDE.
 test('i18n: toda errorKey do backend existe no dicionário', () => {
-  const core = read('server/core.mjs');
+  const core = read('server/core.mjs') + '\n' + read('server/demo-sala-viva.mjs'); // a sala viva também emite srv.err.demo*
   const emitidas = new Set([...core.matchAll(/['"](srv\.err\.[a-zA-Z0-9.]+)['"]/g)].map((m) => m[1]));
   assert.ok(emitidas.size >= 20,
     `só ${emitidas.size} chave(s) srv.err.* no core — o regex parou de achar as citações?`);
@@ -323,7 +323,7 @@ test('i18n: toda errorKey do backend existe no dicionário', () => {
 // Zero, e pela citação EXATA (entre aspas, fora de comentário): `includes` cru
 // contava `srv.err.cookieFormat` como emissão de `srv.err.cookieFormatNoWaze`.
 test('i18n: dicionário não acumula srv.err.* órfã', () => {
-  const servidor = ['server/core.mjs', 'worker/index.mjs', 'server/node.mjs'].map(read).join('\n')
+  const servidor = ['server/core.mjs', 'server/demo-sala-viva.mjs', 'worker/index.mjs', 'server/node.mjs'].map(read).join('\n')
     .split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
   const emitida = (k) => servidor.includes(`'${k}'`) || servidor.includes(`"${k}"`);
   const noDict = Object.keys(DICT[LANG_REF]).filter((k) => k.startsWith('srv.err.'));
@@ -367,9 +367,11 @@ test('i18n: toda chave do dicionário é usada pelo app — chave morta sai', ()
   const semComentario = (txt, html) => (html ? txt.replace(/<!--[\s\S]*?-->/g, '') : txt)
     .split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
   const codigo = ['js/app.js', 'js/api.js', 'js/presenca.js', 'js/swipe.js', 'js/sw-register.js', 'js/mapa.js', 'js/qr.js',
-    'js/status.js', 'server/core.mjs', 'worker/index.mjs', 'server/node.mjs'].map((a) => semComentario(read(a), false))
+    'js/status.js', 'js/demo.js', 'js/palco.js', 'server/core.mjs', 'server/demo-sala-viva.mjs', 'worker/index.mjs', 'server/node.mjs'].map((a) => semComentario(read(a), false))
     .concat(semComentario(read('index.src.html'), true))
-    .concat(semComentario(read('status.src.html'), true)).join('\n');
+    .concat(semComentario(read('status.src.html'), true))
+    .concat(semComentario(read('demo.src.html'), true))
+    .concat(semComentario(read('palco.src.html'), true)).join('\n');
   const citada = (k) => codigo.includes(`'${k}'`) || codigo.includes(`"${k}"`) || codigo.includes('`' + k + '`');
   const familias = [...new Set([...codigo.matchAll(/['"`]([a-z][a-zA-Z0-9]*(?:\.[a-zA-Z0-9_]+)*\.)['"`]/g)].map((m) => m[1]))];
   const usada = (k) => citada(k) || familias.some((f) => k.startsWith(f))

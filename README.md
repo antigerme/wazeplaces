@@ -172,6 +172,10 @@ wazeplaces/
 ├── index.html              # GERADO por `npm run html` — é ele que a raiz serve
 ├── status.src.html         # A página pública /status.html (transparência de uso) — o FONTE
 ├── status.html             # GERADO por `npm run html` — servido sem extensão (`/status`)
+├── demo.src.html           # A página do convidado da demo (`/demo#<segredo>`) — o FONTE
+├── demo.html               # GERADO por `npm run html` — servido sem extensão (`/demo`)
+├── palco.src.html          # O palco da demo (`/palco`): a tela do apresentador, pra projetar — o FONTE
+├── palco.html              # GERADO por `npm run html` — servido sem extensão (`/palco`)
 ├── manifest.json           # PWA manifest
 ├── service-worker.js       # Service worker (cache + auto-update)
 ├── icons/
@@ -194,6 +198,9 @@ wazeplaces/
 │   ├── mapa.js             # Mini-mapa e mapa ampliado (tiles do Waze)
 │   ├── qr.js               # Gerador de QR do pareamento (sob demanda)
 │   ├── status.js           # A página /status.html: busca /api/status uma vez, sem polling
+│   ├── demo.js             # A página /demo (convidado): triagem em sala, fluxo ao vivo, nada vai ao Waze
+│   ├── demo-fluxo.js       # O leitor do fluxo ao vivo da demo (um só, das páginas /demo e /palco)
+│   ├── palco.js            # A página /palco: conduz a sala (teclado), mostra o jogo e o resultado
 │   ├── swipe.js            # Gestos drag/swipe
 │   ├── version.js          # A versão (serial YYYYMMDDnn)
 │   ├── sw-register.js      # Registro e auto-update do service worker
@@ -204,10 +211,16 @@ wazeplaces/
 │   ├── marca-app.mjs       # A marca de quem usa o app, na posição da presença
 │   ├── manter-conectado.mjs # A varredura do «Manter conectado» (renova o cookie de quem pediu)
 │   ├── status.mjs          # Contagem pública (/status.html): conta sessões sem decifrar nada
+│   ├── demo.mjs            # A demo (sala ao vivo): regras puras
+│   ├── demo-sala.mjs       # A máquina de estados da sala da demo
+│   ├── demo-resultado.mjs  # O resultado da demo (unânime/dividido, prêmios, países): puro
+│   ├── demo-sala-viva.mjs  # A sala no ar (SSE), comum ao Durable Object e à VM
+│   ├── demo-salas-vm.mjs   # As salas da demo na VM
 │   ├── corpo.mjs           # Leitura do corpo da requisição na VM (UTF-8 inteiro)
 │   └── node.mjs            # Adaptador VM/Node (http + estáticos + fs sessions)
 ├── worker/
-│   └── index.mjs           # Adaptador Cloudflare Workers (roteia /api/*, delega estáticos pro ASSETS)
+│   ├── index.mjs           # Adaptador Cloudflare Workers (roteia /api/*, delega estáticos pro ASSETS)
+│   └── demo-do.mjs         # O Durable Object da demo
 ├── extensao-chrome/        # A extensão "WazePlaces Rapid Access" (o README dela ensina a instalar)
 ├── _headers                # Headers/CSP no Cloudflare (substitui o antigo .htaccess)
 ├── wrangler.jsonc          # Config Cloudflare (binding do KV)

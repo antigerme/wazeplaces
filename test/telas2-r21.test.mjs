@@ -527,8 +527,8 @@ test('R21-8-04 · o "Acesso restrito" quebra a palavra que não cabe no título,
 
 // Os cartões cuja fileira de ações (ou o botão único) é o ÚLTIMO filho da rolagem: cinco com a fileira `.dialogo-acoes` de dois
 // botões e dois com um botão só (o fim do treino e o "Acesso restrito"), que ficam presos pela mesma regra.
-const CARTOES_COM_ACOES = ['pasteModal', 'comoFuncionaModal', 'logoutModal', 'pairEnterModal', 'batchReadModal'];
-const CARTOES_COM_BOTAO_UNICO = [['treinoFimModal', 'treinoFimOk'], ['accessDeniedModal', 'closeAccessDenied']];
+const CARTOES_COM_ACOES = ['pasteModal', 'comoFuncionaModal', 'logoutModal', 'pairEnterModal', 'batchReadModal', 'demoCriarModal'];
+const CARTOES_COM_BOTAO_UNICO = [['treinoFimModal', 'treinoFimOk'], ['accessDeniedModal', 'closeAccessDenied'], ['demoProntaModal', 'demoProntaFechar']];
 
 test('R21-8-02 · a fileira de ações fica presa no fim do cartão do diálogo (sticky) só quando o cartão ROLA (e, sem o portão de rolagem, só empilhada); o foco para acima dela', () => {
   const cartao = regraDe('.dialogo-cartao');

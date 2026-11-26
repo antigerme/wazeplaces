@@ -46,7 +46,7 @@ import { pausaComJitter } from './waze-jitter.mjs';
 // 0). Perguntar o perfil de quem mudou de nível deslogaria a pessoa pela mão de
 // quem lia o relato dela. E o relatório já traz o perfil (`appState.profile`).
 // `testar-cookies` cria sessão a partir de cookies crus — nada disso é leitura.
-const ESCRITA = new Set(['validar-place', 'marcar-lido', 'excluir-foto', 'renomear-local', 'guardar-pedido', 'sessao', 'parear', 'presenca-waze', 'presenca-app', 'chat', 'perfil', 'testar-cookies']);
+const ESCRITA = new Set(['validar-place', 'marcar-lido', 'excluir-foto', 'renomear-local', 'guardar-pedido', 'sessao', 'parear', 'presenca-waze', 'presenca-app', 'chat', 'perfil', 'testar-cookies', 'demo-criar', 'demo-abrir', 'demo-entrar', 'demo-votar', 'demo-palpitar', 'demo-host']);
 // E a decisão é por LISTA DE LEITURA PERMITIDA, não pela lista acima: a lista
 // negra deixava passar `x/../marcar-lido`, `./validar-place` e `marcar-lido?x=1`
 // (a URL normaliza DEPOIS da recusa e chega na rota de escrita), e rota nova

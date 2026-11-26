@@ -14,7 +14,11 @@
 //
 // Toda a lógica vive em server/core.mjs (compartilhada com a VM Node).
 
-import { dispatch, makeSessions, chaveDoSecret, varrerMantidosDoStore, SESSION_TTL, MAX_BODY_BYTES, RESPOSTA_CORPO_GRANDE } from '../server/core.mjs';
+import { dispatch, fluxoDaDemo, makeSessions, chaveDoSecret, varrerMantidosDoStore, SESSION_TTL, MAX_BODY_BYTES, RESPOSTA_CORPO_GRANDE } from '../server/core.mjs';
+import { DemoSalaDO } from './demo-do.mjs';
+
+// O Durable Object da demo: o runtime da Cloudflare o acha por este export.
+export { DemoSalaDO };
 import { calcularStatusPublico } from '../server/status.mjs';
 
 // O corpo, lido com TETO — o mesmo da VM (`readBody`), e com a mesma resposta.
@@ -127,6 +131,27 @@ function statusStoreDoKv(env) {
   };
 }
 
+// As salas da demo sobre o Durable Object: uma instância por sala (o nome é o id
+// de 40 hex) e uma por CÓDIGO CURTO (o nome leva o hash do código). O core só fala
+// com este contrato (o mesmo da VM, em `server/demo-salas-vm.mjs`). Sem o binding
+// `DEMO_SALA`, devolve `undefined` e o core responde "demo indisponível" (503).
+function salasDoDo(env) {
+  const ns = env && env.DEMO_SALA;
+  if (!ns) return undefined;
+  const chamar = (nome, caminho, corpo) => ns.get(ns.idFromName(nome)).fetch('https://demo/' + caminho, { method: 'POST', body: JSON.stringify(corpo) });
+  return {
+    async criar(id, payload) { return (await chamar(id, 'criar', payload)).json(); },
+    async acao(id, req) { const r = await chamar(id, 'acao', req); return { status: r.status, body: await r.json() }; },
+    async fluxo(id, req) {
+      const r = await chamar(id, 'fluxo', req);
+      if ((r.headers.get('Content-Type') || '').startsWith('text/event-stream')) return r;
+      return { status: r.status, body: await r.json() };
+    },
+    async definirCodigo(hash, id, ate) { return (await (await chamar('codigo:' + hash, 'codigo-definir', { id, ate })).json()).ok === true; },
+    async resolverCodigo(hash) { return (await (await chamar('codigo:' + hash, 'codigo-resolver', {})).json()).id || null; },
+  };
+}
+
 export default {
   // O Cron Trigger do wrangler.jsonc (a cada 30 min): renova o cookie do Waze das
   // sessões que ligaram «Manter conectado». O que fazer, em que ritmo e a conta
@@ -201,7 +226,14 @@ export default {
         // da presença de carona que passou do teto de espera). Sem `waitUntil`
         // o runtime da Cloudflare corta a promessa assim que a resposta sai.
         const aoFundo = ctx && typeof ctx.waitUntil === 'function' ? (p) => ctx.waitUntil(p) : undefined;
-        const { status, body } = await dispatch(route, data, { sessions, aoFundo, statusStore: statusStoreDoKv(env) });
+        const salas = salasDoDo(env);
+        // O FLUXO da demo (SSE) é uma resposta que não termina: não passa pelo
+        // `dispatch` (que devolve JSON). A chave do apresentador vem no corpo.
+        if (route === 'demo-ao-vivo') {
+          const r = await fluxoDaDemo(data, { salas });
+          return r instanceof Response ? r : json(r.body, r.status);
+        }
+        const { status, body } = await dispatch(route, data, { sessions, aoFundo, statusStore: statusStoreDoKv(env), salas });
         return json(body, status);
       } catch (err) {
         console.error('Erro no handler /api:', err);

@@ -1667,6 +1667,8 @@ test('toda chave gravada no aparelho é resolvida no logout', () => {
     // `esquecer` da presença, que o logout chama — conferido abaixo que o
     // esquecer de fato APAGA a chave, senão a chamada seria decoração.
     CHAT_KEY: 'window.Presenca?.esquecer?.()',
+    // A chave de condução da demo que o apresentador criou (credencial): sai no «Sair» e na troca de conta.
+    DEMO_PALCO_KEY: 'safeLS.remove(DEMO_PALCO_KEY)',
     waze_session_token: 'API.setSession(null)',
     waze_region: "API.setRegion('row')",
     waze_country: 'API.setCountry(30)',

@@ -63,6 +63,8 @@ const MINIFICADOR = 'html-minifier-terser@7.2.0';   // fixo: versão que muda, s
 const PAGINAS = [
   { fonte: 'index.src.html', saida: 'index.html' },
   { fonte: 'status.src.html', saida: 'status.html' },
+  { fonte: 'demo.src.html', saida: 'demo.html' },
+  { fonte: 'palco.src.html', saida: 'palco.html' },
 ];
 
 const hashDoInline = (html) => {

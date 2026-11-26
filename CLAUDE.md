@@ -75,6 +75,10 @@ wazeplaces/
 │                            #   gerador confere o hash do script inline do tema e não grava se divergir.
 ├── status.src.html          # A página pública /status.html (transparência de uso). FONTE, mesmo tratamento do index.src.html.
 ├── status.html              # GERADO por `npm run html`. Servido SEM extensão (`/status`; `/status.html` redireciona).
+├── demo.src.html            # A página do CONVIDADO da demo (`/demo#<segredo>`). FONTE; o card é cópia do <template> do index.src.html.
+├── demo.html                # GERADO por `npm run html`. Servido SEM extensão (`/demo`).
+├── palco.src.html           # O PALCO da demo (`/palco`): a tela do apresentador, feita pra ser projetada. FONTE; o JS desenha tudo.
+├── palco.html               # GERADO por `npm run html`. Servido SEM extensão (`/palco`).
 ├── manifest.json            # PWA manifest (ícones SVG em icons/)
 ├── service-worker.js        # Cache + auto-update (controllerchange + SKIP_WAITING)
 ├── icons/
@@ -95,6 +99,9 @@ wazeplaces/
 │   │                        #   fixo) e `mapaGrade` (o mapa ampliado). Tiles do Waze, camada `live/base`.
 │   ├── qr.js                # Gerador de QR, JS puro, só pro pareamento; sob demanda (`carregarQr()`); vetores em test/qr.test.mjs
 │   ├── status.js            # A página /status.html: busca /api/status UMA vez (zero polling) e monta o DOM
+│   ├── demo.js              # A página /demo (convidado): IIFE; fluxo SSE por fetch POST, voto otimista, telas. As funções puras saem em `window.DemoPuro`
+│   ├── demo-fluxo.js        # O leitor do fluxo ao vivo da demo (POST + SSE por fetch, recuo, vigia de 45 s): UM só, das páginas /demo e /palco
+│   ├── palco.js             # A página /palco (apresentador): IIFE; conduz a sala pelo `demo-host`, desenha saguão/jogo/livre/resultado. Puras em `window.PalcoPuro`
 │   ├── version.js           # FONTE ÚNICA da versão (APP_VERSION + verLabel). Carregado antes do app.js
 │   ├── i18n.js              # i18n pt/en/es/fr: I18N_DICT, t(), applyI18n(), setLang(), setI18nVars(). FONTE
 │   │                        #   ÚNICA de texto de tela; LANGS_SUPORTADOS = Object.keys(I18N_DICT)
@@ -114,11 +121,17 @@ wazeplaces/
 │   │                        #   lon mod 1000 = país). PURO; quem escreve e quem lê importam daqui
 │   ├── manter-conectado.mjs # A varredura do «Manter conectado» (renova o cookie do Waze de quem pediu); PURA
 │   ├── status.mjs           # Contagem pública (/status.html): conta chaves sess_/ka_, PURA, nunca decifra
+│   ├── demo.mjs             # A DEMO, o que é puro: cota de pedidos, quem cria, o retrato (allowlist) e o apelido
+│   ├── demo-sala.mjs        # A máquina de estados da sala da demo (saguão, contagem, triagem, revelação), PURA
+│   ├── demo-resultado.mjs   # O RESULTADO da demo (unânime/dividido numa função só, prêmios com desempate, países, palpites, projeção), PURO
+│   ├── demo-sala-viva.mjs   # A sala no ar, comum ao Durable Object e à VM: conexões SSE, difusão, gravação, alarme
+│   ├── demo-salas-vm.mjs    # As salas da demo na VM: memória + um arquivo por sala
 │   ├── core.mjs             # Toda a lógica: sessões, cripto (AES-GCM), callWaze, categorizeWazeError,
 │   │                        #   categorizeGrpcError, isUserAllowed, os handlers e o dispatch()
 │   └── node.mjs             # Adaptador VM/Node: servidor http, estáticos, sessões em arquivo, chave
 ├── worker/
-│   └── index.mjs            # Adaptador Cloudflare Workers: /api/* (KV, Secret) e estáticos pelo ASSETS
+│   ├── index.mjs            # Adaptador Cloudflare Workers: /api/* (KV, Secret) e estáticos pelo ASSETS
+│   └── demo-do.mjs          # O Durable Object da demo (`DemoSalaDO`): uma sala por instância, sobre a SalaViva
 ├── _headers                 # Cloudflare: cabeçalhos, CSP e cache dos estáticos
 ├── wrangler.jsonc           # Cloudflare: KV SESSIONS, compat date e o Cron `*/30 * * * *` do «Manter conectado»
 ├── .assetsignore            # O que o Cloudflare NÃO publica (o padrão é publicar: esquecer vaza calado). É SÓ
@@ -141,6 +154,7 @@ wazeplaces/
 │   ├── gerar-html.mjs       # Gera o index.html a partir do index.src.html (npm run html)
 │   ├── gerar-css.mjs        # Gera o css/app.css (npm run css): tailwind + styles.css, nessa ORDEM (é o contrato)
 │   ├── gerar-js.mjs         # Gera o js/min/*.js (npm run js): um arquivo por fonte, esbuild de versão FIXA
+│   ├── smoke-demo.mjs       # Smoke da /demo (npm run test:demo): VM de verdade, salas semeadas, 41+ pedidos reais × iPhone/Fold × 4 línguas, fluxo ao vivo, servidor reiniciado
 │   ├── smoke-offline.mjs    # Smoke do offline (npm run test:offline): o service worker no comando
 │   ├── cf-injecao.mjs       # Mede a injeção do Cloudflare no index.html (com controle: menção × tag)
 │   ├── csp-img.mjs          # FONTE ÚNICA do casamento do curinga `https://*.waze.com` da `img-src`
@@ -388,6 +402,22 @@ Decidido pelo owner (2026-09-23). Fase 1: só servidor (`server/wme-grpc.mjs`, r
 - **Fica de fora, aceito**: o «Sair» que não alcança o servidor deixa a sessão renovada por até 14 dias (o aviso diz); a sessão órfã sem token no aparelho idem; `renovadas` conta o 200 do Waze, não a gravação do cookie.
 - **Mexer aqui é mexer em cota e em privacidade** (ver a exceção da Ajuda na seção da chave).
 - **A prova de produção** (fora do repo): sessões novas COM e SEM a opção, sem NENHUM uso até a hora (qualquer uso renova o cookie e anula a prova), conferidas a +26 h e +38 h. É o único jeito de provar o Cron no Cloudflare de verdade.
+
+---
+
+## 🎤 A demo — convidados triam junto, nada vai ao Waze (v2026.11.25-04)
+
+Pra Global Champs/apresentadores «venderem» o app. Quem cria: **L6+ com área gerenciada ou staff** (`podeCriarDemo`, `MIN_RANK_DEMO = 5`, só no SERVIDOR: lê o `/Session` direto, nunca o `handlePerfil`). Os convidados não têm login. **Três peças**: o servidor (`server/demo*.mjs`, `worker/demo-do.mjs`, rotas `demo-*`), a página do **convidado** (`/demo`) e o **palco** (`/palco`, a tela do apresentador); o app só CRIA (Preferências → «Demo para apresentação»). **Falta**: «cartão de participação», reações, exportar o resumo em imagem.
+
+- **Os convidados recebem o que o FILTRO do apresentador mostra** (a busca de página 1, residencial fora — NÃO «os mesmos pedidos que ele veria»: a ordem e o «já decidido» do app não entram), por ALLOWLIST (`montarRetrato`): sem autor, sem `creatorId`, sem texto livre (`flagComment`, `description`, `phone`…), ids sintéticos `demo-N`, foto só de host `*.waze.com`. O apresentador guarda os ids reais (o ↗). Campo novo do Waze nasce FORA. Os filtros que o app manda são os da busca, escritos pela MESMA conta (`filtrosDaDemo` × `fetchNextPage`, guard linha a linha em `test/demo-app.test.mjs`); «até 30» é espelho do servidor (`DEMO_PEDIDOS_MAX`, com teste).
+- **O voto é de sala, nunca do Waze**: ✕ R · ✓ L · ↑ P, **a primeira escolha vale** (sem Desfazer), e a repetição é idempotente (`repetido`). A regra do jogo é pura em `server/demo-sala.mjs` (fases saguão → contagem → andamento ⇄ pausada → encerrada; modos `livre`/`sinc`; revelação automática em `fimEm + SALA_GRACA_MS`; `comecouEm` marca o começo da triagem); a sala viva (`demo-sala-viva.mjs`) só difunde e grava; o **Durable Object** (Cloudflare) e o **arquivo** (VM) são adaptadores da MESMA `SalaViva`. A demo escreve no DO/arquivo, **nunca no KV das sessões** (um link vazado esgotaria as 1.000 escritas/dia e derrubaria a renovação de todo editor).
+- **O resultado é calculado no SERVIDOR** (`server/demo-resultado.mjs`, puro): «unânime» (≥ 85% do mais votado) e «dividido» (≤ 60%) são UMA função (`classeDoPedido`, com mínimo de 3 votos) usada pela etiqueta, pela ordem e pelo resumo; prêmios leves sem ranking (cada pessoa ganha no máximo um; elegível quem votou em ≥ 2/3 dos pedidos, e a sala precisa de 3 assim; empate pela ordem de entrada; «mais rápido» escolhe primeiro); países contados sem caixa nem acento (**«Brazil» ≠ «Brasil»**: não há lista pra consultar); **«mais rápido» e a projeção da fila existem SÓ no modo livre** (no sincronizado quem dita o ritmo é o apresentador) e contam do `comecouEm`, não da entrada no saguão. O cliente só desenha.
+- **A tela é PROJETADA, então o servidor esconde o que orientaria a sala** (`pedidoVisivel`, UMA regra na visão e no resultado): no sincronizado a divisão sai depois da revelação; **no livre só no FIM** (a barra colorida ao vivo orientaria quem ainda vota — o palco mostra contagens); o voto de **referência** do apresentador sai como `*` («registrado») até o pedido ser revelado, e o palco o confirma com «●», **nunca ✓/✕/↑** (o ✓ é o voto «lido»). `resultado` no meio da demo não entrega quem votou o quê.
+- **O fluxo ao vivo é POST + `text/event-stream` lido por `fetch`** (`/api/demo-ao-vivo`; o leitor é `js/demo-fluxo.js`, UM só das duas páginas): o segredo e a chave vão no CORPO, nunca em URL (`EventSource` só faz GET). O estado é sempre o INTEIRO, então reconectar é só abrir de novo. Batimento a cada 20 s; vigia de 45 s; recuo 1·2·4·8 s; recusa «parar» (fora da sala, sem permissão) não religa sozinha, nem na volta à aba. Coalescência de 250 ms; teto de 400 conexões com sonda antes de recusar. **A VM e o Worker respondem igual** (`test/demo-vm-http.test.mjs`, `test/demo-do.test.mjs`); no workerd o `setTimeout` solto num objeto dá «Illegal invocation» e o fechamento do cliente só chega ao `cancel` no batimento seguinte.
+- **O PALCO é uma página própria (`/palco`), não uma camada do app**, por decisão de projeto: o app liga ← → ↑ a decisões REAIS no Waze (o → de «próximo» a um toque de mandar um ✓), a página vai pra a tela do projetor sem levar o app, e a queda da sessão do Waze no meio da apresentação não a derruba (a chave da demo basta). A **chave de condução** (`waze_demo_palco`: `{demo, segredo, hostKey, expiraEm, conta}`) é credencial: o app a grava na criação e ela **sai no «Sair» e na troca de conta** (o palco aberto noutra aba solta o controle pelo evento `storage`), o diagnóstico a omite, **nunca vai pra URL nem pra tela**, e a resposta de criação que chega depois do «Sair» não a grava. O palco: Espaço/→ = ação principal (começar, revelar, próximo; 700 ms entre duas, pra o Espaço duplo não pular uma revelação), P pausa, R recado, 1·2·3 voto de referência; **no livre nenhuma tecla encerra** (confirmação no botão). Tudo que o convidado escreveu (apelido, país) passa por `esc()` — é texto de terceiro num projetor. O campo do recado é montado UMA vez (a visão se refaz o tempo todo e apagaria o que se digita). Tema e idioma seguem os do app (`waze_places_theme`/`waze_places_lang`), a fonte cresce com a largura (16 px a 1366, ~22 px a 1920) e o painel lateral tem `overflow: hidden`: **o que passa da caixa SOME calado**, por isso o smoke mede `scrollHeight > clientHeight`.
+- **A página `/demo` e o palco são públicos/sem login e sem script inline** (a CSP só autoriza o do tema do app, por hash): o tema vem do `js`. Reusam o `swipe.js` (só o convidado), o `mapa.js` e as chaves `card.*`; texto próprio é `demo.*` e `palco.*`. A chave do convidado (`demo_participante`) **não começa com `waze`** de propósito. Cada página tem a PRÓPRIA `atalhoDoNavegador`, travada igual à do app em `test/atalhos-do-navegador.test.mjs`.
+- **O palco se mede em JANELA de verdade, não só em tela cheia**: 1366×650 (laptop com a barra do navegador), 1280×720 e 1024×768 (espelhamento de projetor), além de 1366×768 e 1920×1080. Abaixo de 740 px de altura ou de 1100 de largura o painel lateral compacta (variante `palco-baixo:` do `tailwind.config.js`; a 1366×768 inteira nada muda): a 650 ele cortava ~60 px calado. «Tela cheia» é botão no topo (só por gesto), e o **PageDown** do passador de slides faz a ação principal (PageUp não faz nada: não há voltar). **A chave do palco mora SÓ no aparelho que cria a demo**: o diálogo de criar e o «criada» dizem isso quando não é computador de tela larga (`computadorDeTelaLarga()`), e o `/palco` numa janela < 720 px diz que é pra computador em vez de mostrar uma tela cortada (sem ir à rede).
+- **Mockup antes, dado que quebra depois**: o `npm run test:demo` mede os pedidos reais dos seis países no iPhone (393) e no Fold (280) nas 4 línguas, o app criando a demo (a tela REAL com o estado injetado), o palco no laptop (1366×768) e no projetor (1920×1080) nas 4 línguas em claro e escuro, o jogo inteiro pelo teclado, o XSS do apelido, a chave que não aparece na tela e a reconexão — com CONTROLES do medidor. **Ainda NÃO validado**: o Durable Object (migração v3, binding `DEMO_SALA`) e o SSE pela borda de PRODUÇÃO (WAF, Bot Fight Mode, ociosidade de 100 s contra o batimento de 20 s) — só um deploy prova; não afirme que funciona em produção antes disso. **Também não medido**: teclado virtual no celular do convidado (só viewport emulada) e o palco num projetor de verdade.
 
 ---
 
