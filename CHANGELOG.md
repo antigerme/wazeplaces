@@ -8,6 +8,9 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.11.27-06
+**Demo: quem cria é quem o app já considera de confiança, L5+ com área gerenciada (ou staff).** Antes só L6+ criava a demo; agora o nível é o mesmo de aprovar foto, excluir foto, corrigir nome e recusar autor sozinho, e a linha «Demo para apresentação» das Preferências aparece pra esse nível. O servidor confere de novo na criação, e a frase de recusa cita o nível pelo número do app (nas quatro línguas), sem escrevê-lo à mão. Se um dia o dono quiser separar os dois níveis, muda uma função só.
+
 ## v2026.11.27-04
 **Mudança interna: `MIN_RANK_DESTRUTIVO` agora se chama `MIN_RANK_CONFIAVEL`.** É o mesmo número (L5 com área gerenciada, ou staff) e as mesmas regras; só o nome mudou, porque ele passou a dizer quem é de confiança no app e não só quem pode agir de forma destrutiva. Nada muda para quem usa.
 

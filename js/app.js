@@ -65,6 +65,8 @@ if (typeof setI18nVars === 'function') {
 const NIVEL_MINIMO_EXIBIDO = 2;
 if (typeof setI18nVars === 'function') {
     setI18nVars({ nivelMinimo: () => NIVEL_MINIMO_EXIBIDO });
+    // O nível de quem cria a demo é o do `MIN_RANK_CONFIAVEL` (0-indexed), como o editor o vê.
+    setI18nVars({ nivelConfiavel: () => MIN_RANK_CONFIAVEL + 1 });
 }
 
 // Os prazos do SERVIDOR que a tela cita: a sessão vale 21 dias sem uso e o
@@ -4151,19 +4153,17 @@ function podeExcluirFotoAqui() {
     return podeAgirDestrutivoAqui();
 }
 
-// CRIAR uma demo (a sala triando pedidos reais pelo celular, sem login): L6+ com
-// área gerenciada ou staff — decisão do owner, e nível PRÓPRIO: não é o do
-// destrutivo (L5), porque a demo não escreve no Waze; ela gasta cota de KV e
-// expõe pedidos reais a um link aberto. Rank 0-indexed (5 é o L6 que o editor
-// vê). O SERVIDOR confere de novo na criação (`podeCriarDemo` em
-// `server/demo.mjs`, que guarda a cópia deste número; o teste compara); isto
-// aqui só decide se a linha aparece nas Preferências.
-const MIN_RANK_DEMO = 5;
+// CRIAR uma demo (a sala triando pedidos reais pelo celular, sem login): quem o
+// app já considera de CONFIANÇA, o mesmo nível dos recursos destrutivos (L5+ com
+// área gerenciada, ou staff) — decisão do owner, 2026-11-27. Um delegador como os
+// outros: a demo não escreve no Waze, mas gasta cota de KV e expõe pedidos reais
+// a um link aberto, e quem já pode aprovar foto e renomear local é quem a
+// comunidade escolheu pra isso; se um dia o owner separar os dois níveis, muda
+// só esta função. O SERVIDOR confere de novo na criação (`podeCriarDemo` em
+// `server/demo.mjs`, que guarda a cópia do número; o teste compara com
+// `MIN_RANK_CONFIAVEL`); isto aqui só decide se a linha aparece nas Preferências.
 function podeCriarDemoAqui() {
-    const p = AppState.profile;
-    if (!p) return false;
-    if (p.isStaff === true) return true;
-    return Number.isInteger(p.rank) && p.rank >= MIN_RANK_DEMO && p.isAreaManager === true;
+    return podeAgirDestrutivoAqui();
 }
 
 

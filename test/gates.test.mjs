@@ -72,7 +72,7 @@ test('portão L5: cada recurso tem o SEU nome, e todos delegam', () => {
   const semComentarios = fonte.replace(/\/\/[^\n]*/g, '');
   // Os delegadores conhecidos hoje. Recurso novo entra aqui junto com o seu.
   const DELEGADORES = ['podeExcluirFotoAqui', 'podeRenomearAqui', 'podeAprovarAtual',
-                       'podeRecusarAutomaticoAqui', 'conquistasComPortaoAqui'];
+                       'podeRecusarAutomaticoAqui', 'conquistasComPortaoAqui', 'podeCriarDemoAqui'];
   for (const nome of DELEGADORES) {
     assert.ok(semComentarios.includes(nome), `${nome} sumiu`);
   }
