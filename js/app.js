@@ -4133,13 +4133,13 @@ const Lightbox = {
 // decisão do owner. NOMEADA de propósito (ao contrário do `MIN_RANK_WAZE` do
 // core, que é da ENTRADA): esta é a única leitura do número no app inteiro —
 // `test/gates.test.mjs` reprova quem copiar a comparação em vez de ler daqui.
-const MIN_RANK_DESTRUTIVO = 4;
+const MIN_RANK_CONFIAVEL = 4;
 function podeAgirDestrutivoAqui() {
     const p = AppState.profile;
     if (!p) return false;
     if (p.isStaff) return true;
     const rank = Number.isInteger(p.rank) ? p.rank : parseInt(p.rank, 10);
-    return rank >= MIN_RANK_DESTRUTIVO && !!p.isAreaManager;
+    return rank >= MIN_RANK_CONFIAVEL && !!p.isAreaManager;
 }
 
 // Excluir foto: o primeiro recurso a usar o portão, e agora um delegador como
@@ -4181,6 +4181,8 @@ const DEMO_PALCO_KEY = 'waze_demo_palco';
 // (DEMO_VOTOS_JANELA_S) e a vida da demo (DEMO_TTL_S). Valor de constante NÃO se escreve na frase: vai por
 // `setI18nVars` (ver o fim do `initApp`).
 const DEMO_PEDIDOS_MAX = 30;
+// A folga de chaves que o app manda além dos 30 (o servidor usa a folga pros pedidos que outro editor decidir no meio).
+const DEMO_CHAVES_MAX = DEMO_PEDIDOS_MAX + 10;
 const DEMO_JANELA_H = 3;
 const DEMO_TTL_H = 48;
 let demoCriando = false;
@@ -4241,6 +4243,9 @@ function resumoDosFiltrosDaDemo() {
     partes.push(t(f.unreadOnly !== false ? 'demo.criar.naoLidos' : 'demo.criar.lidosTambem'));
     const n = Array.isArray(f.types) ? f.types.length : 0;
     partes.push(n > 0 && n < TYPES_ALL.length ? t('demo.criar.tiposN', { n }) : t('demo.criar.tiposTodos'));
+    // «Residenciais» só entra no resumo quando está ligado, com os MESMOS nomes do painel de Filtros.
+    if (f.residential === 'true') partes.push(t('filters.residential.only'));
+    else if (f.residential === 'false') partes.push(t('filters.residential.exclude'));
     return partes.join(' · ');
 }
 
@@ -4276,12 +4281,26 @@ function sincronizarTempoDaDemo() {
     document.getElementById('demoCriarTempo').classList.toggle('hidden', livre);
 }
 
+// Os pedidos da demo são os PRÓXIMOS da fila REAL do apresentador, na ordem dele (a que o app montou lendo todas as páginas,
+// ordenando e tirando o já decidido): só as chaves vão ao servidor, que acha os dados no Waze. `filaReal()` (e não a
+// `AppState.queue`) pra o treino aberto não mandar exemplo.
+function chavesDaFilaParaDemo() {
+    return filaReal().filter((p) => p && !p._treino && !p._exemplo && p.venueID !== undefined && p.updateRequestID !== undefined)
+        .slice(0, DEMO_CHAVES_MAX).map((p) => ({ venueID: p.venueID, updateRequestID: p.updateRequestID }));
+}
+
 async function criarDemo() {
     if (demoCriando || !podeCriarDemoAqui()) return;
     const erro = document.getElementById('demoCriarErro');
     erro.classList.add('hidden');
     if (AppState.filters.myArea && !caixaDaMinhaAreaEm()) {
         erro.textContent = t('demo.criar.areaAinda');
+        erro.classList.remove('hidden');
+        return;
+    }
+    const pedidos = chavesDaFilaParaDemo();
+    if (pedidos.length === 0) {
+        erro.textContent = t('demo.criar.filaVazia');
         erro.classList.remove('hidden');
         return;
     }
@@ -4294,7 +4313,7 @@ async function criarDemo() {
     botao.textContent = t('demo.criar.criando');
     const epoca = epocaDaSessao;
     let r;
-    try { r = await API.criarDemo({ modo, tempoMs, referencia, filtros: filtrosDaDemo() }); }
+    try { r = await API.criarDemo({ modo, tempoMs, referencia, filtros: filtrosDaDemo(), pedidos }); }
     catch (e) { r = { success: false }; }
     demoCriando = false;
     botao.disabled = false;

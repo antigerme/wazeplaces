@@ -2140,9 +2140,13 @@ async function handleBuscarPlaces(data, { sessions }) {
     toUpdateTime: null,
     bbox,
     cityId: null,
-    countryId: bbox ? null : countryId,
-    managedAreaId,
-    managedAreaIds: null,
+    // Com área gerenciada, quem manda é ELA: o Waze IGNORA o `managedAreaId` (singular) e devolve a fila do país inteiro
+    // (medido na produção com 3 áreas: 500 pedidos, igual ao controle sem filtro), e com `countryId` junto a lista
+    // `managedAreaIds` vira E com o país (as áreas de Mendoza e San Luis davam 0 numa busca com o Brasil). A lista SEM país é
+    // a que estreita de verdade (9 áreas medidas: 115, 0, 4, 244, 0, 12, 48, 7, 0). A caixa («Minha área») já era sem país.
+    countryId: bbox || managedAreaId ? null : countryId,
+    managedAreaId: null,
+    managedAreaIds: managedAreaId ? [managedAreaId] : null,
     stateId,
     userPropertiesFilter: unreadOnly ? { isRead: false } : {},
     venueUpdateRequestsFilter: {
@@ -4211,6 +4215,24 @@ async function handleStatusPublico(data, { statusStore } = {}) {
 // sala (votar, entrar) é anônimo de propósito: o convidado não tem sessão.
 const DEMO_PLACES = cotaDaDemo(MIN_RANK_WAZE);
 const DEMO_MIN_PEDIDOS = 3;
+// A demo mostra os PRÓXIMOS pedidos da FILA REAL do apresentador, na ordem dele: o app manda as chaves (as da frente da fila,
+// com uma folga pros que outro editor decidir no meio), e o servidor as acha nas páginas do Waze (os mesmos filtros) e monta
+// o retrato NESSA ordem. Quem ordena e tira o já decidido é o app (a fila dele), nunca uma segunda coleta aqui.
+const DEMO_CHAVES_MAX = DEMO_PLACES + 10;
+const DEMO_PAGINAS_MAX = 6;
+
+function chavesDaFilaDaDemo(bruto) {
+  if (!Array.isArray(bruto) || bruto.length === 0 || bruto.length > DEMO_CHAVES_MAX) apiError('Pedido inválido', 400, 'srv.err.badRequest');
+  const id = (x) => (typeof x === 'string' || typeof x === 'number') && String(x).length > 0 && String(x).length <= 100;
+  const vistas = new Set();
+  const lista = [];
+  for (const c of bruto) {
+    if (!c || typeof c !== 'object' || !id(c.venueID) || !id(c.updateRequestID)) apiError('Pedido inválido', 400, 'srv.err.badRequest');
+    const k = `${c.venueID}|${c.updateRequestID}`;
+    if (!vistas.has(k)) { vistas.add(k); lista.push(k); }
+  }
+  return lista;
+}
 
 const demoIdDoSegredo = async (segredo) => (await sha256hex('demo:' + segredo)).slice(0, 40);
 const demoHash = (rotulo, valor) => sha256hex('demo-' + rotulo + ':' + valor);
@@ -4249,6 +4271,7 @@ async function handleDemoCriar(data, ctx) {
   if (!DEMO_MODOS.includes(modo) || !DEMO_TEMPOS_MS.includes(tempoMs) || typeof referencia !== 'boolean') {
     apiError('Pedido inválido', 400, 'srv.err.badRequest');
   }
+  const chaves = chavesDaFilaDaDemo(data.pedidos);
 
   const cookies = await resolveCookies(data, sessions);
   const region = requireRegion(data);
@@ -4267,11 +4290,26 @@ async function handleDemoCriar(data, ctx) {
   }
   if (!podeCriarDemo(objetoDoWaze(sessao.response))) apiError('Só quem é L6+ com área gerenciada cria uma demo', 403, 'srv.err.demoSemPermissao');
 
-  // A busca é a MESMA do app, com os filtros do apresentador, página 1; o
-  // residencial sai pelo Waze e de novo no retrato.
-  const busca = await handleBuscarPlaces({ ...data, page: 1, residential: false }, ctx);
-  if (busca.status !== 200) return busca;
-  const { convidado, apresentador } = montarRetrato(busca.body.places, DEMO_PLACES);
+  // A busca é a MESMA do app, com os filtros do apresentador (o «Residenciais» também: casa entra quando o filtro deixa), e
+  // anda pelas páginas até achar os pedidos da fila dele (ou até o fim, ou o teto). O Waze já tira autor, nome e telefone de
+  // casa, e o retrato é uma allowlist. A falha de uma página DEPOIS da primeira não derruba a demo: vale o que já se achou.
+  const achados = new Map();
+  for (let pagina = 1; pagina <= DEMO_PAGINAS_MAX; pagina++) {
+    const busca = await handleBuscarPlaces({ ...data, page: pagina }, ctx);
+    if (busca.status !== 200) {
+      if (pagina === 1) return busca;
+      break;
+    }
+    for (const p of busca.body.places) {
+      const k = `${p.venueID}|${p.updateRequestID}`;
+      if (!achados.has(k)) achados.set(k, p);
+    }
+    const quantos = chaves.filter((k) => achados.has(k)).length;
+    if (quantos >= DEMO_PLACES || quantos === chaves.length || busca.body.hasMore !== true) break;
+  }
+  // NA ORDEM do apresentador; o que sumiu da fila no meio (outro editor decidiu) fica de fora e o próximo ocupa o lugar.
+  const naOrdem = chaves.map((k) => achados.get(k)).filter(Boolean);
+  const { convidado, apresentador } = montarRetrato(naOrdem, DEMO_PLACES);
   if (convidado.length < DEMO_MIN_PEDIDOS) {
     apiError('Poucos pedidos no filtro', 409, 'srv.err.demoPoucosPedidos', { n: convidado.length, min: DEMO_MIN_PEDIDOS });
   }

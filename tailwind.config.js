@@ -35,5 +35,5 @@ module.exports = {
 // palavras de QUALQUER texto dos arquivos de content — inclusive de dentro de
 // atributos e comentários. O host `static.cloudflareinsights.com` na CSP faz
 // aparecer um `.static{position:static}` no CSS gerado. São 24 bytes mortos e
-// inevitáveis enquanto o host estiver liberado. NÃO use `blocklist` pra tirar:
+// inevitáveis enquanto o host estiver liberado. Idem o `c.blur()` do palco, que gera `.blur` e `.filter`. NÃO use `blocklist` pra tirar:
 // viraria armadilha silenciosa no dia em que alguém usar `class="static"`.

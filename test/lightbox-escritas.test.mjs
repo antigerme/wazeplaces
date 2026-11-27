@@ -29,15 +29,15 @@ function fatiar(nome) {
     else if (APP_SEM[j] === ')') { par--; if (par === 0) { i = j + 1; break; } }
   }
   const corpo = APP_SEM.slice(m.index, fechar(APP_SEM, i));
-  // `podeAgirDestrutivoAqui` passou a ler `MIN_RANK_DESTRUTIVO` (uma constante
+  // `podeAgirDestrutivoAqui` passou a ler `MIN_RANK_CONFIAVEL` (uma constante
   // do MÓDULO) em vez de cravar o número — fatiar só a função, pra quem a
   // chama (direto ou via delegador), dá ReferenceError sem a constante junto.
   // Escopado a ESTA constante, não genérico: um sweep de "todo identificador
   // maiúsculo" colidia com constantes que outros call sites JÁ injetam por
   // conta própria (`UNDO_WINDOW_MS` virava "already declared").
-  if (corpo.includes('MIN_RANK_DESTRUTIVO')) {
-    const cm = /^const MIN_RANK_DESTRUTIVO = [^;]+;/m.exec(APP_SEM);
-    assert.ok(cm, 'MIN_RANK_DESTRUTIVO sumiu do app.js');
+  if (corpo.includes('MIN_RANK_CONFIAVEL')) {
+    const cm = /^const MIN_RANK_CONFIAVEL = [^;]+;/m.exec(APP_SEM);
+    assert.ok(cm, 'MIN_RANK_CONFIAVEL sumiu do app.js');
     return cm[0] + '\n' + corpo;
   }
   return corpo;

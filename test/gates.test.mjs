@@ -4,7 +4,7 @@
 //   · ENTRAR é L2+AM (L3+AM até 2026-09-09) — `isUserAllowed`, no SERVIDOR. É o portão de verdade, e
 //     `test/core.test.mjs` já cobre a matriz dele.
 //   · AGIR de forma destrutiva é L5+AM (L6+AM até 2026-11-21) — `podeAgirDestrutivoAqui`, só do
-//     CLIENTE, lendo `MIN_RANK_DESTRUTIVO`. Este arquivo é o que faltava: até agora nada reprovava
+//     CLIENTE, lendo `MIN_RANK_CONFIAVEL`. Este arquivo é o que faltava: até agora nada reprovava
 //     quem trocasse a comparação por uma cópia solta.
 //
 // O portão do cliente ser só do cliente é decisão, não esquecimento (gotcha
@@ -22,8 +22,8 @@ const core = readFileSync(new URL('../server/core.mjs', import.meta.url), 'utf8'
 // test/qr.test.mjs. Fatiar em vez de reimplementar é o que garante que o teste
 // exercite o código que roda no aparelho. A constante vem JUNTO: ela mora logo
 // antes da função, e a função LÊ dela — fatiar só a função sem ela deixaria
-// `MIN_RANK_DESTRUTIVO` indefinida no escopo de mentira.
-const INICIO_CONST = 'const MIN_RANK_DESTRUTIVO = ';
+// `MIN_RANK_CONFIAVEL` indefinida no escopo de mentira.
+const INICIO_CONST = 'const MIN_RANK_CONFIAVEL = ';
 const INICIO = 'function podeAgirDestrutivoAqui() {';
 assert.ok(fonte.includes(INICIO_CONST), 'a constante do portão dos destrutivos sumiu do app.js');
 assert.ok(fonte.includes(INICIO), 'o portão dos destrutivos sumiu do app.js');
@@ -48,7 +48,7 @@ test('portão L5: a matriz de quem passa', () => {
 
 // NÃO existe teste de "rank em texto": ele foi escrito, sabotado e removido.
 // A ideia era travar a normalização (`Number.isInteger(p.rank) ? p.rank :
-// parseInt(...)`) contra alguém simplificar pra `p.rank >= MIN_RANK_DESTRUTIVO`.
+// parseInt(...)`) contra alguém simplificar pra `p.rank >= MIN_RANK_CONFIAVEL`.
 // Mas as duas formas concordam em tudo que importa — `'4' >= 4` coage pra true,
 // `'abc' >= 4` dá false — e o único valor que as separa é `'4abc'`, que a versão
 // atual ACEITA como L5. Travar isso seria afirmar que "4abc" é um rank válido,
@@ -102,7 +102,7 @@ test('portões: ENTRAR (L2, servidor) e AGIR (L5, cliente) são níveis diferent
   assert.ok(m, 'MIN_RANK_WAZE sumiu do core');
   const entrar = parseInt(m[1], 10);
   assert.equal(entrar + 1, MIN_RANK_WAZE_DISPLAY, 'o nível de ENTRADA mudou — foi decisão?');
-  const g = fonte.match(/const MIN_RANK_DESTRUTIVO = (\d+);/);
+  const g = fonte.match(/const MIN_RANK_CONFIAVEL = (\d+);/);
   assert.ok(g, 'a constante do portão dos destrutivos mudou de forma');
   const agir = parseInt(g[1], 10);
   assert.ok(agir > entrar,
