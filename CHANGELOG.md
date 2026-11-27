@@ -8,6 +8,12 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.11.27-03
+**Demo: os convidados recebem exatamente a fila do apresentador.** Antes a demo coletava os pedidos por conta própria no servidor (só a primeira página, na ordem do Waze), e isso podia divergir da fila que o apresentador teria triando de verdade: o app lê todas as páginas, ordena e tira o que já foi decidido. Agora o app manda quais são os próximos pedidos da fila dele, e o servidor os busca no Waze e monta a demo **na mesma ordem**: o primeiro é o card que o apresentador está vendo. Se outro editor decidir um deles no meio, o próximo da fila ocupa o lugar. Com a fila vazia ou ainda carregando, o app avisa em vez de criar uma demo vazia. O diálogo diz «os próximos pedidos da sua fila, na mesma ordem».
+
+## v2026.11.27-02
+**«Área gerenciada» passa a filtrar de verdade.** O filtro «Área gerenciada» não estreitava nada: o Waze ignora o `managedAreaId` quando vem junto do país, e a fila do país inteiro aparecia, qualquer que fosse a área (nas três áreas testadas, 500 pedidos, igual a sem filtro). As áreas de outro país, como Mendoza e San Luis, mostravam a fila do Brasil. Agora a busca manda a área como lista e sem país, e cada área mostra os pedidos dela (medido com as 9 áreas de uma conta L6+AM). O estado continua estreitando dentro da área.
+
 ## v2026.11.27-01
 **Demo: segue o filtro «Residenciais».** Até aqui a demo tirava os locais residenciais sempre, qualquer que fosse o filtro, e o diálogo de criar dizia «sem locais residenciais» ao lado de um filtro em «Indiferente» (e «Apenas residenciais» era ignorado em silêncio). Agora o filtro vale como está: casa entra quando o filtro deixa, e o resumo do diálogo mostra «Apenas residenciais» ou «Excluir residenciais» com os mesmos nomes do painel de Filtros. O que o convidado vê não mudou: continua sem autor, sem texto livre, com ids sintéticos. No palco, depois de mandar um recado o foco sai do campo na hora (um Espaço digitado logo em seguida podia cair no campo escondido e não revelar nada).
 

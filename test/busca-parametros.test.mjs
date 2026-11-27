@@ -63,7 +63,9 @@ test('R17-6-A2: CONTROLE — o que o app manda hoje (null, \'\', número, texto 
   const cheia = await buscar({ stateId: 2, managedAreaId: '77', page: 3, categories: ['GAS_STATION', 'PARKING_LOT'] });
   assert.equal(cheia.r.status, 200, JSON.stringify(cheia.r.body));
   assert.equal(cheia.enviado.stateId, 2);
-  assert.equal(cheia.enviado.managedAreaId, 77);
+  // A área gerenciada vai como LISTA e sem país (ver o teste «Área gerenciada» abaixo): o `managedAreaId` singular o Waze ignora.
+  assert.deepEqual(cheia.enviado.managedAreaIds, [77]);
+  assert.equal(cheia.enviado.managedAreaId, null);
   assert.equal(cheia.enviado.venueUpdateRequestsFilter.page, 3);
   assert.deepEqual(cheia.enviado.venueUpdateRequestsFilter.categories, ['GAS_STATION', 'PARKING_LOT']);
 
@@ -161,4 +163,35 @@ test('R17-6-A3: só um número NÃO-negativo bloqueia o local — ausente, `null
   assert.deepEqual(entra(rdComPermissao(undefined, true)), { cards: 1, blocked: 0 }, 'ausente');
   assert.deepEqual(entra(rdComPermissao(null)), { cards: 1, blocked: 0 }, 'DEFEITO: `permissions: null` bloqueou o local');
   assert.deepEqual(entra(rdComPermissao('5')), { cards: 1, blocked: 0 }, 'DEFEITO: o TEXTO "5" bloqueou o local');
+});
+
+// «Área gerenciada» (validado na produção, com 9 áreas de uma conta L6+AM, 2026-11-27): o Waze IGNORA o `managedAreaId`
+// singular e devolve a fila do PAÍS (500 pedidos para as três áreas testadas, igual ao controle sem filtro), e com
+// `countryId` junto a lista `managedAreaIds` vira E com o país (as áreas de Mendoza e de San Luis davam 0 numa busca com o
+// Brasil). A lista SEM país é a que estreita: 115, 0, 4, 244, 0, 12, 48, 7 e 0 pedidos nas 9 áreas.
+test('Área gerenciada: vai como LISTA e SEM país; o singular não vai mais', async () => {
+  const sem = await buscar({});
+  assert.equal(sem.enviado.countryId, 30, 'CONTROLE: sem área, a busca segue com o país');
+  assert.equal(sem.enviado.managedAreaIds, null);
+  for (const id of [77, '77']) {
+    const { r, enviado } = await buscar({ managedAreaId: id });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.deepEqual(enviado.managedAreaIds, [77], 'a área vai como lista de números');
+    assert.equal(enviado.managedAreaId, null, 'o singular o Waze ignora: não vai');
+    assert.equal(enviado.countryId, null, 'com país a lista vira E com ele (a área de outro país dava zero)');
+  }
+  // O estado e os demais filtros seguem junto (o estado só estreita DENTRO da área).
+  const junto = await buscar({ managedAreaId: 77, stateId: 5, residential: false, unreadOnly: false });
+  assert.equal(junto.enviado.stateId, 5);
+  assert.equal(junto.enviado.venueUpdateRequestsFilter.residential, false);
+  assert.deepEqual(junto.enviado.userPropertiesFilter, {});
+  // A caixa («Minha área») continua sem país e SEM a lista.
+  const caixa = await buscar({ bbox: [-46.7, -23.6, -46.5, -23.4], managedAreaId: null });
+  assert.equal(caixa.enviado.countryId, null);
+  assert.equal(caixa.enviado.managedAreaIds, null);
+  // Área inválida continua sendo 400 antes do Waze.
+  for (const ruim of ['abc', 0, -3, 1.5]) {
+    const { r, chamadas } = await buscar({ managedAreaId: ruim });
+    recusada(r, chamadas, 'managedAreaId ' + JSON.stringify(ruim));
+  }
 });
