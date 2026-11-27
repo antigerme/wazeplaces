@@ -96,11 +96,27 @@ test('criar: o portão recusa SEM apagar a sessão de quem pediu (não é o port
   assert.ok(await s.sessions.loadSession(s.sessionToken), 'quem só não pode criar demo segue logado');
 });
 
-test('criar: residencial fica de fora e a numeração não tem buraco; poucos pedidos é 409', async () => {
+test('criar: a demo segue o filtro «Residenciais» — casa entra, e o filtro chega ao Waze; poucos pedidos é 409', async () => {
   const { r, salas } = await demoCriada({}, { venues: 5, residencial: 2 });
   assert.equal(r.status, 200);
-  assert.equal(r.body.total, 4);
-  assert.ok(!JSON.stringify(salas._salas.get(r.body.demo).sala.deck.convidado).includes('RESIDENCE'));
+  assert.equal(r.body.total, 5, 'a casa não é descartada pelo servidor');
+  assert.ok(JSON.stringify(salas._salas.get(r.body.demo).sala.deck.convidado).includes('RESIDENCE_HOME'));
+  // O valor do filtro vai ao Waze como o app o mandou: ausente = sem filtro; true e false, os dois.
+  const corpoDaBusca = async (extra) => {
+    let corpo = null;
+    const original = globalThis.fetch;
+    const s = await sessaoDeTeste(COOKIES);
+    globalThis.fetch = async (url, init = {}) => {
+      const u = String(url);
+      if (u.includes('/Issues/Search/List')) corpo = JSON.parse(init.body);
+      return waze({ venues: 5 })(u);
+    };
+    try { await dispatch('demo-criar', { ...s.dados, region: 'row', countryId: 30, ...extra }, { ...s.ctx, salas: criarSalasVm({ agora: () => Date.now() }) }); } finally { globalThis.fetch = original; }
+    return corpo.venueUpdateRequestsFilter.residential;
+  };
+  assert.equal(await corpoDaBusca({}), null, 'sem a chave: o Waze não filtra por residencial');
+  assert.equal(await corpoDaBusca({ residential: true }), true, 'só residenciais');
+  assert.equal(await corpoDaBusca({ residential: false }), false, 'sem residenciais');
   const poucos = await demoCriada({}, { venues: 2 });
   assert.equal(poucos.r.status, 409);
   assert.equal(poucos.r.body.errorKey, 'srv.err.demoPoucosPedidos');

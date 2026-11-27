@@ -4267,9 +4267,9 @@ async function handleDemoCriar(data, ctx) {
   }
   if (!podeCriarDemo(objetoDoWaze(sessao.response))) apiError('Só quem é L6+ com área gerenciada cria uma demo', 403, 'srv.err.demoSemPermissao');
 
-  // A busca é a MESMA do app, com os filtros do apresentador, página 1; o
-  // residencial sai pelo Waze e de novo no retrato.
-  const busca = await handleBuscarPlaces({ ...data, page: 1, residential: false }, ctx);
+  // A busca é a MESMA do app, com os filtros do apresentador (o «Residenciais» também: casa entra quando
+  // o filtro deixa), página 1. O Waze já tira autor, nome e telefone de casa, e o retrato é uma allowlist.
+  const busca = await handleBuscarPlaces({ ...data, page: 1 }, ctx);
   if (busca.status !== 200) return busca;
   const { convidado, apresentador } = montarRetrato(busca.body.places, DEMO_PLACES);
   if (convidado.length < DEMO_MIN_PEDIDOS) {

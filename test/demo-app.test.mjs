@@ -62,6 +62,24 @@ test('filtrosDaDemo escreve a MESMA conta que o fetchNextPage (linha a linha, se
   assert.deepEqual(minha, dela, 'a demo monta os filtros de um jeito e a busca de outro');
 });
 
+test('resumo do diálogo: «Residenciais» só aparece quando está ligado, com os nomes do painel de Filtros', () => {
+  const dic = { 'demo.criar.naoLidos': 'NL', 'demo.criar.lidosTambem': 'LT', 'demo.criar.tiposN': 'T{n}', 'demo.criar.tiposTodos': 'TT',
+    'filters.residential.only': 'SÓ', 'filters.residential.exclude': 'SEM', 'demo.criar.minhaArea': 'MA', 'demo.criar.paisId': 'P{id}' };
+  const resumo = (residential) => new Function('AppState', 'API', 'TYPES_ALL', 't', fatiar('resumoDosFiltrosDaDemo') + '\nreturn resumoDosFiltrosDaDemo();')(
+    { filters: { types: [], residential, unreadOnly: true, myArea: false }, countries: [{ id: 30, name: 'Brazil' }] },
+    { getCountry: () => 30 }, ['a', 'b', 'c'], (k, v = {}) => (dic[k] || k).replace(/\{(\w+)\}/g, (_, x) => v[x]));
+  assert.equal(resumo(''), 'Brazil · NL · TT', '«Indiferente» não vira texto');
+  assert.equal(resumo('true'), 'Brazil · NL · TT · SÓ');
+  assert.equal(resumo('false'), 'Brazil · NL · TT · SEM');
+});
+
+test('o diálogo de criar não promete mais «sem residenciais» (a demo segue o filtro), nas 4 línguas', () => {
+  const I18N = readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8');
+  const frases = [...I18N.matchAll(/'demo\.criar\.filtro': '([^']*(?:\\'[^']*)*)'/g)].map((m) => m[1]);
+  assert.equal(frases.length, 4);
+  for (const f of frases) assert.ok(!/resid/i.test(f), f);
+});
+
 test('filtrosDaDemo: cada filtro do apresentador chega ao corpo (e o que é padrão não vai)', () => {
   const montar = (filtros, extra = {}) => new Function('AppState', 'TYPES_ALL', 'caixaDaMinhaAreaEm', 'ordemDoWaze',
     fatiar('filtrosDaDemo') + '\nreturn filtrosDaDemo();')(

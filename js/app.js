@@ -4241,6 +4241,9 @@ function resumoDosFiltrosDaDemo() {
     partes.push(t(f.unreadOnly !== false ? 'demo.criar.naoLidos' : 'demo.criar.lidosTambem'));
     const n = Array.isArray(f.types) ? f.types.length : 0;
     partes.push(n > 0 && n < TYPES_ALL.length ? t('demo.criar.tiposN', { n }) : t('demo.criar.tiposTodos'));
+    // «Residenciais» só entra no resumo quando está ligado, com os MESMOS nomes do painel de Filtros.
+    if (f.residential === 'true') partes.push(t('filters.residential.only'));
+    else if (f.residential === 'false') partes.push(t('filters.residential.exclude'));
     return partes.join(' · ');
 }
 
