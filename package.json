@@ -19,7 +19,7 @@
     "cf:deploy": "wrangler deploy",
     "test:presenca": "node tools/smoke-presenca.mjs",
     "test:fluxo": "node tools/smoke-fluxo.mjs",
-    "js": "node tools/gerar-js.mjs",
+    "js": "node tools/extensao-instalacoes.mjs && node tools/gerar-js.mjs",
     "html": "node tools/gerar-html.mjs",
     "test:diag-tela": "node tools/smoke-diag-tela.mjs",
     "test:offline": "node tools/smoke-offline.mjs",

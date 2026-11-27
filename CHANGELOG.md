@@ -8,6 +8,9 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.11.27-05
+**/status: o número de instalações da extensão agora se atualiza no build.** O número era fixo no código (99, medido à mão em 23/11) e já estava defasado: a loja mostra 105. Agora `npm run js` lê a página da loja da extensão antes de gerar e reescreve o número quando ele mudou. No CI não busca (o número da loja reprovaria a conferência dos arquivos gerados), sem rede segue com o último número e nunca derruba o build.
+
 ## v2026.11.27-04
 **Mudança interna: `MIN_RANK_DESTRUTIVO` agora se chama `MIN_RANK_CONFIAVEL`.** É o mesmo número (L5 com área gerenciada, ou staff) e as mesmas regras; só o nome mudou, porque ele passou a dizer quem é de confiança no app e não só quem pode agir de forma destrutiva. Nada muda para quem usa.
 

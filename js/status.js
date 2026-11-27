@@ -187,11 +187,12 @@ function montarTendencia(historico) {
   svg.addEventListener('mouseleave', sair);
 }
 
-// 99 instalações no Chrome Web Store, medido em 2026-11-23 na página pública
-// da loja (https://chromewebstore.google.com/detail/.../dpinfpcoggnilplfgkpnkhbmfokhnhnn).
-// NÃO é dinâmico — não existe API pública pra isso (ver CLAUDE.md); atualizar
-// este número é um ato manual, deliberado, quando alguém medir de novo.
-const EXTENSAO_INSTALACOES_CHROME = 99;
+// O número de instalações da extensão NÃO é dinâmico no navegador (não existe API pública pra isso): quem o
+// atualiza é o BUILD. `npm run js` roda antes `tools/extensao-instalacoes.mjs`, que lê a página da loja
+// (https://chromewebstore.google.com/detail/waze-places-rapid-access/dpinfpcoggnilplfgkpnkhbmfokhnhnn) e reescreve
+// as DUAS linhas abaixo quando o número mudou (no CI não busca; sem rede, segue com o que está aqui).
+// Chrome Web Store, lido em 2026-11-27 na página pública da loja (reescrito por tools/extensao-instalacoes.mjs).
+const EXTENSAO_INSTALACOES_CHROME = 105;
 
 function montarExtensao() {
   document.getElementById('extensaoInstalacoes').textContent = t('status.extensao.instalacoes', { n: EXTENSAO_INSTALACOES_CHROME });
