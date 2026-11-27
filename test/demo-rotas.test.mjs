@@ -12,17 +12,19 @@ const COOKIES = [NETSCAPE('.waze.com', '_csrf_token', 'csrf-abc'), NETSCAPE('.wa
 const pid = (n) => 'parte-de-teste-' + String(n).padStart(4, '0');
 
 // `n` venues editáveis, cada um com um PUR; o venue `residencial` (1-based) é casa.
-const pedidosDoWaze = (n, { residencial = 0 } = {}) => JSON.stringify({
+const pedidosDoWaze = (n, { residencial = 0, de = 1, hasMore = false } = {}) => JSON.stringify({
   users: { objects: [{ id: 7, userName: 'world_48213' }] },
   streets: { objects: [] }, cities: { objects: [] }, states: { objects: [] },
-  mapIssues: { venueUpdateRequests: { hasMore: false } },
+  mapIssues: { venueUpdateRequests: { hasMore } },
   venues: {
     objects: Array.from({ length: n }, (_, i) => ({
-      id: 'v-real-' + (i + 1), name: 'Local ' + (i + 1), permissions: -1, categories: [i + 1 === residencial ? 'RESIDENCE_HOME' : 'BAR'], images: [],
-      venueUpdateRequests: [{ id: 'ur-real-' + (i + 1), type: 'IMAGE', createdBy: 7, isRead: false }],
+      id: 'v-real-' + (de + i), name: 'Local ' + (de + i), permissions: -1, categories: [de + i === residencial ? 'RESIDENCE_HOME' : 'BAR'], images: [],
+      venueUpdateRequests: [{ id: 'ur-real-' + (de + i), type: 'IMAGE', createdBy: 7, isRead: false }],
     })),
   },
 });
+// As chaves da fila do apresentador: os pedidos `de`..`ate` do Waze de mentira, NESSA ordem (o app manda as da frente da fila).
+const filaDoApresentador = (ate, de = 1) => Array.from({ length: Math.max(0, ate - de + 1) }, (_, i) => ({ venueID: 'v-real-' + (de + i), updateRequestID: 'ur-real-' + (de + i) }));
 const perfil = (campos) => JSON.stringify({ userName: 'apresentador', areas: [], managedAreas: [], ...campos });
 const L5 = { rank: 4, isAreaManager: true, isStaff: false };
 
@@ -32,9 +34,15 @@ async function comWaze(responder, fn) {
   globalThis.fetch = async (url, init = {}) => { chamadas.push(String(url)); return responder(String(url), init); };
   try { return { r: await fn(), chamadas }; } finally { globalThis.fetch = original; }
 }
-const waze = ({ sessao = L5, venues = 40, residencial = 0 } = {}) => (url) => {
+const waze = ({ sessao = L5, venues = 40, residencial = 0, paginas = null } = {}) => (url, init = {}) => {
   if (url.includes('/Session')) return new Response(perfil(sessao), { status: 200, headers: { 'content-type': 'application/json' } });
-  if (url.includes('/Issues/Search/List')) return new Response(pedidosDoWaze(venues, { residencial }), { status: 200, headers: { 'content-type': 'application/json' } });
+  if (url.includes('/Issues/Search/List')) {
+    // `paginas`: o Waze paginado ({ de, n, hasMore } por página); sem ele, uma página só com `venues` pedidos.
+    const pg = init.body ? JSON.parse(init.body).venueUpdateRequestsFilter.page : 1;
+    const cfg = paginas ? (paginas[pg - 1] || { de: 1, n: 0 }) : { de: 1, n: venues };
+    if (cfg.falha) return new Response('{}', { status: 500, headers: { 'content-type': 'application/json' } });
+    return new Response(pedidosDoWaze(cfg.n, { residencial, de: cfg.de, hasMore: cfg.hasMore === true }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }
   throw new Error('a demo não podia ir a ' + url);
 };
 
@@ -44,7 +52,9 @@ async function demoCriada(extra = {}, opcoesDoWaze = {}) {
   const salas = criarSalasVm({ agora: () => clock.t });
   const s = await sessaoDeTeste(COOKIES);
   const ctx = { ...s.ctx, salas };
-  const { r, chamadas } = await comWaze(waze(opcoesDoWaze), () => dispatch('demo-criar', { ...s.dados, region: 'row', countryId: 30, ...extra }, ctx));
+  // Sem `pedidos` no `extra`, o apresentador tem a fila toda do Waze de mentira (até 40 chaves, na ordem).
+  const pedidos = filaDoApresentador(Math.min(opcoesDoWaze.venues ?? 40, 40));
+  const { r, chamadas } = await comWaze(waze(opcoesDoWaze), () => dispatch('demo-criar', { ...s.dados, region: 'row', countryId: 30, pedidos, ...extra }, ctx));
   return { ctx, salas, clock, r, chamadas, s };
 }
 const host = (d, tipo, extra = {}) => ({ demo: d.demo, hostKey: d.hostKey, tipo, ...extra });
@@ -97,15 +107,108 @@ test('criar: o portão recusa SEM apagar a sessão de quem pediu (não é o port
   assert.ok(await s.sessions.loadSession(s.sessionToken), 'quem só não pode criar demo segue logado');
 });
 
-test('criar: residencial fica de fora e a numeração não tem buraco; poucos pedidos é 409', async () => {
+test('criar: a demo segue o filtro «Residenciais» — casa entra, e o filtro chega ao Waze; poucos pedidos é 409', async () => {
   const { r, salas } = await demoCriada({}, { venues: 5, residencial: 2 });
   assert.equal(r.status, 200);
-  assert.equal(r.body.total, 4);
-  assert.ok(!JSON.stringify(salas._salas.get(r.body.demo).sala.deck.convidado).includes('RESIDENCE'));
+  assert.equal(r.body.total, 5, 'a casa não é descartada pelo servidor');
+  assert.ok(JSON.stringify(salas._salas.get(r.body.demo).sala.deck.convidado).includes('RESIDENCE_HOME'));
+  // O valor do filtro vai ao Waze como o app o mandou: ausente = sem filtro; true e false, os dois.
+  const corpoDaBusca = async (extra) => {
+    let corpo = null;
+    const original = globalThis.fetch;
+    const s = await sessaoDeTeste(COOKIES);
+    globalThis.fetch = async (url, init = {}) => {
+      const u = String(url);
+      if (u.includes('/Issues/Search/List')) corpo = JSON.parse(init.body);
+      return waze({ venues: 5 })(u);
+    };
+    try { await dispatch('demo-criar', { ...s.dados, region: 'row', countryId: 30, pedidos: filaDoApresentador(5), ...extra }, { ...s.ctx, salas: criarSalasVm({ agora: () => Date.now() }) }); } finally { globalThis.fetch = original; }
+    return corpo.venueUpdateRequestsFilter.residential;
+  };
+  assert.equal(await corpoDaBusca({}), null, 'sem a chave: o Waze não filtra por residencial');
+  assert.equal(await corpoDaBusca({ residential: true }), true, 'só residenciais');
+  assert.equal(await corpoDaBusca({ residential: false }), false, 'sem residenciais');
   const poucos = await demoCriada({}, { venues: 2 });
   assert.equal(poucos.r.status, 409);
   assert.equal(poucos.r.body.errorKey, 'srv.err.demoPoucosPedidos');
   assert.deepEqual(poucos.r.body.errorVars, { n: 2, min: 3 });
+});
+
+// ── a demo é a FILA REAL do apresentador: os mesmos pedidos, na mesma ordem ──────────────────────
+
+const nomesDoRetrato = (salas, r) => salas._salas.get(r.body.demo).sala.deck.convidado.map((c) => c.name);
+const idsDoApresentador = (salas, r) => salas._salas.get(r.body.demo).sala.deck.apresentador.map((a) => a.venueID);
+const leituras = (chamadas) => chamadas.filter((u) => /Issues\/Search\/List/.test(u)).length;
+
+test('fila real: a demo segue a ORDEM do apresentador (a do Waze não manda) e a numeração é em sequência', async () => {
+  const { r, salas } = await demoCriada({ pedidos: filaDoApresentador(10).reverse() }, { venues: 40 });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.deepEqual(nomesDoRetrato(salas, r), Array.from({ length: 10 }, (_, i) => 'Local ' + (10 - i)), 'o 1º é o que o apresentador tem na frente da fila');
+  assert.deepEqual(idsDoApresentador(salas, r), Array.from({ length: 10 }, (_, i) => 'v-real-' + (10 - i)), 'o ↗ do palco leva ao MESMO pedido');
+  assert.deepEqual(salas._salas.get(r.body.demo).sala.deck.convidado.map((c) => c.n), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+});
+
+test('fila real: só os pedidos que o apresentador tem na fila entram (ordem de distância, já decididos fora)', async () => {
+  const chaves = [filaDoApresentador(12)[11], filaDoApresentador(3)[2], filaDoApresentador(7)[6], filaDoApresentador(1)[0]];
+  const { r, salas } = await demoCriada({ pedidos: chaves }, { venues: 40 });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.deepEqual(nomesDoRetrato(salas, r), ['Local 12', 'Local 3', 'Local 7', 'Local 1']);
+  assert.equal(r.body.total, 4);
+});
+
+test('fila real: o pedido que sumiu no meio (outro editor decidiu) fica de fora e o próximo da fila ocupa o lugar', async () => {
+  // O Waze já não tem os pedidos 1 a 5; o apresentador mandou 40 chaves (30 + folga de 10).
+  const { r, salas } = await demoCriada({ pedidos: filaDoApresentador(40) }, { paginas: [{ de: 6, n: 35 }] });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.total, 30, 'a folga completa os 30');
+  assert.deepEqual(nomesDoRetrato(salas, r).slice(0, 3), ['Local 6', 'Local 7', 'Local 8']);
+});
+
+test('fila real: anda pelas páginas do Waze até achar os pedidos da fila, e PARA quando já achou', async () => {
+  const duas = [{ de: 1, n: 20, hasMore: true }, { de: 21, n: 20, hasMore: true }, { de: 41, n: 20, hasMore: false }];
+  const a = await demoCriada({ pedidos: filaDoApresentador(35) }, { paginas: duas });
+  assert.equal(a.r.status, 200, JSON.stringify(a.r.body));
+  assert.equal(a.r.body.total, 30, 'cota de uma demo');
+  assert.equal(leituras(a.chamadas), 2, 'os 30 primeiros estavam nas duas primeiras páginas: a 3ª não é lida');
+  const b = await demoCriada({ pedidos: filaDoApresentador(15) }, { paginas: duas });
+  assert.equal(leituras(b.chamadas), 1, 'tudo na 1ª página: UMA leitura (o free tier)');
+  // Um pedido da fila que só aparece na página 3 (fila ordenada por distância) é achado.
+  const c = await demoCriada({ pedidos: [...filaDoApresentador(3), ...filaDoApresentador(45, 45)] }, { paginas: [...duas, { de: 41, n: 10, hasMore: false }] });
+  assert.equal(c.r.status, 200);
+  assert.equal(leituras(c.chamadas), 3);
+});
+
+test('fila real: pedido que o Waze não conhece não entra (o app não injeta dado), e o teto de páginas existe', async () => {
+  const { r, salas } = await demoCriada({ pedidos: [{ venueID: 'v-inventado', updateRequestID: 'ur-inventado' }, ...filaDoApresentador(4)] }, { venues: 40 });
+  assert.equal(r.status, 200);
+  assert.deepEqual(nomesDoRetrato(salas, r), ['Local 1', 'Local 2', 'Local 3', 'Local 4']);
+  assert.ok(!JSON.stringify(salas._salas.get(r.body.demo).sala.deck).includes('inventado'));
+  // Nunca acha: lê no máximo 6 páginas e responde «poucos pedidos».
+  const sempre = Array.from({ length: 10 }, (_, i) => ({ de: 100 + i * 3, n: 3, hasMore: true }));
+  const nada = await demoCriada({ pedidos: filaDoApresentador(5) }, { paginas: sempre });
+  assert.equal(nada.r.status, 409);
+  assert.equal(leituras(nada.chamadas), 6, 'o teto de páginas');
+});
+
+test('fila real: a página que falha DEPOIS da primeira não derruba a demo; a que falha na primeira, sim', async () => {
+  const meio = await demoCriada({ pedidos: filaDoApresentador(40) }, { paginas: [{ de: 1, n: 20, hasMore: true }, { falha: true }] });
+  assert.equal(meio.r.status, 200, JSON.stringify(meio.r.body));
+  assert.equal(meio.r.body.total, 20, 'vale o que já se achou');
+  const primeira = await demoCriada({ pedidos: filaDoApresentador(5) }, { paginas: [{ falha: true }] });
+  assert.notEqual(primeira.r.status, 200);
+});
+
+test('fila real: as chaves são validadas ANTES de qualquer ida ao Waze (ausente, vazia, grande demais, torta)', async () => {
+  const ruins = [undefined, null, [], 'x', filaDoApresentador(41), [{ venueID: 'v-real-1' }], [{ venueID: '', updateRequestID: 'u' }], [{ venueID: {}, updateRequestID: 'u' }], [null], [1]];
+  for (const pedidos of ruins) {
+    const { r, chamadas } = await demoCriada({ pedidos });
+    assert.equal(r.status, 400, String(JSON.stringify(pedidos)).slice(0, 60));
+    assert.equal(r.body.errorKey, 'srv.err.badRequest');
+    assert.equal(chamadas.length, 0, 'não gasta ida ao Waze');
+  }
+  // Repetida entra uma vez; id numérico vale como o texto dele.
+  const { r } = await demoCriada({ pedidos: [...filaDoApresentador(4), ...filaDoApresentador(4)] });
+  assert.equal(r.body.total, 4);
 });
 
 test('criar: escolha fora do contrato é 400 ANTES de qualquer ida ao Waze; sem sessão é 401', async () => {
@@ -116,7 +219,7 @@ test('criar: escolha fora do contrato é 400 ANTES de qualquer ida ao Waze; sem 
   }
   const salas = criarSalasVm();
   const { sessions } = await sessaoDeTeste(COOKIES);
-  const { r, chamadas } = await comWaze(waze(), () => dispatch('demo-criar', { sessionToken: 'inventado', region: 'row' }, { sessions, salas }));
+  const { r, chamadas } = await comWaze(waze(), () => dispatch('demo-criar', { sessionToken: 'inventado', region: 'row', pedidos: filaDoApresentador(5) }, { sessions, salas }));
   assert.equal(r.status, 401);
   assert.equal(chamadas.length, 0);
 });
@@ -132,7 +235,7 @@ test('criar: o apresentador escolhe modo, tempo e referência, e a sala os guard
 
 test('sem o adaptador das salas, toda rota da demo diz "indisponível" (503), nunca 500', async () => {
   const s = await sessaoDeTeste(COOKIES);
-  for (const [rota, corpo] of [['demo-criar', { ...s.dados, region: 'row' }], ['demo-abrir', { segredo: 'A'.repeat(20) }], ['demo-entrar', {}], ['demo-votar', {}], ['demo-host', {}]]) {
+  for (const [rota, corpo] of [['demo-criar', { ...s.dados, region: 'row', pedidos: filaDoApresentador(5) }], ['demo-abrir', { segredo: 'A'.repeat(20) }], ['demo-entrar', {}], ['demo-votar', {}], ['demo-host', {}]]) {
     const r = await dispatch(rota, corpo, s.ctx);
     assert.equal(r.status, 503, rota);
     assert.equal(r.body.errorKey, 'srv.err.demoUnavailable');

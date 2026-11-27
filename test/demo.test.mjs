@@ -141,15 +141,22 @@ test('retrato: ALLOWLIST — campo novo do Waze nasce fora', () => {
   assert.ok(!('campoNovoDoWaze' in convidado[0]) && !JSON.stringify(convidado).includes('segredo'));
 });
 
-test('retrato: residencial fica de fora (foto de casa), pelos dois sinais', () => {
+test('retrato: residencial ENTRA (a demo segue o filtro «Residenciais»), com a numeração em sequência', () => {
   const { convidado } = montarRetrato([
     pedido(1, { categories: ['RESIDENCE_HOME'] }), pedido(2, { residential: true }), pedido(3),
   ], 30);
-  assert.deepEqual(convidado.map((c) => c.name), ['Local 3']);
-  assert.equal(convidado[0].n, 1, 'a numeração é a do retrato, sem buraco');
+  assert.deepEqual(convidado.map((c) => c.name), ['Local 1', 'Local 2', 'Local 3']);
+  assert.deepEqual(convidado.map((c) => c.n), [1, 2, 3]);
+  assert.ok(convidado.every((c, i) => c.venueID === 'demo-' + (i + 1)), 'casa também sai com id sintético');
 });
 
-test('retrato: respeita o máximo e o corte vale DEPOIS de tirar os residenciais', () => {
+test('retrato: casa não ganha campo a mais — o autor e o texto livre seguem fora', () => {
+  const { convidado } = montarRetrato([pedido(1, { categories: ['RESIDENCE_HOME'], createdBy: 'world_1', creatorId: 7, flagComment: 'moro aqui', phone: '11 9999' })], 30);
+  const bruto = JSON.stringify(convidado);
+  for (const proibido of ['world_1', 'moro aqui', '11 9999', 'creatorId', 'createdBy']) assert.ok(!bruto.includes(proibido), proibido);
+});
+
+test('retrato: respeita o máximo', () => {
   const lista = [pedido(1, { residential: true }), ...Array.from({ length: 40 }, (_, i) => pedido(i + 2))];
   const { convidado, apresentador } = montarRetrato(lista, 30);
   assert.equal(convidado.length, 30);

@@ -108,7 +108,6 @@ export const CAMPOS_DO_DIFF_NA_DEMO = new Set([
   'residential', 'brand', 'entryExitPoints', 'services', 'categoryAttributes', 'lockRank',
 ]);
 
-const ehResidencial = (p) => p.residential === true || (Array.isArray(p.categories) && p.categories.some((c) => /^RESIDEN/.test(String(c))));
 const texto = (v, max = 200) => (typeof v === 'string' ? v.slice(0, max) : null);
 const lista = (v, max) => (Array.isArray(v) ? v.slice(0, max) : []);
 const numero = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
@@ -156,7 +155,7 @@ export function montarRetrato(pedidos, max) {
   const apresentador = [];
   for (const p of Array.isArray(pedidos) ? pedidos : []) {
     if (convidado.length >= max) break;
-    if (!p || typeof p !== 'object' || ehResidencial(p)) continue;
+    if (!p || typeof p !== 'object') continue;
     const n = convidado.length + 1;
     const d = p.duplicado && typeof p.duplicado === 'object' ? p.duplicado : null;
     convidado.push({
