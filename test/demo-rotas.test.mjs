@@ -26,7 +26,7 @@ const pedidosDoWaze = (n, { residencial = 0, de = 1, hasMore = false } = {}) => 
 // As chaves da fila do apresentador: os pedidos `de`..`ate` do Waze de mentira, NESSA ordem (o app manda as da frente da fila).
 const filaDoApresentador = (ate, de = 1) => Array.from({ length: Math.max(0, ate - de + 1) }, (_, i) => ({ venueID: 'v-real-' + (de + i), updateRequestID: 'ur-real-' + (de + i) }));
 const perfil = (campos) => JSON.stringify({ userName: 'apresentador', areas: [], managedAreas: [], ...campos });
-const L6 = { rank: 5, isAreaManager: true, isStaff: false };
+const L5 = { rank: 4, isAreaManager: true, isStaff: false };
 
 async function comWaze(responder, fn) {
   const original = globalThis.fetch;
@@ -34,7 +34,7 @@ async function comWaze(responder, fn) {
   globalThis.fetch = async (url, init = {}) => { chamadas.push(String(url)); return responder(String(url), init); };
   try { return { r: await fn(), chamadas }; } finally { globalThis.fetch = original; }
 }
-const waze = ({ sessao = L6, venues = 40, residencial = 0, paginas = null } = {}) => (url, init = {}) => {
+const waze = ({ sessao = L5, venues = 40, residencial = 0, paginas = null } = {}) => (url, init = {}) => {
   if (url.includes('/Session')) return new Response(perfil(sessao), { status: 200, headers: { 'content-type': 'application/json' } });
   if (url.includes('/Issues/Search/List')) {
     // `paginas`: o Waze paginado ({ de, n, hasMore } por página); sem ele, uma página só com `venues` pedidos.
@@ -61,7 +61,7 @@ const host = (d, tipo, extra = {}) => ({ demo: d.demo, hostKey: d.hostKey, tipo,
 
 // ── criar ───────────────────────────────────────────────────────────────────
 
-test('criar: L6+AM cria; só o /Session e a busca vão ao Waze; o retrato tem 30, sem autor nem id real', async () => {
+test('criar: L5+AM cria; só o /Session e a busca vão ao Waze; o retrato tem 30, sem autor nem id real', async () => {
   const { r, chamadas, salas } = await demoCriada();
   assert.equal(r.status, 200, JSON.stringify(r.body));
   assert.deepEqual(chamadas.map((u) => u.replace(/^.*waze\.com/, '').split('?')[0]).sort(), ['/row-Descartes/app/Session', '/row-Descartes/app/v1/Issues/Search/List']);
@@ -81,11 +81,12 @@ test('criar: L6+AM cria; só o /Session e a busca vão ao Waze; o retrato tem 30
   assert.ok(!guardado.includes(b.hostKey) && !guardado.includes(b.segredo), 'a sala só guarda o HASH das duas chaves');
 });
 
-test('criar: o servidor confere o portão — L5+AM, L6 sem AM, /Session estragado e staff', async () => {
+test('criar: o servidor confere o portão — L4+AM, L5 sem AM, /Session estragado e staff', async () => {
   const casos = [
-    [{ rank: 4, isAreaManager: true, isStaff: false }, 403],
-    [{ rank: 5, isAreaManager: false, isStaff: false }, 403],
-    [{ rank: '5', isAreaManager: true, isStaff: false }, 403],
+    [{ rank: 3, isAreaManager: true, isStaff: false }, 403],
+    [{ rank: 4, isAreaManager: true, isStaff: false }, 200],
+    [{ rank: 4, isAreaManager: false, isStaff: false }, 403],
+    [{ rank: '4', isAreaManager: true, isStaff: false }, 403],
     [{}, 403],
     [{ rank: 0, isAreaManager: false, isStaff: true }, 200],
     [{ rank: 6, isAreaManager: true, isStaff: false }, 200],

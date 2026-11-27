@@ -8,11 +8,15 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.11.27-06
+**Demo: quem cria é quem o app já considera de confiança, L5+ com área gerenciada (ou staff).** Antes só L6+ criava a demo; agora o nível é o mesmo de aprovar foto, excluir foto, corrigir nome e recusar autor sozinho, e a linha «Demo para apresentação» das Preferências aparece pra esse nível. O servidor confere de novo na criação, e a frase de recusa cita o nível pelo número do app (nas quatro línguas), sem escrevê-lo à mão. Se um dia o dono quiser separar os dois níveis, muda uma função só.
+
 ## v2026.11.27-05
 **/status: o número de instalações da extensão agora se atualiza no build.** O número era fixo no código (99, medido à mão em 23/11) e já estava defasado: a loja mostra 105. Agora `npm run js` lê a página da loja da extensão antes de gerar e reescreve o número quando ele mudou. No CI não busca (o número da loja reprovaria a conferência dos arquivos gerados), sem rede segue com o último número e nunca derruba o build.
 
 ## v2026.11.27-04
 **Mudança interna: `MIN_RANK_DESTRUTIVO` agora se chama `MIN_RANK_CONFIAVEL`.** É o mesmo número (L5 com área gerenciada, ou staff) e as mesmas regras; só o nome mudou, porque ele passou a dizer quem é de confiança no app e não só quem pode agir de forma destrutiva. Nada muda para quem usa.
+
 
 ## v2026.11.27-03
 **Demo: os convidados recebem exatamente a fila do apresentador.** Antes a demo coletava os pedidos por conta própria no servidor (só a primeira página, na ordem do Waze), e isso podia divergir da fila que o apresentador teria triando de verdade: o app lê todas as páginas, ordena e tira o que já foi decidido. Agora o app manda quais são os próximos pedidos da fila dele, e o servidor os busca no Waze e monta a demo **na mesma ordem**: o primeiro é o card que o apresentador está vendo. Se outro editor decidir um deles no meio, o próximo da fila ocupa o lugar. Com a fila vazia ou ainda carregando, o app avisa em vez de criar uma demo vazia. O diálogo diz «os próximos pedidos da sua fila, na mesma ordem».

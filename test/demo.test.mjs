@@ -26,13 +26,14 @@ test('paridade: o UNDO_GATE_BASE do app.js é o da demo (senão a demo mente sob
   assert.equal(DEMO_UNDO_GATE_BASE, noApp);
 });
 
-// ── quem cria: L6+ com área gerenciada ──────────────────────────────────────
+// ── quem cria: o nível de CONFIANÇA (L5+ com área gerenciada) ───────────────
 
-test('podeCriarDemo: L6+AM ou staff; L5+AM, L6 sem AM e perfil estragado não', () => {
-  assert.equal(MIN_RANK_DEMO, 5, 'rank 0-indexed: L6 é 5');
+test('podeCriarDemo: L5+AM ou staff; L4+AM, L5 sem AM e perfil estragado não', () => {
+  assert.equal(MIN_RANK_DEMO, 4, 'rank 0-indexed: L5 é 4');
+  assert.equal(podeCriarDemo({ rank: 4, isAreaManager: true }), true);
   assert.equal(podeCriarDemo({ rank: 5, isAreaManager: true }), true);
   assert.equal(podeCriarDemo({ rank: 6, isAreaManager: true }), true);
-  assert.equal(podeCriarDemo({ rank: 4, isAreaManager: true }), false, 'L5+AM é o portão do destrutivo, não o da demo');
+  assert.equal(podeCriarDemo({ rank: 3, isAreaManager: true }), false, 'L4+AM não é de confiança ainda');
   assert.equal(podeCriarDemo({ rank: 5, isAreaManager: false }), false);
   assert.equal(podeCriarDemo({ rank: 5, isAreaManager: 'true' }), false, 'booleano estrito');
   assert.equal(podeCriarDemo({ rank: '5', isAreaManager: true }), false);
@@ -41,8 +42,24 @@ test('podeCriarDemo: L6+AM ou staff; L5+AM, L6 sem AM e perfil estragado não', 
   assert.equal(podeCriarDemo({}), false);
 });
 
-test('paridade: MIN_RANK_DEMO do app.js é o do servidor', () => {
-  assert.equal(Number(/^const MIN_RANK_DEMO = (\d+);/m.exec(app)?.[1] ?? NaN), MIN_RANK_DEMO);
+test('paridade: o nível da demo no servidor é o MIN_RANK_CONFIAVEL do app', () => {
+  const noApp = Number(/^const MIN_RANK_CONFIAVEL = (\d+);/m.exec(app)?.[1] ?? NaN);
+  assert.equal(noApp, MIN_RANK_DEMO, 'o app e o servidor discordam de quem cria a demo');
+});
+
+test('o app não tem um número PRÓPRIO pra demo: podeCriarDemoAqui delega à base', () => {
+  assert.ok(!/const MIN_RANK_DEMO\b/.test(app), 'o app voltou a ter um MIN_RANK_DEMO próprio');
+  const corpo = /function podeCriarDemoAqui\(\) \{([\s\S]*?)\n\}/.exec(app)?.[1] ?? '';
+  assert.match(corpo, /return podeAgirDestrutivoAqui\(\);/, 'podeCriarDemoAqui deixou de delegar');
+  assert.ok(!/rank/.test(corpo), 'podeCriarDemoAqui copiou a comparação de rank');
+});
+
+test('o 403 da demo cita o nível pela variável registrada, nunca escrito à mão', () => {
+  const i18n = readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8');
+  const frases = [...i18n.matchAll(/'srv\.err\.demoSemPermissao': '([^']*)'/g)].map((m) => m[1]);
+  assert.equal(frases.length, 4);
+  for (const f of frases) assert.match(f, /L\{nivelConfiavel\}\+/, f);
+  assert.match(app, /nivelConfiavel: \(\) => MIN_RANK_CONFIAVEL \+ 1/, 'a variável não é registrada a partir da constante');
 });
 
 // ── segredo e código ────────────────────────────────────────────────────────

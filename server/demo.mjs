@@ -27,10 +27,13 @@ export function cotaDaDemo(minRankWaze, base = DEMO_UNDO_GATE_BASE) {
 }
 
 // ── Quem cria ───────────────────────────────────────────────────────────────
-// L6+ com área gerenciada (decisão do dono). O rank do Waze é 0-INDEXADO (a tela
-// mostra rank + 1): L6 é `rank >= 5`. A cópia do cliente (`MIN_RANK_DEMO` no
-// `js/app.js`) é conferida em teste. Staff passa, como em todo portão do app.
-export const MIN_RANK_DEMO = 5;
+// Quem cria a demo é quem o app já considera de CONFIANÇA: o mesmo nível dos
+// recursos destrutivos (decisão do dono, 2026-11-27). O rank do Waze é
+// 0-INDEXADO (a tela mostra rank + 1): L5 é `rank >= 4`. O número mora no app
+// (`MIN_RANK_CONFIAVEL`, `js/app.js`), que é script clássico e não importa daqui:
+// esta é a cópia do SERVIDOR, e `test/demo.test.mjs` as compara. Staff passa,
+// como em todo portão do app.
+export const MIN_RANK_DEMO = 4;
 export function podeCriarDemo(perfil) {
   if (!perfil || typeof perfil !== 'object') return false;
   if (perfil.isStaff === true) return true;

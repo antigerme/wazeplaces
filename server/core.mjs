@@ -4288,7 +4288,7 @@ async function handleDemoCriar(data, ctx) {
       body: { success: false, error: cat.message, errorKey: cat.messageKey, errorVars: cat.messageVars, errorCategory: cat.category, httpCode: sessao.httpCode },
     };
   }
-  if (!podeCriarDemo(objetoDoWaze(sessao.response))) apiError('Só quem é L6+ com área gerenciada cria uma demo', 403, 'srv.err.demoSemPermissao');
+  if (!podeCriarDemo(objetoDoWaze(sessao.response))) apiError('Só quem é L5+ com área gerenciada cria uma demo', 403, 'srv.err.demoSemPermissao');
 
   // A busca é a MESMA do app, com os filtros do apresentador (o «Residenciais» também: casa entra quando o filtro deixa), e
   // anda pelas páginas até achar os pedidos da fila dele (ou até o fim, ou o teto). O Waze já tira autor, nome e telefone de
