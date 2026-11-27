@@ -400,7 +400,7 @@ function abrirAba(comp, { perfil = null, naTela = false, visivel = true } = {}) 
     ABA_DOS_FILTROS: 'filtersTabFilters',
     FILTER_TABS: [{ tab: 'filtersTabHistory', panel: 'filtersPanelHistory' }, { tab: 'filtersTabPrefs', panel: 'filtersPanelPrefs' }],
   };
-  aba.h = rodar(deps, [lista('PATENTES'), lista('CONQUISTAS'), declaracao('MIN_RANK_DESTRUTIVO'), ...fontes(FUNCOES_DAS_CONQUISTAS)],
+  aba.h = rodar(deps, [lista('PATENTES'), lista('CONQUISTAS'), declaracao('MIN_RANK_CONFIAVEL'), ...fontes(FUNCOES_DAS_CONQUISTAS)],
     ['temConquistaNova', 'atualizarSeloDeConquista', 'marcarConquistasVistas', 'checarConquistas', 'aoGravarEmOutraAba',
       'definirPerfil', 'abrirConquistaNova', 'agendarRedesenhoDoHistorico', 'htmlConquistas']);
   Object.assign(aba, { els, doc, AppState, deps, ponto: () => !els.conqSelo.classList.contains('hidden') });

@@ -4133,13 +4133,13 @@ const Lightbox = {
 // decisão do owner. NOMEADA de propósito (ao contrário do `MIN_RANK_WAZE` do
 // core, que é da ENTRADA): esta é a única leitura do número no app inteiro —
 // `test/gates.test.mjs` reprova quem copiar a comparação em vez de ler daqui.
-const MIN_RANK_DESTRUTIVO = 4;
+const MIN_RANK_CONFIAVEL = 4;
 function podeAgirDestrutivoAqui() {
     const p = AppState.profile;
     if (!p) return false;
     if (p.isStaff) return true;
     const rank = Number.isInteger(p.rank) ? p.rank : parseInt(p.rank, 10);
-    return rank >= MIN_RANK_DESTRUTIVO && !!p.isAreaManager;
+    return rank >= MIN_RANK_CONFIAVEL && !!p.isAreaManager;
 }
 
 // Excluir foto: o primeiro recurso a usar o portão, e agora um delegador como

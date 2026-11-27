@@ -8,6 +8,9 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.11.27-04
+**Mudança interna: `MIN_RANK_DESTRUTIVO` agora se chama `MIN_RANK_CONFIAVEL`.** É o mesmo número (L5 com área gerenciada, ou staff) e as mesmas regras; só o nome mudou, porque ele passou a dizer quem é de confiança no app e não só quem pode agir de forma destrutiva. Nada muda para quem usa.
+
 ## v2026.11.27-03
 **Demo: os convidados recebem exatamente a fila do apresentador.** Antes a demo coletava os pedidos por conta própria no servidor (só a primeira página, na ordem do Waze), e isso podia divergir da fila que o apresentador teria triando de verdade: o app lê todas as páginas, ordena e tira o que já foi decidido. Agora o app manda quais são os próximos pedidos da fila dele, e o servidor os busca no Waze e monta a demo **na mesma ordem**: o primeiro é o card que o apresentador está vendo. Se outro editor decidir um deles no meio, o próximo da fila ocupa o lugar. Com a fila vazia ou ainda carregando, o app avisa em vez de criar uma demo vazia. O diálogo diz «os próximos pedidos da sua fila, na mesma ordem».
 
