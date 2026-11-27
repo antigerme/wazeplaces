@@ -8,6 +8,9 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.11.27-05
+**/status: o número de instalações da extensão agora se atualiza no build.** O número era fixo no código (99, medido à mão em 23/11) e já estava defasado: a loja mostra 105. Agora `npm run js` lê a página da loja da extensão antes de gerar e reescreve o número quando ele mudou. No CI não busca (o número da loja reprovaria a conferência dos arquivos gerados), sem rede segue com o último número e nunca derruba o build.
+
 ## v2026.11.25-05
 **Demo: o palco cabe em janela de verdade, e a criação no celular fala a verdade.** O palco passou a ser medido também em 1366×650 (um laptop com a barra do navegador), 1280×720 e 1024×768 (espelhamento de projetor): a 650 de altura o painel lateral cortava ~60 px calado, e agora a janela baixa ou estreita compacta o painel (a 1366×768 inteira nada muda). Botão «Tela cheia» no topo do palco, e o **PageDown** do passador de slides avança como o Espaço (PageUp não faz nada: não há voltar). Quem cria a demo num **celular** lê, antes e depois, que o palco só abre naquele aparelho (a chave não sai dele) e que, pra projetar, a demo se cria no computador; o `/palco` numa janela estreita diz isso em vez de mostrar uma tela cortada.
 

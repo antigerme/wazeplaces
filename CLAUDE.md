@@ -154,6 +154,7 @@ wazeplaces/
 │   ├── gerar-html.mjs       # Gera o index.html a partir do index.src.html (npm run html)
 │   ├── gerar-css.mjs        # Gera o css/app.css (npm run css): tailwind + styles.css, nessa ORDEM (é o contrato)
 │   ├── gerar-js.mjs         # Gera o js/min/*.js (npm run js): um arquivo por fonte, esbuild de versão FIXA
+│   ├── extensao-instalacoes.mjs # Primeiro passo do `npm run js`: lê da página da loja o nº de instalações da extensão e reescreve 2 linhas do js/status.js (CI pula; falha de rede nunca derruba o build)
 │   ├── smoke-demo.mjs       # Smoke da /demo (npm run test:demo): VM de verdade, salas semeadas, 41+ pedidos reais × iPhone/Fold × 4 línguas, fluxo ao vivo, servidor reiniciado
 │   ├── smoke-offline.mjs    # Smoke do offline (npm run test:offline): o service worker no comando
 │   ├── cf-injecao.mjs       # Mede a injeção do Cloudflare no index.html (com controle: menção × tag)
@@ -206,7 +207,7 @@ Antes de inventar estrutura no `handleBuscarPlaces`, consulte o `docs/wme-sdk-ty
 npm run check          # node --check em js/*.js server/*.mjs worker/*.mjs
 npm test               # node --test, ZERO dependências
 npm run css            # SÓ se mexeu em classe do Tailwind OU no css/styles.css (regenera css/app.css; CI cobra)
-npm run js             # SEMPRE que mexer em js/*.js — regenera js/min/, que é o que o app CARREGA (CI cobra)
+npm run js             # SEMPRE que mexer em js/*.js — regenera js/min/, que é o que o app CARREGA (CI cobra). ANTES, lê da loja o nº de instalações da extensão e reescreve o js/status.js se mudou (no CI não busca; sem rede segue com o que está lá; mudou = suba o serial)
 npm run html           # SEMPRE que mexer no index.src.html — regenera o index.html, que é o que a RAIZ serve (CI cobra)
 npm run test:presenca  # SÓ se mexeu na presença ou na conversa
 # o navegador dos smokes é o do CI, o MAIS NOVO — 1ª vez na sessão, instale (ver abaixo)
