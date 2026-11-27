@@ -4268,6 +4268,11 @@ function abrirCriarDemo() {
     // A chave do palco mora SÓ no aparelho que cria: num celular, o palco não abre no computador que vai projetar.
     document.getElementById('demoCriarRodape').textContent = t('demo.criar.rodape') + (computadorDeTelaLarga() ? '' : ' ' + t('demo.criar.soAqui'));
     document.getElementById('demoCriarJa').classList.toggle('hidden', !lerPalcoDaDemo());
+    // O endereço de uma casa chega ao convidado que abrir o link: avisa quando o filtro NÃO a tira («Excluir residenciais»).
+    const casas = document.getElementById('demoCriarCasas');
+    const casasEntram = AppState.filters.residential !== 'false';
+    casas.textContent = casasEntram ? t('demo.criar.casas', { opcao: t('filters.residential.exclude') }) : '';
+    casas.classList.toggle('hidden', !casasEntram);
     document.getElementById('demoCriarErro').classList.add('hidden');
     sincronizarTempoDaDemo();
     openModal('demoCriarModal');

@@ -8,6 +8,9 @@ Formato inspirado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 
 ---
 
+## v2026.11.27-02
+**«Área gerenciada» passa a filtrar de verdade, e a demo avisa quando casas podem entrar.** O filtro «Área gerenciada» não estreitava nada: o Waze ignora o `managedAreaId` quando vem junto do país, e a fila do país inteiro aparecia, qualquer que fosse a área (nas três áreas testadas, 500 pedidos, igual a sem filtro). As áreas de outro país, como Mendoza e San Luis, mostravam a fila do Brasil. Agora a busca manda a área como lista e sem país, e cada área mostra os pedidos dela (medido com as 9 áreas de uma conta L6+AM). O estado continua estreitando dentro da área. No diálogo de criar a demo, quando o filtro «Residenciais» não exclui casas, um aviso diz que o endereço de uma residência pode chegar a quem abrir o link, e que «Excluir residenciais» nos Filtros as tira.
+
 ## v2026.11.27-01
 **Demo: segue o filtro «Residenciais».** Até aqui a demo tirava os locais residenciais sempre, qualquer que fosse o filtro, e o diálogo de criar dizia «sem locais residenciais» ao lado de um filtro em «Indiferente» (e «Apenas residenciais» era ignorado em silêncio). Agora o filtro vale como está: casa entra quando o filtro deixa, e o resumo do diálogo mostra «Apenas residenciais» ou «Excluir residenciais» com os mesmos nomes do painel de Filtros. O que o convidado vê não mudou: continua sem autor, sem texto livre, com ids sintéticos. No palco, depois de mandar um recado o foco sai do campo na hora (um Espaço digitado logo em seguida podia cair no campo escondido e não revelar nada).
 

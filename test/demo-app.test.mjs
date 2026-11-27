@@ -73,6 +73,28 @@ test('resumo do diálogo: «Residenciais» só aparece quando está ligado, com 
   assert.equal(resumo('false'), 'Brazil · NL · TT · SEM');
 });
 
+test('aviso de casa: aparece quando o filtro NÃO exclui residenciais, cita a opção do painel pelo MESMO nome e some quando exclui', () => {
+  const I18N = readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8');
+  const frases = [...I18N.matchAll(/'demo\.criar\.casas': '([^']*)'/g)].map((m) => m[1]);
+  assert.equal(frases.length, 4, 'a frase existe nas 4 línguas');
+  for (const f of frases) assert.ok(f.includes('{opcao}'), 'a opção do painel entra por variável (um nome só em todo o app): ' + f);
+  const abrir = fatiar('abrirCriarDemo');
+  assert.match(abrir, /residential !== 'false'/, 'o aviso depende do filtro «Residenciais»');
+  assert.match(abrir, /t\('filters\.residential\.exclude'\)/, 'a opção citada é a MESMA do painel de Filtros');
+  const rodar = (residential) => {
+    const elementos = { demoCriarJa: { classList: { toggle() {} } }, demoCriarCasas: { textContent: '', ocultoAgora: null, classList: { toggle(c, v) { if (c === 'hidden') elementos.demoCriarCasas.ocultoAgora = v; } } } };
+    const trecho = abrir.slice(abrir.indexOf("document.getElementById('demoCriarJa')"), abrir.indexOf("document.getElementById('demoCriarErro')"));
+    new Function('document', 'AppState', 't', 'lerPalcoDaDemo', trecho)(
+      { getElementById: (id) => elementos[id] }, { filters: { residential } }, (k, v = {}) => (v.opcao ? k + '|' + v.opcao : k), () => null);
+    return elementos.demoCriarCasas;
+  };
+  assert.equal(rodar('').ocultoAgora, false, '«Indiferente»: avisa');
+  assert.equal(rodar('true').ocultoAgora, false, '«Apenas residenciais»: avisa');
+  assert.equal(rodar('false').ocultoAgora, true, '«Excluir residenciais»: não avisa (não há casa)');
+  assert.equal(rodar('false').textContent, '', 'e o texto sai');
+  assert.equal(rodar('').textContent, 'demo.criar.casas|filters.residential.exclude');
+});
+
 test('o diálogo de criar não promete mais «sem residenciais» (a demo segue o filtro), nas 4 línguas', () => {
   const I18N = readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8');
   const frases = [...I18N.matchAll(/'demo\.criar\.filtro': '([^']*(?:\\'[^']*)*)'/g)].map((m) => m[1]);

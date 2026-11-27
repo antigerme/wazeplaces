@@ -2140,9 +2140,13 @@ async function handleBuscarPlaces(data, { sessions }) {
     toUpdateTime: null,
     bbox,
     cityId: null,
-    countryId: bbox ? null : countryId,
-    managedAreaId,
-    managedAreaIds: null,
+    // Com área gerenciada, quem manda é ELA: o Waze IGNORA o `managedAreaId` (singular) e devolve a fila do país inteiro
+    // (medido na produção com 3 áreas: 500 pedidos, igual ao controle sem filtro), e com `countryId` junto a lista
+    // `managedAreaIds` vira E com o país (as áreas de Mendoza e San Luis davam 0 numa busca com o Brasil). A lista SEM país é
+    // a que estreita de verdade (9 áreas medidas: 115, 0, 4, 244, 0, 12, 48, 7, 0). A caixa («Minha área») já era sem país.
+    countryId: bbox || managedAreaId ? null : countryId,
+    managedAreaId: null,
+    managedAreaIds: managedAreaId ? [managedAreaId] : null,
     stateId,
     userPropertiesFilter: unreadOnly ? { isRead: false } : {},
     venueUpdateRequestsFilter: {
