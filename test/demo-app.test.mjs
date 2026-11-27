@@ -62,6 +62,24 @@ test('filtrosDaDemo escreve a MESMA conta que o fetchNextPage (linha a linha, se
   assert.deepEqual(minha, dela, 'a demo monta os filtros de um jeito e a busca de outro');
 });
 
+test('resumo do diálogo: «Residenciais» só aparece quando está ligado, com os nomes do painel de Filtros', () => {
+  const dic = { 'demo.criar.naoLidos': 'NL', 'demo.criar.lidosTambem': 'LT', 'demo.criar.tiposN': 'T{n}', 'demo.criar.tiposTodos': 'TT',
+    'filters.residential.only': 'SÓ', 'filters.residential.exclude': 'SEM', 'demo.criar.minhaArea': 'MA', 'demo.criar.paisId': 'P{id}' };
+  const resumo = (residential) => new Function('AppState', 'API', 'TYPES_ALL', 't', fatiar('resumoDosFiltrosDaDemo') + '\nreturn resumoDosFiltrosDaDemo();')(
+    { filters: { types: [], residential, unreadOnly: true, myArea: false }, countries: [{ id: 30, name: 'Brazil' }] },
+    { getCountry: () => 30 }, ['a', 'b', 'c'], (k, v = {}) => (dic[k] || k).replace(/\{(\w+)\}/g, (_, x) => v[x]));
+  assert.equal(resumo(''), 'Brazil · NL · TT', '«Indiferente» não vira texto');
+  assert.equal(resumo('true'), 'Brazil · NL · TT · SÓ');
+  assert.equal(resumo('false'), 'Brazil · NL · TT · SEM');
+});
+
+test('o diálogo de criar não promete mais «sem residenciais» (a demo segue o filtro), nas 4 línguas', () => {
+  const I18N = readFileSync(new URL('../js/i18n.js', import.meta.url), 'utf8');
+  const frases = [...I18N.matchAll(/'demo\.criar\.filtro': '([^']*(?:\\'[^']*)*)'/g)].map((m) => m[1]);
+  assert.equal(frases.length, 4);
+  for (const f of frases) assert.ok(!/resid/i.test(f), f);
+});
+
 test('filtrosDaDemo: cada filtro do apresentador chega ao corpo (e o que é padrão não vai)', () => {
   const montar = (filtros, extra = {}) => new Function('AppState', 'TYPES_ALL', 'caixaDaMinhaAreaEm', 'ordemDoWaze',
     fatiar('filtrosDaDemo') + '\nreturn filtrosDaDemo();')(
@@ -108,7 +126,8 @@ test('lerPalcoDaDemo: só devolve a demo que ainda vale, desta conta e inteira',
 });
 
 // ── criar ───────────────────────────────────────────────────────────────────
-function aparelho({ resposta, podeCriar = true, trocaEpoca = false } = {}) {
+const FILA = [{ venueID: 'v1', updateRequestID: 'u1' }, { venueID: 'v2', updateRequestID: 'u2' }, { venueID: 'v3', updateRequestID: 'u3' }];
+function aparelho({ resposta, podeCriar = true, trocaEpoca = false, fila = FILA } = {}) {
   const els = {};
   const el = (id) => (els[id] ||= { id, textContent: '', disabled: false, checked: true, classList: { _s: new Set(), add(c) { this._s.add(c); }, remove(c) { this._s.delete(c); }, toggle(c, on) { if (on) this._s.add(c); else this._s.delete(c); }, contains(c) { return this._s.has(c); } }, focus() {} });
   const radios = { demoModo: { value: 'sinc' }, demoTempo: { value: '20000' } };
@@ -122,10 +141,11 @@ function aparelho({ resposta, podeCriar = true, trocaEpoca = false } = {}) {
   const fonte = fatiar('criarDemo') + '\n' + fatiar('atualizarLinhaDaDemo')
     + '\nreturn { criarDemo, get demoCriando() { return demoCriando; } };';
   const api = new Function('document', 'API', 'AppState', 'podeCriarDemoAqui', 'caixaDaMinhaAreaEm', 'filtrosDaDemo', 't', 'msgDoServidor',
-    'safeLS', 'DEMO_PALCO_KEY', 'contaAgora', 'lerPalcoDaDemo', 'setTimeout', 'getEpoca', 'openModal',
+    'safeLS', 'DEMO_PALCO_KEY', 'contaAgora', 'lerPalcoDaDemo', 'setTimeout', 'getEpoca', 'openModal', 'chavesDaFilaParaDemo',
     'let demoCriando = false;\nObject.defineProperty(globalThis, "epocaDaSessao", { configurable: true, get: getEpoca });\n' + fonte.replace(/\bepocaDaSessao\b/g, 'getEpoca()'))(
     document, API, { filters: { myArea: false } }, () => podeCriar, () => null, () => ({ unreadOnly: true }), t,
-    (r) => r.error, { set: (k, v) => ls.set(k, v), get: (k) => ls.get(k) ?? null }, 'waze_demo_palco', () => '42', () => null, () => 0, () => epocaDaSessao, (id) => abertos.push(id));
+    (r) => r.error, { set: (k, v) => ls.set(k, v), get: (k) => ls.get(k) ?? null }, 'waze_demo_palco', () => '42', () => null, () => 0, () => epocaDaSessao, (id) => abertos.push(id),
+    () => fila);
   return { api, els, ls, chamadas, radios, abertos };
 }
 const OK = { success: true, demo: 'd'.repeat(40), segredo: 'S'.repeat(20), hostKey: 'H'.repeat(20), expiraEm: 9e12, criadoEm: 1, total: 30, modo: 'sinc', tempoMs: 20000, referencia: true };
@@ -134,12 +154,38 @@ test('criar: manda a escolha e os filtros, guarda a chave COM a conta e mostra o
   const a = aparelho({ resposta: OK });
   await a.api.criarDemo();
   assert.equal(a.chamadas.length, 1);
-  assert.deepEqual({ ...a.chamadas[0], filtros: { ...a.chamadas[0].filtros } }, { modo: 'sinc', tempoMs: 20000, referencia: true, filtros: { unreadOnly: true } });
+  assert.deepEqual({ ...a.chamadas[0], filtros: { ...a.chamadas[0].filtros } }, { modo: 'sinc', tempoMs: 20000, referencia: true, filtros: { unreadOnly: true }, pedidos: FILA });
   const guardado = JSON.parse(a.ls.get('waze_demo_palco'));
   assert.equal(guardado.hostKey, 'H'.repeat(20));
   assert.equal(guardado.conta, '42', 'a chave é DESTA conta');
   assert.deepEqual(a.abertos, ['demoProntaModal'], 'abre o diálogo «criada» (que esconde o de criar)');
   assert.equal(a.els.demoProntaResumo.textContent, 'demo.pronta.resumo{"n":30,"modo":"demo.criar.sinc"}');
+});
+
+test('criar com a fila vazia (ou não carregada) NÃO vai ao servidor e diz por quê', async () => {
+  const a = aparelho({ resposta: OK, fila: [] });
+  await a.api.criarDemo();
+  assert.equal(a.chamadas.length, 0, 'sem fila não há o que mostrar: nenhuma ida ao servidor');
+  assert.equal(a.els.demoCriarErro.textContent, 'demo.criar.filaVazia');
+  assert.ok(!a.els.demoCriarErro.classList._s.has('hidden'), 'a mensagem aparece');
+  assert.equal(a.ls.get('waze_demo_palco'), undefined, 'e nenhuma chave é guardada');
+});
+
+test('chavesDaFilaParaDemo: as da FILA REAL, na ordem, só até a folga; nunca exemplo ou card de treino', () => {
+  const montar = (fila) => new Function('filaReal', 'DEMO_CHAVES_MAX', fatiar('chavesDaFilaParaDemo') + '\nreturn chavesDaFilaParaDemo();')(() => fila, 40);
+  const real = Array.from({ length: 55 }, (_, i) => ({ venueID: 'v' + i, updateRequestID: 'u' + i, name: 'não vai' }));
+  const chaves = montar(real);
+  assert.equal(chaves.length, 40, 'os 30 + a folga de 10');
+  assert.deepEqual(chaves[0], { venueID: 'v0', updateRequestID: 'u0' }, 'a primeira é a da frente da fila (o card na tela)');
+  assert.deepEqual(chaves.map((c) => c.venueID), real.slice(0, 40).map((p) => p.venueID), 'a ordem é a da fila');
+  assert.ok(chaves.every((c) => Object.keys(c).sort().join() === 'updateRequestID,venueID'), 'só as chaves: nenhum dado da fila vai junto');
+  assert.deepEqual(montar([{ venueID: 'v1', updateRequestID: 'u1', _treino: true }, { venueID: 'v2', updateRequestID: 'u2', _exemplo: true }, { venueID: 'v3', updateRequestID: 'u3' }]),
+    [{ venueID: 'v3', updateRequestID: 'u3' }], 'treino e exemplo ficam de fora');
+  assert.deepEqual(montar([]), []);
+  // O espelho do teto do servidor (30 + 10 de folga).
+  assert.match(APP, /const DEMO_CHAVES_MAX = DEMO_PEDIDOS_MAX \+ 10;/);
+  assert.match(CORE, /const DEMO_CHAVES_MAX = DEMO_PLACES \+ 10;/);
+  assert.match(fatiar('chavesDaFilaParaDemo'), /\bfilaReal\(\)/, 'a fila REAL (no treino, a guardada), nunca a AppState.queue');
 });
 
 test('criar no modo livre manda tempo 0 (o tempo por pedido não existe nele)', async () => {
