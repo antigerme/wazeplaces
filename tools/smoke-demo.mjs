@@ -414,7 +414,8 @@ console.log('\n9) O APP cria a demo: a linha das Preferências, o diálogo (4 l�
 // A tela REAL do app com o estado injetado (a API é de mentira: nada fala com o Waze). O diálogo é o que tem
 // campo e botões presos, então o que se mede é caber, o toque e a fileira presa — e a chave guardada de verdade.
 const CRIAR_OK = { success: true, demo: 'd'.repeat(40), segredo: 'ABCDEFGHJKLMNPQRSTUV', hostKey: 'WXYZ2345679ABCDEFGHJ', total: 30, modo: 'sinc', tempoMs: 20000, referencia: true, max: 150, criadoEm: Date.now(), votosAte: Date.now() + 3 * 3600_000, expiraEm: Date.now() + 48 * 3600_000 };
-async function appComoApresentador(ap, lingua, perfil) {
+// `fila`: os pedidos que o apresentador TEM na fila (reais, das fixtures): a demo é a cópia dela, então o app de teste precisa de uma.
+async function appComoApresentador(ap, lingua, perfil, { fila = fixtures.slice(0, 45) } = {}) {
   const ctx = await browser.newContext({ viewport: ap.viewport, locale: lingua, serviceWorkers: 'block' });
   const corpos = [];
   await ctx.route('**/api/perfil', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, profile: perfil }) }));
@@ -428,15 +429,16 @@ async function appComoApresentador(ap, lingua, perfil) {
   await page.addInitScript(() => localStorage.setItem('waze_places_preferences', JSON.stringify({ undoEnabled: true, comoFuncionaVisto: true, passagemDispensada: true, undoGateSeen: true, presenca: false })));
   await page.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
   await new Promise((r) => setTimeout(r, 500));
-  await page.evaluate(async (perfil) => {
+  await page.evaluate(async ([perfil, fila]) => {
     applyI18n();
     AppState.authenticated = true;
     API.setSession('token-smoke');
     AppState.profile = perfil;
+    AppState.queue = fila;
     document.getElementById('authScreen').classList.add('hidden');
     document.getElementById('appScreen').classList.remove('hidden');
     showLoading(false); renderProfileHeader(AppState.profile); updateStats();
-  }, perfil);
+  }, [perfil, fila]);
   return { ctx, page, erros, corpos };
 }
 const caixaDoDialogo = (page, id) => page.evaluate((i) => {
@@ -506,6 +508,10 @@ if (rodar(9)) {
       const textoTela = await page.evaluate(() => document.body.innerText);
       if (textoTela.includes('WXYZ2345679ABCDEFGHJ') || textoTela.includes('ABCDEFGHJKLMNPQRSTUV')) achados.push('a chave ou o segredo foi escrito na tela');
       const c1 = corpos[0] || {};
+      // A demo é a FILA do apresentador: o corpo leva as chaves dela, na ordem, só as chaves (até 30 + 10 de folga).
+      const filaNaTela = await page.evaluate(() => AppState.queue.slice(0, DEMO_CHAVES_MAX).map((p) => ({ venueID: p.venueID, updateRequestID: p.updateRequestID })));
+      if (filaNaTela.length !== 40 || JSON.stringify(c1.pedidos) !== JSON.stringify(filaNaTela)) achados.push('o corpo não leva as chaves da fila na ordem dela: ' + (c1.pedidos || []).length + ' × ' + filaNaTela.length);
+      if ((c1.pedidos || []).some((c) => Object.keys(c).sort().join() !== 'updateRequestID,venueID')) achados.push('foi mais que a chave de cada pedido');
       if (c1.modo !== 'sinc' || c1.tempoMs !== 20000 || c1.referencia !== true || c1.unreadOnly !== true || !c1.sessionToken) achados.push('o corpo do pedido não leva as escolhas e os filtros: ' + JSON.stringify({ ...c1, sessionToken: !!c1.sessionToken }));
       checa(achados.length === 0, `${ap.nome} · ${lingua}: a linha, o diálogo e a chave`, achados.slice(0, 4).join(' || '));
       // O diagnóstico omite a chave; o «Sair» a apaga.
@@ -750,6 +756,23 @@ if (rodar(10)) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
+// CONTROLE da fila: sem pedido na fila a demo NÃO é criada (e nenhuma ida ao servidor) — nada de demo vazia.
+if (rodar(9)) {
+  const { ctx, page, erros, corpos } = await appComoApresentador({ viewport: { width: 393, height: 852 } }, 'pt-BR', { userName: 'a', rank: 5, isAreaManager: true, isStaff: false, id: 4242 }, { fila: [] });
+  await page.evaluate(() => abrirPerfil('filtersTabPrefs'));
+  await page.evaluate(() => document.getElementById('prefDemoCriar').scrollIntoView({ block: 'center' }));
+  await page.locator('#prefDemoCriar').click();
+  await esperarOuExplodir(page, () => !document.getElementById('demoCriarModal').classList.contains('hidden'), 'o diálogo de criar (fila vazia)');
+  await page.locator('#demoCriarOk').scrollIntoViewIfNeeded();
+  await page.locator('#demoCriarOk').click();
+  await esperarOuExplodir(page, () => !document.getElementById('demoCriarErro').classList.contains('hidden'), 'a mensagem de fila vazia');
+  const msg = await page.evaluate(() => ({ texto: document.getElementById('demoCriarErro').textContent, esperado: t('demo.criar.filaVazia'), pronta: !document.getElementById('demoProntaModal').classList.contains('hidden') }));
+  checa(msg.texto === msg.esperado && msg.pronta === false, 'CONTROLE: com a fila vazia a demo não é criada e o diálogo diz por quê', JSON.stringify(msg));
+  checa(corpos.length === 0, 'CONTROLE: com a fila vazia nenhum pedido vai ao servidor');
+  checa(erros.length === 0, 'fila vazia: sem erro de página', erros.slice(0, 2).join(' | '));
+  await ctx.close();
+}
+
 // CONTROLE do aviso do celular: num computador de tela larga o diálogo NÃO o diz, e o «criada» fala de abrir no computador que projeta.
 if (rodar(9)) {
   const { ctx, page, erros } = await appComoApresentador({ viewport: { width: 1366, height: 768 } }, 'pt-BR', { userName: 'a', rank: 5, isAreaManager: true, isStaff: false, id: 4242 });

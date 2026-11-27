@@ -767,11 +767,11 @@ const API = {
 
     // CRIAR uma demo (a sala triando pedidos reais, sem login). `filtros` é o corpo da busca do app (o MESMO
     // que o `fetchPlaces` leva); o servidor confere o portão (L6+ com área gerenciada) e refaz a busca.
-    async criarDemo({ modo, tempoMs, referencia, filtros = {} } = {}) {
+    async criarDemo({ modo, tempoMs, referencia, filtros = {}, pedidos = [] } = {}) {
         const sessionToken = this.sessionToken;
         if (!sessionToken) return semSessao();
         return this._post('demo-criar', {
-            sessionToken, region: this.getRegion(), countryId: this.getCountry(), modo, tempoMs, referencia, ...filtros,
+            sessionToken, region: this.getRegion(), countryId: this.getCountry(), modo, tempoMs, referencia, pedidos, ...filtros,
         });
     },
 
