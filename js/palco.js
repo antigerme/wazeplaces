@@ -361,7 +361,15 @@
     if (!caixa) return;
     caixa.classList.toggle('hidden', !P.recadoAberto);
     caixa.classList.toggle('flex', P.recadoAberto);
-    if (!P.recadoAberto) { const c = $('palcoRecadoCampo'); if (c) c.value = ''; }
+    if (!P.recadoAberto) {
+      const c = $('palcoRecadoCampo');
+      if (c) {
+        c.value = '';
+        // O campo some (display:none), mas o navegador só tira o foco dele no PRÓXIMO quadro: um Espaço digitado nesse vão ia pro
+        // campo e não revelava nada. Tira o foco já, pra a tecla seguinte ser do palco.
+        if (document.activeElement === c) c.blur();
+      }
+    }
   }
 
   // ── encerrar (com confirmação, no próprio botão: o app não mostra diálogo do sistema) ───────────

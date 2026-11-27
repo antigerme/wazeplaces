@@ -21,7 +21,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { novaSala } from '../server/demo-sala.mjs';
-import { montarRetrato, gerarTexto, DEMO_SEGREDO_LEN } from '../server/demo.mjs';
+import { montarRetrato, gerarTexto, DEMO_SEGREDO_LEN, cotaDaDemo } from '../server/demo.mjs';
 
 const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORTA = Number(process.env.SMOKE_DEMO_PORT || 8251);
@@ -48,6 +48,9 @@ let { servidor } = await subir();
 // Derruba o servidor de verdade e espera ele SAIR (a porta tem que ficar livre pra subir de novo).
 const derrubar = () => new Promise((resolve) => { servidor.once('exit', resolve); servidor.kill('SIGTERM'); });
 
+// O máximo de pedidos de UMA demo (o servidor usa `cotaDaDemo(MIN_RANK_WAZE)`, MIN_RANK_WAZE = 1): o palco é medido com o pior caso REAL, nunca com
+// o baralho inteiro das fixtures (51 pedidos: a trilha do rodapé quebra em duas linhas e rouba altura, num caso que o produto não permite).
+const DEMO_MAX = cotaDaDemo(1);
 const fixtures = JSON.parse(readFileSync(join(RAIZ, 'tools', 'fixtures-paises.json'), 'utf8'));
 const { convidado: DECK, apresentador: DECK_HOST } = montarRetrato(fixtures.filter((p) => p && typeof p === 'object'), 60);
 console.log(`deck: ${DECK.length} pedidos reais (${fixtures.length} nas fixtures)`);
@@ -555,7 +558,7 @@ const palcoCabe = (page) => page.evaluate(() => {
   // O que passa da própria caixa (o painel lateral e o cartão do pedido têm `overflow: hidden`: o que passa SOME, calado).
   for (const id of ['palcoLado', 'palcoFoco', 'palcoAvanco', 'palcoDecisoes']) {
     const el = document.getElementById(id);
-    if (el && el.scrollHeight > el.clientHeight + 1) ruins.push('cortado: #' + id + ' (' + el.scrollHeight + ' > ' + el.clientHeight + ')');
+    if (el && el.scrollHeight > el.clientHeight + 1) ruins.push('cortado: #' + id + ' (' + el.scrollHeight + ' > ' + el.clientHeight + ') · alturas dos blocos: ' + [...el.children].map((c) => Math.round(c.getBoundingClientRect().height)).join('+'));
   }
   return { rolaDeLado: doc.scrollWidth - doc.clientWidth, rolaPraBaixo: document.body.scrollHeight - innerHeight, ruins };
 });
@@ -715,7 +718,7 @@ if (rodar(10)) {
   // O palco cabe nos DOIS tamanhos de projetor nas QUATRO línguas, claro e escuro (o texto mais largo está noutra língua).
   for (const pr of PROJETORES.filter((x) => !process.env.SMOKE_DEMO_JANELA || x.nome.includes(process.env.SMOKE_DEMO_JANELA))) {
     for (const [lingua, escuro] of [['pt-BR', false], ['en-US', true], ['es-ES', false], ['fr-FR', true]]) {
-      const sala = semear({ modo: 'sinc', tempoMs: 20000, total: DECK.length, referencia: true });
+      const sala = semear({ modo: 'sinc', tempoMs: 20000, total: Math.min(DECK.length, DEMO_MAX), referencia: true });
       const { ctx, page, erros } = await abrirPalco(pr, lingua, sala, { escuro });
       const achados = [];
       await esperarOuExplodir(page, () => !!document.getElementById('palcoQr'), 'o saguão', 20000);
